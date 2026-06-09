@@ -1,237 +1,227 @@
 'use client'
-
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase'
+import BottomNav from '@/components/BottomNav'
+
+type Tab = 'tasks' | 'content' | 'groups' | 'members'
 
 export default function AdminPage() {
-  const [user, setUser] = useState<any>(null)
+  const [tab, setTab] = useState<Tab>('tasks')
   const [groups, setGroups] = useState<any[]>([])
+  const [tasks, setTasks] = useState<any[]>([])
+  const [content, setContent] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
+  const [selectedGroup, setSelectedGroup] = useState('')
   const [loading, setLoading] = useState(true)
-
-  const [newGroupName, setNewGroupName] = useState('')
-  const [newTaskTitle, setNewTaskTitle] = useState('')
-  const [newTaskDesc, setNewTaskDesc] = useState('')
-  const [newTaskDue, setNewTaskDue] = useState('')
-  const [newTaskGroupId, setNewTaskGroupId] = useState('')
-  const [newContentTitle, setNewContentTitle] = useState('')
-  const [newContentUrl, setNewContentUrl] = useState('')
-  const [newContentType, setNewContentType] = useState('video')
-  const [newContentDesc, setNewContentDesc] = useState('')
-  const [newContentGroupId, setNewContentGroupId] = useState('')
+  const [taskTitle, setTaskTitle] = useState('')
+  const [taskDesc, setTaskDesc] = useState('')
+  const [contentTitle, setContentTitle] = useState('')
+  const [contentUrl, setContentUrl] = useState('')
+  const [contentType, setContentType] = useState('video')
+  const [contentDesc, setContentDesc] = useState('')
+  const [groupName, setGroupName] = useState('')
   const [assignUserId, setAssignUserId] = useState('')
-  const [assignGroupId, setAssignGroupId] = useState('')
-
   const router = useRouter()
-  const supabase = createClient()
 
   useEffect(() => {
     async function load() {
+      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
-      setUser(user)
-      const { data: g } = await supabase.from('groups').select('*')
-      setGroups(g || [])
-      const { data: u } = await supabase.from('profiles').select('*')
-      setUsers(u || [])
+      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      if (prof?.role !== 'leader') { router.push('/dashboard'); return }
+
+      const [groupsRes, usersRes] = await Promise.all([
+        supabase.from('groups').select('*').eq('leader_id', user.id),
+        supabase.from('profiles').select('id, full_name, group_id, role')
+      ])
+      const grps = groupsRes.data || []
+      setGroups(grps)
+      setUsers(usersRes.data || [])
+      if (grps[0]) { setSelectedGroup(grps[0].id); loadGroupData(grps[0].id) }
       setLoading(false)
     }
     load()
-  }, [])
+  }, [router])
 
-  async function createGroup(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newGroupName.trim()) return
-    const { data, error } = await supabase
-      .from('groups')
-      .insert({ name: newGroupName, leader_id: user.id })
-      .select()
-      .single()
-    if (!error && data) {
-      setGroups(prev => [...prev, data])
-      setNewGroupName('')
-    }
+  async function loadGroupData(gid: string) {
+    const supabase = createClient()
+    const [t, c] = await Promise.all([
+      supabase.from('tasks').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
+      supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false })
+    ])
+    setTasks(t.data || [])
+    setContent(c.data || [])
   }
 
-  async function createTask(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newTaskTitle.trim() || !newTaskGroupId) return
-    await supabase.from('tasks').insert({
-      title: newTaskTitle,
-      description: newTaskDesc,
-      due_date: newTaskDue || null,
-      group_id: newTaskGroupId
-    })
-    setNewTaskTitle('')
-    setNewTaskDesc('')
-    setNewTaskDue('')
-    setNewTaskGroupId('')
-    alert('Task posted!')
+  async function createGroup() {
+    if (!groupName.trim()) return
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data } = await supabase.from('groups').insert({ name: groupName.trim(), leader_id: user!.id }).select().single()
+    if (data) { setGroups(p => [...p, data]); setSelectedGroup(data.id); setGroupName('') }
   }
 
-  async function addContent(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newContentTitle.trim() || !newContentUrl.trim() || !newContentGroupId) return
-    await supabase.from('content').insert({
-      title: newContentTitle,
-      description: newContentDesc,
-      url: newContentUrl,
-      content_type: newContentType,
-      group_id: newContentGroupId
-    })
-    setNewContentTitle('')
-    setNewContentUrl('')
-    setNewContentDesc('')
-    setNewContentGroupId('')
-    alert('Content added!')
+  async function addTask() {
+    if (!taskTitle.trim() || !selectedGroup) return
+    const supabase = createClient()
+    const { data } = await supabase.from('tasks').insert({ group_id: selectedGroup, title: taskTitle.trim(), description: taskDesc.trim() }).select().single()
+    if (data) { setTasks(p => [data, ...p]); setTaskTitle(''); setTaskDesc('') }
   }
 
-  async function assignUser(e: React.FormEvent) {
-    e.preventDefault()
-    if (!assignUserId || !assignGroupId) return
-    await supabase
-      .from('profiles')
-      .update({ group_id: assignGroupId })
-      .eq('id', assignUserId)
+  async function deleteTask(id: string) {
+    const supabase = createClient()
+    await supabase.from('tasks').delete().eq('id', id)
+    setTasks(p => p.filter(t => t.id !== id))
+  }
+
+  async function addContent() {
+    if (!contentTitle.trim() || !contentUrl.trim() || !selectedGroup) return
+    const supabase = createClient()
+    const { data } = await supabase.from('content').insert({
+      group_id: selectedGroup, title: contentTitle.trim(), url: contentUrl.trim(),
+      type: contentType, description: contentDesc.trim()
+    }).select().single()
+    if (data) { setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc('') }
+  }
+
+  async function assignUser() {
+    if (!assignUserId || !selectedGroup) return
+    const supabase = createClient()
+    await supabase.from('profiles').update({ group_id: selectedGroup }).eq('id', assignUserId)
+    setUsers(p => p.map(u => u.id === assignUserId ? { ...u, group_id: selectedGroup } : u))
     setAssignUserId('')
-    setAssignGroupId('')
-    alert('User assigned!')
   }
 
-  const inputClass = "w-full border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-  const labelClass = "block text-sm font-medium text-gray-700 mb-1"
-  const btnClass = "bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
-  const sectionClass = "bg-white rounded-2xl p-6 shadow-sm border border-gray-100"
+  const inputClass = "w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>
+  if (loading) return <div className="min-h-screen bg-bt-pale flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-800">Breakthrough Table — Admin</h1>
-        <a href="/dashboard" className="text-sm text-blue-600 hover:underline">← Dashboard</a>
-      </nav>
+    <div className="min-h-screen bg-bt-pale">
+      <div className="bg-bt-navy px-5 pt-16 pb-4">
+        <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
+        {groups.length > 0 && (
+          <select value={selectedGroup}
+            onChange={e => { setSelectedGroup(e.target.value); loadGroupData(e.target.value) }}
+            className="mt-3 w-full bg-white/15 text-white text-sm rounded-xl px-3 py-2 border border-white/25 focus:outline-none">
+            {groups.map(g => <option key={g.id} value={g.id} className="text-gray-900">{g.name}</option>)}
+          </select>
+        )}
+        <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
+          {(['tasks', 'content', 'groups', 'members'] as Tab[]).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
+                tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
+              }`}>
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <main className="max-w-4xl mx-auto px-6 py-10 flex flex-col gap-10">
+      <div className="px-5 py-5 pb-28 space-y-4">
 
-        {/* Create Group */}
-        <section className={sectionClass}>
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Create a Group</h2>
-          <form onSubmit={createGroup} className="flex gap-3">
-            <input
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-              placeholder="Group name"
-              className={inputClass}
-            />
-            <button type="submit" className={btnClass}>Create</button>
-          </form>
-          {groups.length > 0 && (
-            <ul className="mt-4 flex flex-col gap-2">
-              {groups.map(g => (
-                <li key={g.id} className="text-sm font-medium text-gray-800 bg-gray-50 px-4 py-2 rounded-lg">
-                  {g.name}
-                </li>
+        {tab === 'tasks' && (
+          <>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Add Task</h3>
+              <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Task title *" className={inputClass} />
+              <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Description (optional)" className={inputClass} />
+              <button onClick={addTask} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Add Task</button>
+            </div>
+            <div className="space-y-2">
+              {tasks.map(task => (
+                <div key={task.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900 text-sm">{task.title}</p>
+                    {task.description && <p className="text-gray-400 text-xs mt-0.5">{task.description}</p>}
+                  </div>
+                  <button onClick={() => deleteTask(task.id)} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
+                </div>
               ))}
-            </ul>
-          )}
-        </section>
+            </div>
+          </>
+        )}
 
-        {/* Assign User to Group */}
-        <section className={sectionClass}>
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Assign User to Group</h2>
-          <form onSubmit={assignUser} className="flex flex-col gap-3">
-            <div>
-              <label className={labelClass}>User</label>
+        {tab === 'content' && (
+          <>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Add Content</h3>
+              <input value={contentTitle} onChange={e => setContentTitle(e.target.value)} placeholder="Title *" className={inputClass} />
+              <input value={contentUrl} onChange={e => setContentUrl(e.target.value)} placeholder="URL *" className={inputClass} />
+              <input value={contentDesc} onChange={e => setContentDesc(e.target.value)} placeholder="Description (optional)" className={inputClass} />
+              <select value={contentType} onChange={e => setContentType(e.target.value)} className={inputClass}>
+                <option value="video">🎥 Video</option>
+                <option value="pdf">📄 PDF</option>
+                <option value="article">📰 Article</option>
+                <option value="link">🔗 Link</option>
+              </select>
+              <button onClick={addContent} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Add Content</button>
+            </div>
+            <div className="space-y-2">
+              {content.map(item => (
+                <div key={item.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                  <p className="font-medium text-gray-900 text-sm">{item.title}</p>
+                  <p className="text-gray-400 text-xs mt-0.5 capitalize">{item.type}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab === 'groups' && (
+          <>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Create New Group</h3>
+              <input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Group name" className={inputClass} />
+              <button onClick={createGroup} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Create Group</button>
+            </div>
+            <div className="space-y-2">
+              {groups.map(g => (
+                <div key={g.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                  <p className="font-semibold text-gray-900">{g.name}</p>
+                  <p className="text-gray-400 text-xs mt-0.5">{users.filter(u => u.group_id === g.id).length} members</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab === 'members' && (
+          <>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Assign Member to Group</h3>
               <select value={assignUserId} onChange={e => setAssignUserId(e.target.value)} className={inputClass}>
-                <option value="">Select a user</option>
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>{u.full_name || u.id}</option>
+                <option value="">Select a member...</option>
+                {users.filter(u => u.role !== 'leader').map(u => (
+                  <option key={u.id} value={u.id}>{u.full_name}</option>
                 ))}
               </select>
+              <button onClick={assignUser} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">
+                Assign to Selected Group
+              </button>
             </div>
-            <div>
-              <label className={labelClass}>Group</label>
-              <select value={assignGroupId} onChange={e => setAssignGroupId(e.target.value)} className={inputClass}>
-                <option value="">Select a group</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
+            <div className="space-y-2">
+              {users.map(u => (
+                <div key={u.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-bt-pale flex items-center justify-center flex-shrink-0">
+                    <span className="text-bt-navy font-bold text-xs">
+                      {u.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0,2)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
+                    <p className="text-gray-400 text-xs capitalize">{u.role} · {u.group_id ? 'In a group' : 'Unassigned'}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-            <button type="submit" className={btnClass}>Assign</button>
-          </form>
-        </section>
-
-        {/* Post a Task */}
-        <section className={sectionClass}>
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Post a Task</h2>
-          <form onSubmit={createTask} className="flex flex-col gap-3">
-            <div>
-              <label className={labelClass}>Title</label>
-              <input value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} placeholder="Task title" className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass}>Description (optional)</label>
-              <textarea value={newTaskDesc} onChange={e => setNewTaskDesc(e.target.value)} placeholder="Describe the task..." className={inputClass} rows={2} />
-            </div>
-            <div>
-              <label className={labelClass}>Due Date (optional)</label>
-              <input type="date" value={newTaskDue} onChange={e => setNewTaskDue(e.target.value)} className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass}>Group</label>
-              <select value={newTaskGroupId} onChange={e => setNewTaskGroupId(e.target.value)} className={inputClass}>
-                <option value="">Select a group</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-            <button type="submit" className={btnClass}>Post Task</button>
-          </form>
-        </section>
-
-        {/* Add Content */}
-        <section className={sectionClass}>
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Add Content</h2>
-          <form onSubmit={addContent} className="flex flex-col gap-3">
-            <div>
-              <label className={labelClass}>Title</label>
-              <input value={newContentTitle} onChange={e => setNewContentTitle(e.target.value)} placeholder="Content title" className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass}>Description (optional)</label>
-              <textarea value={newContentDesc} onChange={e => setNewContentDesc(e.target.value)} placeholder="Description..." className={inputClass} rows={2} />
-            </div>
-            <div>
-              <label className={labelClass}>URL</label>
-              <input value={newContentUrl} onChange={e => setNewContentUrl(e.target.value)} placeholder="https://..." className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass}>Type</label>
-              <select value={newContentType} onChange={e => setNewContentType(e.target.value)} className={inputClass}>
-                <option value="video">Video</option>
-                <option value="pdf">PDF</option>
-                <option value="article">Article</option>
-                <option value="link">Link</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelClass}>Group</label>
-              <select value={newContentGroupId} onChange={e => setNewContentGroupId(e.target.value)} className={inputClass}>
-                <option value="">Select a group</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-            <button type="submit" className={btnClass}>Add Content</button>
-          </form>
-        </section>
-
-      </main>
+          </>
+        )}
+      </div>
+      <BottomNav />
     </div>
   )
 }

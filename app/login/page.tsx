@@ -1,8 +1,8 @@
 'use client'
-
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -10,69 +10,58 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
-
+    const supabase = createClient()
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (error) {
-      setError(error.message)
-      setLoading(false)
-    } else {
-      router.push('/dashboard')
-    }
+    if (error) { setError(error.message); setLoading(false) }
+    else router.push('/dashboard')
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="bg-white p-8 rounded-2xl shadow-md w-full max-w-md">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Breakthrough Table</h1>
-        <p className="text-gray-600 mb-6">Sign in to your account</p>
-
-        <form onSubmit={handleLogin} className="flex flex-col gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="you@example.com"
-            />
+    <div className="min-h-screen bg-bt-pale flex flex-col">
+      <div className="bg-bt-navy pt-20 pb-14 px-6 flex flex-col items-center">
+        <div className="text-center">
+          <div className="text-white text-3xl tracking-wide">
+            <span className="font-light">break</span><span className="font-bold">THROUGH</span>
           </div>
+          <div className="text-bt-light text-2xl font-light tracking-widest mt-0.5">table</div>
+        </div>
+      </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="••••••••"
-            />
-          </div>
+      <div className="flex-1 px-5 -mt-6 pb-10">
+        <div className="bg-white rounded-2xl shadow-lg p-6">
+          <h2 className="text-xl font-bold text-bt-navy mb-1">Welcome back</h2>
+          <p className="text-gray-400 text-sm mb-6">Sign in to your account</p>
 
-          {error && <p className="text-red-500 text-sm">{error}</p>}
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
+                placeholder="you@example.com" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
+                placeholder="••••••••" required />
+            </div>
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+            <button type="submit" disabled={loading}
+              className="w-full bg-bt-navy text-white py-4 rounded-xl font-semibold text-base disabled:opacity-50 mt-2">
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-blue-600 text-white rounded-lg py-2 font-medium hover:bg-blue-700 transition disabled:opacity-50"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="text-sm text-center text-gray-600 mt-4">
-          Don't have an account?{' '}
-          <a href="/signup" className="text-blue-600 hover:underline font-medium">Sign up</a>
-        </p>
+          <p className="text-center text-sm text-gray-400 mt-6">
+            Don't have an account?{' '}
+            <Link href="/signup" className="text-bt-blue font-semibold">Sign up</Link>
+          </p>
+        </div>
       </div>
     </div>
   )

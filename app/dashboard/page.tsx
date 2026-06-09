@@ -1,68 +1,83 @@
 'use client'
-
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase'
+import BottomNav from '@/components/BottomNav'
 
-export default function Dashboard() {
-  const [user, setUser] = useState<any>(null)
+export default function DashboardPage() {
+  const [profile, setProfile] = useState<any>(null)
+  const [groupName, setGroupName] = useState('')
+  const [taskStats, setTaskStats] = useState({ total: 0, completed: 0 })
   const router = useRouter()
-  const supabase = createClient()
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
-        router.push('/login')
-      } else {
-        setUser(user)
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push('/login'); return }
+
+      const { data: prof } = await supabase.from('profiles').select('*, groups(name)').eq('id', user.id).single()
+      if (prof) {
+        setProfile(prof)
+        setGroupName(prof.groups?.name || '')
       }
-    })
-  }, [])
 
-  async function handleSignOut() {
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
+      if (prof?.group_id) {
+        const { data: tasks } = await supabase.from('tasks').select('id').eq('group_id', prof.group_id)
+        const { data: completions } = await supabase.from('task_completions').select('task_id').eq('user_id', user.id)
+        if (tasks) {
+          const completedIds = new Set(completions?.map((c: any) => c.task_id))
+          setTaskStats({ total: tasks.length, completed: tasks.filter((t: any) => completedIds.has(t.id)).length })
+        }
+      }
+    }
+    load()
+  }, [router])
 
-  if (!user) return null
+  const firstName = profile?.full_name?.split(' ')[0] || 'there'
+  const adherence = taskStats.total > 0 ? Math.round((taskStats.completed / taskStats.total) * 100) : 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-800">Breakthrough Table</h1>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-500">{user.email}</span>
-          <button
-            onClick={handleSignOut}
-            className="text-sm text-red-500 hover:text-red-700 font-medium"
-          >
-            Sign Out
-          </button>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-bt-pale">
+      <div className="bg-bt-navy px-5 pt-16 pb-8">
+        <p className="text-bt-light text-sm font-medium">Welcome back,</p>
+        <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
+        {groupName && <p className="text-bt-light/70 text-sm mt-1">{groupName}</p>}
+      </div>
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-8">Dashboard</h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <DashboardCard title="My Tasks" description="View and complete your bi-monthly tasks" href="/tasks" />
-          <DashboardCard title="Group Chat" description="Message your table group" href="/messages" />
-          <DashboardCard title="Content Library" description="Videos, PDFs, and resources" href="/content" />
-          <DashboardCard title="My Group" description="See your group and adherence" href="/group" />
+      <div className="px-5 py-5 pb-28 space-y-4">
+        {/* Adherence card */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <p className="text-gray-400 text-sm font-medium">Your Adherence This Period</p>
+          <div className="flex items-end gap-2 mt-2 mb-3">
+            <span className="text-5xl font-bold text-bt-navy">{adherence}%</span>
+            <span className="text-gray-400 text-sm pb-1.5">{taskStats.completed} of {taskStats.total} tasks</span>
+          </div>
+          <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-full bg-bt-blue rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
+          </div>
         </div>
-      </main>
+
+        {/* Nav cards */}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
+            { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
+            { href: '/content', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
+            { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
+          ].map(card => (
+            <Link key={card.href} href={card.href}
+              className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
+              <div className="text-3xl mb-2">{card.emoji}</div>
+              <p className="font-semibold text-bt-navy text-sm">{card.title}</p>
+              <p className="text-gray-400 text-xs mt-0.5">{card.sub}</p>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <BottomNav />
     </div>
-  )
-}
-
-function DashboardCard({ title, description, href }: { title: string; description: string; href: string }) {
-  return (
-    <a
-      href={href}
-      className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition block"
-    >
-      <h3 className="text-lg font-semibold text-gray-800 mb-1">{title}</h3>
-      <p className="text-sm text-gray-500">{description}</p>
-    </a>
   )
 }
