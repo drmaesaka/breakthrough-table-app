@@ -27,6 +27,7 @@ export default function AdminPage() {
   const [copiedGroupId, setCopiedGroupId] = useState('')
   const [contentError, setContentError] = useState('')
   const [contentSaving, setContentSaving] = useState(false)
+  const [memberFilter, setMemberFilter] = useState('all')
   const router = useRouter()
 
   useEffect(() => {
@@ -338,11 +339,32 @@ export default function AdminPage() {
         )}
 
         {tab === 'members' && (
-          <div className="space-y-2">
-            {users.length === 0 && (
-              <p className="text-center text-gray-400 text-sm py-8">No members yet</p>
-            )}
-            {users.map(u => {
+          <div className="space-y-3">
+            {/* Filter dropdown */}
+            <select
+              value={memberFilter}
+              onChange={e => setMemberFilter(e.target.value)}
+              className={inputClass}>
+              <option value="all">All Members ({users.length})</option>
+              <option value="unassigned">Unassigned</option>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>
+                  {g.name} ({users.filter(u => u.group_id === g.id).length})
+                </option>
+              ))}
+            </select>
+
+            {/* Filtered list */}
+            {(() => {
+              const filtered = memberFilter === 'all'
+                ? users
+                : memberFilter === 'unassigned'
+                ? users.filter(u => !u.group_id)
+                : users.filter(u => u.group_id === memberFilter)
+              if (filtered.length === 0) return (
+                <p className="text-center text-gray-400 text-sm py-8">No members in this view</p>
+              )
+              return filtered.map(u => {
               const groupForUser = groups.find(g => g.id === u.group_id)
               return (
                 <div key={u.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
@@ -384,7 +406,8 @@ export default function AdminPage() {
                   </div>
                 </div>
               )
-            })}
+            })
+            })()}
           </div>
         )}
 
