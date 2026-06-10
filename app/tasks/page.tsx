@@ -14,6 +14,7 @@ export default function TasksPage() {
   const [periodLabel, setPeriodLabel] = useState('Current')
   const [streak, setStreak] = useState(0)
   const [habitStreak, setHabitStreak] = useState(0)
+  const [habitJustDone, setHabitJustDone] = useState(false)
   const router = useRouter()
 
   const today = new Date().toISOString().split('T')[0]
@@ -108,6 +109,8 @@ export default function TasksPage() {
     } else {
       await supabase.from('habit_completions').insert({ user_id: userId, completed_date: today })
       setHabitStreak(habitStreak + 1)
+      setHabitJustDone(true)
+      setTimeout(() => setHabitJustDone(false), 3000)
     }
 
     setHabitDoneToday(newHabitDone)
@@ -172,6 +175,13 @@ export default function TasksPage() {
                   <p className="text-xs text-orange-500 font-semibold">🔥 {habitStreak} day{habitStreak !== 1 ? 's' : ''}</p>
                 )}
               </div>
+              {habitJustDone && (
+                <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 text-center mb-3">
+                  <p className="text-3xl mb-1">🔥</p>
+                  <p className="font-bold text-orange-700">{habitStreak > 1 ? `${habitStreak} days in a row!` : 'Habit done!'}</p>
+                  <p className="text-orange-500 text-xs mt-0.5">Keep the streak alive tomorrow</p>
+                </div>
+              )}
               {currentHabit ? (
                 <button onClick={toggleHabit}
                   className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity ${habitDoneToday ? 'opacity-60' : ''}`}>

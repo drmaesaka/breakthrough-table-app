@@ -54,7 +54,7 @@ function JoinForm() {
         .eq('id', data.user.id)
     }
 
-    router.push('/dashboard')
+    router.push('/onboarding')
   }
 
   return (

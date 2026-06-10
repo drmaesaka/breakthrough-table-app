@@ -38,7 +38,7 @@ export default function AdminPage() {
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
       const [groupsRes, usersRes] = await Promise.all([
-        supabase.from('groups').select('*').eq('leader_id', user.id),
+        supabase.from('groups').select('*, last_period_start').eq('leader_id', user.id),
         supabase.from('profiles').select('id, full_name, group_id, role')
       ])
       const grps = groupsRes.data || []
@@ -68,6 +68,9 @@ export default function AdminPage() {
 
     // Archive existing tasks
     await supabase.from('tasks').update({ archived: true }).eq('group_id', selectedGroup).eq('archived', false)
+
+    // Record when this period started
+    await supabase.from('groups').update({ last_period_start: new Date().toISOString() }).eq('id', selectedGroup)
 
     // Reset streak for anyone who didn't hit 100% this period
     await supabase.from('profiles').update({ streak: 0 })
@@ -142,6 +145,16 @@ export default function AdminPage() {
     const supabase = createClient()
     await supabase.from('profiles').update({ role: newRole }).eq('id', userId)
     setUsers(p => p.map(u => u.id === userId ? { ...u, role: newRole } : u))
+  }
+
+  function daysUntilReset(lastStart: string | null) {
+    if (!lastStart) return null
+    const start = new Date(lastStart)
+    const resetDate = new Date(start)
+    resetDate.setDate(resetDate.getDate() + 14)
+    const today = new Date()
+    const diff = Math.ceil((resetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+    return diff
   }
 
   const inputClass = "w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
@@ -263,6 +276,13 @@ export default function AdminPage() {
                       <div>
                         <p className="font-semibold text-gray-900">{g.name}</p>
                         <p className="text-gray-400 text-xs mt-0.5">{users.filter(u => u.group_id === g.id).length} members</p>
+                        {(() => {
+                          const days = daysUntilReset(g.last_period_start)
+                          if (days === null) return null
+                          if (days <= 0) return <p className="text-red-500 text-xs font-semibold mt-0.5">⚠️ Period reset overdue</p>
+                          if (days <= 3) return <p className="text-orange-500 text-xs font-semibold mt-0.5">⏰ Reset in {days} day{days !== 1 ? 's' : ''}</p>
+                          return <p className="text-gray-400 text-xs mt-0.5">🗓 Reset in {days} days</p>
+                        })()}
                       </div>
                     </div>
                     <div className="bg-bt-pale rounded-xl p-3">

@@ -14,10 +14,24 @@ export async function POST(req: NextRequest) {
 
   const today = new Date().toISOString().split('T')[0]
 
+  // Current time as HH:MM and HH:30 window for matching user preferences
+  const now = new Date()
+  const currentHour = now.getUTCHours()
+  const currentMinute = now.getUTCMinutes()
+  // Build a list of time strings that fall within the last 30 min window
+  const timeWindow: string[] = []
+  for (let offset = 0; offset < 30; offset++) {
+    const d = new Date(now.getTime() - offset * 60 * 1000)
+    const h = d.getUTCHours().toString().padStart(2, '0')
+    const m = d.getUTCMinutes() < 30 ? '00' : '30'
+    const t = `${h}:${m}`
+    if (!timeWindow.includes(t)) timeWindow.push(t)
+  }
+
   // Get participants with their preferences and habit info
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, onesignal_id, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone)')
+    .select('id, full_name, onesignal_id, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times)')
     .eq('role', 'participant')
     .not('group_id', 'is', null)
     .not('onesignal_id', 'is', null)
@@ -66,7 +80,11 @@ export async function POST(req: NextRequest) {
         const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
         if (prefs && prefs.enabled === false) return false
         // Only nudge if habit not done OR reading not done
-        return !habitDoneSet.has(p.id) || !readingDoneSet.has(p.id)
+        if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) return false
+        // Check if current time matches any of the user's nudge times
+        const nudgeTimes: string[] = prefs?.nudge_times || ['09:00']
+        const scheduledNow = nudgeTimes.some(t => timeWindow.includes(t))
+        return scheduledNow
       })
       .map(async (participant) => {
         const firstName = participant.full_name?.split(' ')[0] || 'there'
