@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 
 const TONES = [
-  { value: 'encouraging', label: '🙌 Encouraging', desc: 'Warm, positive, you've got this energy' },
+  { value: 'encouraging', label: '🙌 Encouraging', desc: "Warm, positive, you've got this energy" },
   { value: 'direct', label: '⚡ Direct', desc: 'Short, no-fluff, get it done' },
   { value: 'gentle', label: '🌱 Gentle', desc: 'Soft reminders, no pressure' },
   { value: 'competitive', label: '🔥 Competitive', desc: 'Push harder, beat your streak' },
