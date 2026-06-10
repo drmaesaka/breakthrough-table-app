@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import InstallBanner from '@/components/InstallBanner'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -56,7 +57,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="py-5 pb-28 space-y-4">
+        <InstallBanner />
+        <div className="px-5 space-y-4">
         {/* No group state */}
         {profile && !profile.group_id && (
           <div className="bg-white rounded-2xl p-6 shadow-sm text-center">
@@ -110,6 +113,7 @@ export default function DashboardPage() {
             </div>
           </>
         )}
+        </div>
       </div>
 
       <BottomNav />
