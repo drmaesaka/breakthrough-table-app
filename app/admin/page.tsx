@@ -120,6 +120,14 @@ export default function AdminPage() {
     setAssignUserId('')
   }
 
+  async function toggleLeader(userId: string, currentRole: string) {
+    const newRole = currentRole === 'leader' ? 'participant' : 'leader'
+    if (!confirm(`${newRole === 'leader' ? 'Promote to leader' : 'Demote to participant'}?`)) return
+    const supabase = createClient()
+    await supabase.from('profiles').update({ role: newRole }).eq('id', userId)
+    setUsers(p => p.map(u => u.id === userId ? { ...u, role: newRole } : u))
+  }
+
   const inputClass = "w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
 
   if (loading) return <div className="min-h-screen bg-bt-pale flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>
@@ -258,10 +266,23 @@ export default function AdminPage() {
                       {u.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0,2)}
                     </span>
                   </div>
-                  <div>
-                    <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
-                    <p className="text-gray-400 text-xs capitalize">{u.role} · {u.group_id ? 'In a group' : 'Unassigned'}</p>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
+                      {u.role === 'leader' && (
+                        <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
+                      )}
+                    </div>
+                    <p className="text-gray-400 text-xs capitalize">{u.group_id ? 'In a group' : 'Unassigned'}</p>
                   </div>
+                  <button onClick={() => toggleLeader(u.id, u.role)}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                      u.role === 'leader'
+                        ? 'border-gray-200 text-gray-400'
+                        : 'border-bt-blue text-bt-blue'
+                    }`}>
+                    {u.role === 'leader' ? 'Demote' : 'Make Leader'}
+                  </button>
                 </div>
               ))}
             </div>
