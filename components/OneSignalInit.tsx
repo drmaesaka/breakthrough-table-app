@@ -11,8 +11,6 @@ export default function OneSignalInit() {
 
       await OneSignal.init({
         appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID!,
-        safari_web_id: '',
-        notifyButton: { enable: false },
         allowLocalhostAsSecureOrigin: true,
       })
 
