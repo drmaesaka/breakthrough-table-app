@@ -37,10 +37,11 @@ export default function AdminPage() {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
-      const [groupsRes, membersRes] = await Promise.all([
-        supabase.from('groups').select('*, last_period_start'),
-        fetch('/api/admin/members').then(r => r.json())
-      ])
+      const membersReq = await fetch('/api/admin/members')
+      const membersRes = await membersReq.json()
+      console.log('Admin members API response:', membersReq.status, membersRes)
+
+      const groupsRes = await supabase.from('groups').select('*, last_period_start')
       const grps = groupsRes.data || []
       setGroups(grps)
       setUsers(membersRes.members || [])
