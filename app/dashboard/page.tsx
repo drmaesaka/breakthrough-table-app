@@ -61,34 +61,51 @@ export default function DashboardPage() {
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
-        {/* Adherence card */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <p className="text-gray-400 text-sm font-medium">Your Adherence This Period</p>
-          <div className="flex items-end gap-2 mt-2 mb-3">
-            <span className="text-5xl font-bold text-bt-navy">{adherence}%</span>
-            <span className="text-gray-400 text-sm pb-1.5">{taskStats.completed} of {taskStats.total} tasks</span>
+        {/* No group state */}
+        {profile && !profile.group_id && (
+          <div className="bg-white rounded-2xl p-6 shadow-sm text-center">
+            <p className="text-5xl mb-3">👋</p>
+            <h2 className="font-bold text-bt-navy text-lg">You're all set!</h2>
+            <p className="text-gray-400 text-sm mt-2 leading-relaxed">
+              Your account is ready. You'll be added to your Breakthrough Table group shortly — your leader will assign you before your next meeting.
+            </p>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <p className="text-gray-400 text-xs">Questions? Reach out to your table leader.</p>
+            </div>
           </div>
-          <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-full bg-bt-blue rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
-          </div>
-        </div>
+        )}
 
-        {/* Nav cards */}
-        <div className="grid grid-cols-2 gap-3">
-          {[
-            { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
-            { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
-            { href: '/content', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
-            { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
-          ].map(card => (
-            <Link key={card.href} href={card.href}
-              className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
-              <div className="text-3xl mb-2">{card.emoji}</div>
-              <p className="font-semibold text-bt-navy text-sm">{card.title}</p>
-              <p className="text-gray-400 text-xs mt-0.5">{card.sub}</p>
-            </Link>
-          ))}
-        </div>
+        {/* Adherence card - only show if in a group */}
+        {profile?.group_id && (
+          <>
+            <div className="bg-white rounded-2xl p-5 shadow-sm">
+              <p className="text-gray-400 text-sm font-medium">Your Adherence This Period</p>
+              <div className="flex items-end gap-2 mt-2 mb-3">
+                <span className="text-5xl font-bold text-bt-navy">{adherence}%</span>
+                <span className="text-gray-400 text-sm pb-1.5">{taskStats.completed} of {taskStats.total} tasks</span>
+              </div>
+              <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-bt-blue rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
+                { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
+                { href: '/content', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
+                { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
+              ].map(card => (
+                <Link key={card.href} href={card.href}
+                  className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
+                  <div className="text-3xl mb-2">{card.emoji}</div>
+                  <p className="font-semibold text-bt-navy text-sm">{card.title}</p>
+                  <p className="text-gray-400 text-xs mt-0.5">{card.sub}</p>
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <BottomNav />
