@@ -10,14 +10,23 @@ function adminClient() {
 }
 
 export async function GET() {
-  const supabase = adminClient()
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, full_name, group_id, role, adherence_percent, streak')
-    .order('full_name', { ascending: true })
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SECRET_KEY
+    if (!url || !key) {
+      return NextResponse.json({ error: `Missing env: url=${!!url} key=${!!key}` }, { status: 500 })
+    }
+    const supabase = adminClient()
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, group_id, role, adherence_percent, streak')
+      .order('full_name', { ascending: true })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ members: data })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ members: data })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
 }
 
 export async function PATCH(req: NextRequest) {
