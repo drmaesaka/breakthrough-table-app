@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase'
 
 function JoinForm() {
@@ -58,13 +59,8 @@ function JoinForm() {
 
   return (
     <div className="min-h-screen bg-bt-pale flex flex-col">
-      <div className="bg-bt-navy pt-20 pb-14 px-6 flex flex-col items-center">
-        <div className="text-center">
-          <div className="text-white text-3xl">
-            <span className="font-normal">break</span><span className="font-bold">through</span>
-          </div>
-          <div className="text-bt-light text-2xl font-normal text-right -mt-1">table</div>
-        </div>
+      <div className="bg-bt-navy pt-16 pb-14 px-6 flex flex-col items-center">
+        <Image src="/bt-logo.png" alt="Breakthrough Table" width={220} height={80} className="object-contain" />
         {groupName && (
           <div className="mt-5 bg-white/15 rounded-xl px-4 py-2 text-center">
             <p className="text-bt-light/70 text-xs">You're joining</p>
