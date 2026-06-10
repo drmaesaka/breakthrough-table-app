@@ -19,16 +19,20 @@ export default function BottomNav() {
     checkRole()
   }, [])
 
-  const tabs = [
-    { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
-    { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
-    { href: '/group', label: 'Group', icon: <GroupIcon /> },
-    { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
-    ...(isLeader ? [
-      { href: '/analytics', label: 'Stats', icon: <StatsIcon /> },
-      { href: '/admin', label: 'Admin', icon: <AdminIcon /> },
-    ] : []),
-  ]
+  const tabs = isLeader
+    ? [
+        { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
+        { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
+        { href: '/analytics', label: 'Stats', icon: <StatsIcon /> },
+        { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
+        { href: '/admin', label: 'Admin', icon: <AdminIcon /> },
+      ]
+    : [
+        { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
+        { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
+        { href: '/group', label: 'Group', icon: <GroupIcon /> },
+        { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
+      ]
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
