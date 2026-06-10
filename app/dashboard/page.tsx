@@ -51,7 +51,7 @@ export default function DashboardPage() {
           <Link href="/profile"
             className="mt-1 w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
             <span className="text-white text-xs font-bold">
-              {firstName.slice(0,2).toUpperCase()}
+              {(() => { const parts = (profile?.full_name || '').trim().split(' '); return parts.length >= 2 ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase() : firstName.slice(0,2).toUpperCase() })()}
             </span>
           </Link>
         </div>
