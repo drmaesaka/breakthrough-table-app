@@ -1,22 +1,23 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 
-export default function LoginPage() {
-  const [email, setEmail] = useState('')
+export default function ResetPasswordPage() {
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const router = useRouter()
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (password !== confirm) { setError('Passwords don\'t match'); return }
+    if (password.length < 6) { setError('Password must be at least 6 characters'); return }
     setLoading(true)
     setError('')
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.updateUser({ password })
     if (error) { setError(error.message); setLoading(false) }
     else router.push('/dashboard')
   }
@@ -34,36 +35,27 @@ export default function LoginPage() {
 
       <div className="flex-1 px-5 -mt-6 pb-10">
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h2 className="text-xl font-bold text-bt-navy mb-1">Welcome back</h2>
-          <p className="text-gray-400 text-sm mb-6">Sign in to your account</p>
-
-          <form onSubmit={handleLogin} className="space-y-4">
+          <h2 className="text-xl font-bold text-bt-navy mb-1">Set new password</h2>
+          <p className="text-gray-400 text-sm mb-6">Choose something you'll remember.</p>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">New Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
                 className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
-                placeholder="you@example.com" required />
+                placeholder="••••••••" required />
             </div>
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-sm font-medium text-gray-700">Password</label>
-                <Link href="/forgot-password" className="text-xs text-bt-blue font-medium">Forgot password?</Link>
-              </div>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password</label>
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
                 className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
                 placeholder="••••••••" required />
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button type="submit" disabled={loading}
-              className="w-full bg-bt-navy text-white py-4 rounded-xl font-semibold text-base disabled:opacity-50 mt-2">
-              {loading ? 'Signing in...' : 'Sign In'}
+              className="w-full bg-bt-navy text-white py-4 rounded-xl font-semibold text-base disabled:opacity-50">
+              {loading ? 'Updating...' : 'Update Password'}
             </button>
           </form>
-
-          <p className="text-center text-sm text-gray-400 mt-6">
-            Don't have an account?{' '}
-            <Link href="/signup" className="text-bt-blue font-semibold">Sign up</Link>
-          </p>
         </div>
       </div>
     </div>
