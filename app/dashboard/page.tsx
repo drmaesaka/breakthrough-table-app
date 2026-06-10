@@ -95,6 +95,7 @@ export default function DashboardPage() {
                 { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
                 { href: '/content', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
                 { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
+                { href: '/preferences', emoji: '🔔', title: 'Nudge Settings', sub: 'Customize check-ins' },
               ].map(card => (
                 <Link key={card.href} href={card.href}
                   className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">

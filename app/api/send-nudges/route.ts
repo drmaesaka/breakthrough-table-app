@@ -16,10 +16,10 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SECRET_KEY!
   )
 
-  // Get all participants who are in a group
+  // Get all participants who are in a group, joined with their nudge preferences
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, onesignal_id, group_id, adherence_percent')
+    .select('id, full_name, onesignal_id, group_id, adherence_percent, nudge_preferences(enabled, tone)')
     .eq('role', 'participant')
     .not('group_id', 'is', null)
     .not('onesignal_id', 'is', null)
@@ -28,19 +28,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No participants to nudge' })
   }
 
-  // Only nudge people who aren't at 100%
-  const toNudge = participants.filter(p => (p.adherence_percent || 0) < 100)
+  // Only nudge people who: aren't at 100%, and haven't disabled nudges
+  const toNudge = participants.filter(p => {
+    const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
+    if (prefs && prefs.enabled === false) return false
+    return (p.adherence_percent || 0) < 100
+  })
 
   const results = await Promise.all(
     toNudge.map(async (participant) => {
       const firstName = participant.full_name?.split(' ')[0] || 'there'
       const adherence = participant.adherence_percent || 0
+      const prefs = Array.isArray(participant.nudge_preferences) ? participant.nudge_preferences[0] : participant.nudge_preferences
+      const tone = prefs?.tone || 'encouraging'
 
-      let message = `Hey ${firstName} — don't forget to check off your tasks today! You're at ${adherence}% this period.`
-      if (adherence === 0) {
-        message = `Hey ${firstName} — your tasks are waiting! Start strong this period. 💪`
-      } else if (adherence >= 75) {
-        message = `Almost there ${firstName}! You're at ${adherence}% — finish strong! 🔥`
+      let message: string
+      if (tone === 'direct') {
+        message = adherence === 0
+          ? `${firstName}: tasks not started. Get on it.`
+          : adherence >= 75
+          ? `${firstName}: ${adherence}% done. Close it out.`
+          : `${firstName}: ${adherence}% this period. Keep moving.`
+      } else if (tone === 'gentle') {
+        message = adherence === 0
+          ? `Hey ${firstName}, just a soft reminder — your tasks are ready when you are 🌱`
+          : adherence >= 75
+          ? `You're so close ${firstName}! ${adherence}% done — no rush, you've got this 😊`
+          : `Just checking in ${firstName} — you're at ${adherence}%. Every little bit counts 💙`
+      } else if (tone === 'competitive') {
+        message = adherence === 0
+          ? `${firstName} — your table is moving and you're at 0%. Time to compete. 🏆`
+          : adherence >= 75
+          ? `${firstName} at ${adherence}%! Don't let anyone catch you — FINISH IT. 🔥`
+          : `${firstName}: ${adherence}% is not your ceiling. Push harder. 💪`
+      } else {
+        // encouraging (default)
+        message = adherence === 0
+          ? `Hey ${firstName} — your tasks are waiting! Start strong this period. 💪`
+          : adherence >= 75
+          ? `Almost there ${firstName}! You're at ${adherence}% — finish strong! 🔥`
+          : `Hey ${firstName} — don't forget to check off your tasks! You're at ${adherence}% this period.`
       }
 
       const response = await fetch('https://api.onesignal.com/notifications', {
