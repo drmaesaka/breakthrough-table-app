@@ -1,97 +1,105 @@
 'use client'
-
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase'
+import BottomNav from '@/components/BottomNav'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([])
-  const [completedIds, setCompletedIds] = useState<string[]>([])
-  const [user, setUser] = useState<any>(null)
+  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [userId, setUserId] = useState('')
+  const [periodLabel, setPeriodLabel] = useState('Current')
   const router = useRouter()
-  const supabase = createClient()
 
-  useEffect(() => {
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
-      setUser(user)
+  useEffect(() => { loadTasks() }, [])
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('group_id')
-        .eq('id', user.id)
-        .single()
+  async function loadTasks() {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.push('/login'); return }
+    setUserId(user.id)
 
-      if (profile?.group_id) {
-        const { data: tasks } = await supabase
-          .from('tasks')
-          .select('*')
-          .eq('group_id', profile.group_id)
-          .order('created_at', { ascending: false })
-        setTasks(tasks || [])
+    const { data: prof } = await supabase.from('profiles').select('group_id').eq('id', user.id).single()
+    if (!prof?.group_id) { setLoading(false); return }
 
-        const { data: completions } = await supabase
-          .from('task_completions')
-          .select('task_id')
-          .eq('user_id', user.id)
-        setCompletedIds(completions?.map((c: any) => c.task_id) || [])
-      }
-      setLoading(false)
-    }
-    load()
-  }, [])
+    const [{ data: taskData }, { data: completions }] = await Promise.all([
+      supabase.from('tasks').select('*').eq('group_id', prof.group_id).eq('archived', false).order('created_at', { ascending: false }),
+      supabase.from('task_completions').select('task_id').eq('user_id', user.id)
+    ])
 
-  async function completeTask(taskId: string) {
-    if (!user) return
-    await supabase.from('task_completions').insert({ task_id: taskId, user_id: user.id })
-    setCompletedIds(prev => [...prev, taskId])
+    setTasks(taskData || [])
+    if (taskData && taskData.length > 0) setPeriodLabel(taskData[0].period_label || 'Current')
+    setCompletedIds(new Set(completions?.map((c: any) => c.task_id)))
+    setLoading(false)
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>
+  async function toggleTask(taskId: string) {
+    const supabase = createClient()
+    const isCompleted = completedIds.has(taskId)
+    const newSet = new Set(completedIds)
+
+    if (isCompleted) {
+      await supabase.from('task_completions').delete().eq('task_id', taskId).eq('user_id', userId)
+      newSet.delete(taskId)
+    } else {
+      await supabase.from('task_completions').insert({ task_id: taskId, user_id: userId })
+      newSet.add(taskId)
+    }
+
+    setCompletedIds(newSet)
+    const adherence = tasks.length > 0 ? Math.round((newSet.size / tasks.length) * 100) : 0
+    await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
+  }
+
+  const adherence = tasks.length > 0 ? Math.round((completedIds.size / tasks.length) * 100) : 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-800">Breakthrough Table</h1>
-        <a href="/dashboard" className="text-sm text-blue-600 hover:underline">← Dashboard</a>
-      </nav>
-
-      <main className="max-w-3xl mx-auto px-6 py-10">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-8">My Tasks</h2>
-
-        {tasks.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 shadow-sm border border-gray-100 text-center text-gray-500">
-            No tasks assigned yet. Check back after your next meeting.
+    <div className="min-h-screen bg-bt-pale">
+      <div className="bg-bt-navy px-5 pt-16 pb-6">
+        <h1 className="text-white text-2xl font-bold">My Tasks</h1>
+        <p className="text-bt-light/70 text-sm mt-0.5">{periodLabel} period</p>
+        <div className="flex items-center gap-3 mt-4">
+          <div className="flex-1 h-2 bg-white/20 rounded-full overflow-hidden">
+            <div className="h-full bg-bt-light rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
           </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {tasks.map(task => {
-              const completed = completedIds.includes(task.id)
-              return (
-                <div key={task.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-800">{task.title}</h3>
-                    {task.description && <p className="text-sm text-gray-500 mt-1">{task.description}</p>}
-                    {task.due_date && <p className="text-xs text-gray-400 mt-2">Due: {new Date(task.due_date).toLocaleDateString()}</p>}
-                  </div>
-                  <button
-                    onClick={() => !completed && completeTask(task.id)}
-                    className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition ${
-                      completed
-                        ? 'bg-green-100 text-green-700 cursor-default'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
-                    {completed ? '✓ Done' : 'Mark Complete'}
-                  </button>
-                </div>
-              )
-            })}
+          <span className="text-white text-sm font-bold w-10 text-right">{adherence}%</span>
+        </div>
+      </div>
+
+      <div className="px-5 py-5 pb-28 space-y-3">
+        {loading && <p className="text-center text-gray-400 py-10">Loading...</p>}
+        {!loading && tasks.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-5xl mb-3">📋</p>
+            <p className="text-gray-500 font-medium">No tasks this period</p>
+            <p className="text-gray-400 text-sm mt-1">Your leader will post tasks here</p>
           </div>
         )}
-      </main>
+        {tasks.map(task => {
+          const done = completedIds.has(task.id)
+          return (
+            <button key={task.id} onClick={() => toggleTask(task.id)}
+              className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity ${done ? 'opacity-60' : ''}`}>
+              <div className={`mt-0.5 w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                done ? 'bg-bt-navy border-bt-navy' : 'border-gray-300'
+              }`}>
+                {done && (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                )}
+              </div>
+              <div className="flex-1">
+                <p className={`font-semibold text-gray-900 ${done ? 'line-through text-gray-400' : ''}`}>{task.title}</p>
+                {task.description && <p className="text-gray-400 text-sm mt-1 leading-relaxed">{task.description}</p>}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      <BottomNav />
     </div>
   )
 }

@@ -16,12 +16,14 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
+  const [periodLabel, setPeriodLabel] = useState('')
   const [contentTitle, setContentTitle] = useState('')
   const [contentUrl, setContentUrl] = useState('')
   const [contentType, setContentType] = useState('video')
   const [contentDesc, setContentDesc] = useState('')
   const [groupName, setGroupName] = useState('')
   const [assignUserId, setAssignUserId] = useState('')
+  const [archiving, setArchiving] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -48,11 +50,29 @@ export default function AdminPage() {
   async function loadGroupData(gid: string) {
     const supabase = createClient()
     const [t, c] = await Promise.all([
-      supabase.from('tasks').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
+      supabase.from('tasks').select('*').eq('group_id', gid).eq('archived', false).order('created_at', { ascending: false }),
       supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false })
     ])
     setTasks(t.data || [])
     setContent(c.data || [])
+  }
+
+  async function startNewPeriod() {
+    if (!selectedGroup || !periodLabel.trim()) return
+    if (!confirm(`Archive all current tasks and start period "${periodLabel}"?`)) return
+    setArchiving(true)
+    const supabase = createClient()
+
+    // Archive existing tasks
+    await supabase.from('tasks').update({ archived: true }).eq('group_id', selectedGroup).eq('archived', false)
+
+    // Reset adherence for all group members
+    await supabase.from('profiles').update({ adherence_percent: 0 }).eq('group_id', selectedGroup)
+
+    setTasks([])
+    setPeriodLabel('')
+    setArchiving(false)
+    alert(`New period "${periodLabel}" started. Add new tasks below.`)
   }
 
   async function createGroup() {
@@ -66,7 +86,13 @@ export default function AdminPage() {
   async function addTask() {
     if (!taskTitle.trim() || !selectedGroup) return
     const supabase = createClient()
-    const { data } = await supabase.from('tasks').insert({ group_id: selectedGroup, title: taskTitle.trim(), description: taskDesc.trim() }).select().single()
+    const currentPeriod = tasks.length > 0 ? tasks[0].period_label : 'Current'
+    const { data } = await supabase.from('tasks').insert({
+      group_id: selectedGroup,
+      title: taskTitle.trim(),
+      description: taskDesc.trim(),
+      period_label: currentPeriod
+    }).select().single()
     if (data) { setTasks(p => [data, ...p]); setTaskTitle(''); setTaskDesc('') }
   }
 
@@ -125,13 +151,34 @@ export default function AdminPage() {
 
         {tab === 'tasks' && (
           <>
+            {/* New Period */}
+            <div style={{ backgroundColor: '#fefce8', borderColor: '#fde047' }} className="border-2 rounded-2xl p-4 space-y-3">
+              <div>
+                <h3 className="font-bold text-gray-800">🔄 Start New Period</h3>
+                <p className="text-gray-500 text-xs mt-0.5">Archives current tasks and resets adherence for all members.</p>
+              </div>
+              <input value={periodLabel} onChange={e => setPeriodLabel(e.target.value)}
+                placeholder="e.g. July–August 2026" className={inputClass} />
+              <button onClick={startNewPeriod} disabled={archiving || !periodLabel.trim()}
+                style={{ backgroundColor: '#f59e0b' }}
+                className="w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                {archiving ? 'Archiving...' : 'Archive Current & Start New Period'}
+              </button>
+            </div>
+
+            {/* Add Task */}
             <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
               <h3 className="font-bold text-bt-navy">Add Task</h3>
               <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Task title *" className={inputClass} />
               <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Description (optional)" className={inputClass} />
               <button onClick={addTask} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Add Task</button>
             </div>
+
+            {/* Task list */}
             <div className="space-y-2">
+              {tasks.length === 0 && (
+                <p className="text-center text-gray-400 text-sm py-4">No active tasks. Add one above.</p>
+              )}
               {tasks.map(task => (
                 <div key={task.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
                   <div className="flex-1">

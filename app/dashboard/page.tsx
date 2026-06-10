@@ -38,12 +38,26 @@ export default function DashboardPage() {
   const firstName = profile?.full_name?.split(' ')[0] || 'there'
   const adherence = taskStats.total > 0 ? Math.round((taskStats.completed / taskStats.total) * 100) : 0
 
+  async function handleLogout() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
+
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-8">
-        <p className="text-bt-light text-sm font-medium">Welcome back,</p>
-        <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
-        {groupName && <p className="text-bt-light/70 text-sm mt-1">{groupName}</p>}
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-bt-light text-sm font-medium">Welcome back,</p>
+            <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
+            {groupName && <p className="text-bt-light/70 text-sm mt-1">{groupName}</p>}
+          </div>
+          <button onClick={handleLogout}
+            className="mt-1 text-bt-light/60 hover:text-white text-xs font-medium px-3 py-1.5 rounded-lg border border-white/20 transition-colors">
+            Sign out
+          </button>
+        </div>
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
