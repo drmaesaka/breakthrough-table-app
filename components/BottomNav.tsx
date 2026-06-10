@@ -39,7 +39,7 @@ export default function BottomNav() {
       {/* Floating home button — hidden on dashboard itself */}
       {pathname !== '/dashboard' && (
         <Link href="/dashboard"
-          className="fixed top-4 left-4 z-50 bg-bt-navy/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-lg flex flex-col active:scale-95 transition-transform">
+          className="fixed top-4 right-4 z-50 bg-bt-navy/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-lg flex flex-col active:scale-95 transition-transform">
           <div>
             <span className="text-white text-xs font-normal">break</span><span className="text-white text-xs font-bold">through</span>
           </div>
