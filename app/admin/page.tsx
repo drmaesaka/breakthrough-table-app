@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 
-type Tab = 'tasks' | 'content' | 'groups' | 'members'
+type Tab = 'tasks' | 'content' | 'groups' | 'members' | 'scores'
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
@@ -38,8 +38,8 @@ export default function AdminPage() {
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
       const [groupsRes, usersRes] = await Promise.all([
-        supabase.from('groups').select('*, last_period_start').eq('leader_id', user.id),
-        supabase.from('profiles').select('id, full_name, group_id, role')
+        supabase.from('groups').select('*, last_period_start'),
+        supabase.from('profiles').select('id, full_name, group_id, role, adherence_percent, streak')
       ])
       const grps = groupsRes.data || []
       setGroups(grps)
@@ -139,6 +139,20 @@ export default function AdminPage() {
     setAssignUserId('')
   }
 
+  async function assignUserToGroup(userId: string, groupId: string) {
+    const supabase = createClient()
+    const val = groupId === '' ? null : groupId
+    await supabase.from('profiles').update({ group_id: val }).eq('id', userId)
+    setUsers(p => p.map(u => u.id === userId ? { ...u, group_id: val } : u))
+  }
+
+  async function deleteMember(userId: string, name: string) {
+    if (!confirm(`Remove ${name} from the app? This cannot be undone.`)) return
+    const supabase = createClient()
+    await supabase.from('profiles').delete().eq('id', userId)
+    setUsers(p => p.filter(u => u.id !== userId))
+  }
+
   async function toggleLeader(userId: string, currentRole: string) {
     const newRole = currentRole === 'leader' ? 'participant' : 'leader'
     if (!confirm(`${newRole === 'leader' ? 'Promote to leader' : 'Demote to participant'}?`)) return
@@ -173,7 +187,7 @@ export default function AdminPage() {
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'groups', 'members'] as Tab[]).map(t => (
+          {(['tasks', 'content', 'groups', 'members', 'scores'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
@@ -306,48 +320,111 @@ export default function AdminPage() {
         )}
 
         {tab === 'members' && (
-          <>
-            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-              <h3 className="font-bold text-bt-navy">Assign Member to Group</h3>
-              <select value={assignUserId} onChange={e => setAssignUserId(e.target.value)} className={inputClass}>
-                <option value="">Select a member...</option>
-                {users.filter(u => u.role !== 'leader').map(u => (
-                  <option key={u.id} value={u.id}>{u.full_name}</option>
-                ))}
-              </select>
-              <button onClick={assignUser} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">
-                Assign to Selected Group
-              </button>
-            </div>
-            <div className="space-y-2">
-              {users.map(u => (
-                <div key={u.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-bt-pale flex items-center justify-center flex-shrink-0">
-                    <span className="text-bt-navy font-bold text-xs">
-                      {u.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0,2)}
-                    </span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
-                      {u.role === 'leader' && (
-                        <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
-                      )}
+          <div className="space-y-2">
+            {users.length === 0 && (
+              <p className="text-center text-gray-400 text-sm py-8">No members yet</p>
+            )}
+            {users.map(u => {
+              const groupForUser = groups.find(g => g.id === u.group_id)
+              return (
+                <div key={u.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-bt-pale flex items-center justify-center flex-shrink-0">
+                      <span className="text-bt-navy font-bold text-xs">
+                        {(() => { const p = (u.full_name||'').trim().split(' '); return p.length>=2?(p[0][0]+p[p.length-1][0]).toUpperCase():u.full_name?.slice(0,2).toUpperCase()||'?' })()}
+                      </span>
                     </div>
-                    <p className="text-gray-400 text-xs capitalize">{u.group_id ? 'In a group' : 'Unassigned'}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
+                        {u.role === 'leader' && (
+                          <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
+                        )}
+                      </div>
+                      <p className="text-gray-400 text-xs">{groupForUser?.name || 'Unassigned'}</p>
+                    </div>
                   </div>
-                  <button onClick={() => toggleLeader(u.id, u.role)}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
-                      u.role === 'leader'
-                        ? 'border-gray-200 text-gray-400'
-                        : 'border-bt-blue text-bt-blue'
-                    }`}>
-                    {u.role === 'leader' ? 'Demote' : 'Make Leader'}
-                  </button>
+                  {/* Inline group assignment */}
+                  <select
+                    value={u.group_id || ''}
+                    onChange={e => assignUserToGroup(u.id, e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-bt-blue bg-bt-pale">
+                    <option value="">— Unassigned —</option>
+                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <div className="flex gap-2">
+                    <button onClick={() => toggleLeader(u.id, u.role)}
+                      className={`flex-1 text-xs font-medium py-2 rounded-lg border transition-colors ${
+                        u.role === 'leader' ? 'border-gray-200 text-gray-400' : 'border-bt-blue text-bt-blue'
+                      }`}>
+                      {u.role === 'leader' ? 'Demote' : 'Make Leader'}
+                    </button>
+                    <button onClick={() => deleteMember(u.id, u.full_name)}
+                      className="flex-1 text-xs font-medium py-2 rounded-lg border border-red-200 text-red-400 transition-colors">
+                      Remove
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </>
+              )
+            })}
+          </div>
+        )}
+
+        {tab === 'scores' && (
+          <div className="space-y-4">
+            {groups.map(g => {
+              const members = users.filter(u => u.group_id === g.id).sort((a,b) => (b.adherence_percent||0)-(a.adherence_percent||0))
+              const avg = members.length > 0 ? Math.round(members.reduce((s,m) => s+(m.adherence_percent||0),0)/members.length) : 0
+              const at100 = members.filter(m => m.adherence_percent === 100).length
+              return (
+                <div key={g.id} className="space-y-2">
+                  <div className="bg-bt-navy rounded-2xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-white font-bold">{g.name}</h3>
+                      <span className="text-bt-light/60 text-xs">{members.length} members</span>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="text-center">
+                        <p className="text-white text-xl font-bold">{avg}%</p>
+                        <p className="text-bt-light/50 text-xs">Avg</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-white text-xl font-bold">{at100}</p>
+                        <p className="text-bt-light/50 text-xs">At 100%</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-white text-xl font-bold">{members.length - at100}</p>
+                        <p className="text-bt-light/50 text-xs">Incomplete</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 h-1.5 bg-white/20 rounded-full overflow-hidden">
+                      <div className="h-full bg-bt-light rounded-full" style={{ width: `${avg}%` }} />
+                    </div>
+                  </div>
+                  {members.map((m, i) => {
+                    const pct = m.adherence_percent || 0
+                    const color = pct === 100 ? '#22c55e' : pct >= 75 ? '#5B9BD5' : pct > 0 ? '#f59e0b' : '#e5e7eb'
+                    return (
+                      <div key={m.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
+                        <span className="text-sm w-5 text-center">{i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}.`}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-gray-900 truncate">{m.full_name}</p>
+                            {m.streak > 0 && <span className="text-xs text-orange-500">{m.streak}🔥</span>}
+                          </div>
+                          <div className="mt-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+                          </div>
+                        </div>
+                        <span className={`text-sm font-bold w-10 text-right ${pct===100?'text-green-500':pct>=75?'text-bt-blue':'text-gray-400'}`}>{pct}%</span>
+                      </div>
+                    )
+                  })}
+                  {members.length === 0 && <p className="text-center text-gray-400 text-sm py-3 bg-white rounded-2xl">No members yet</p>}
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
       <BottomNav />
