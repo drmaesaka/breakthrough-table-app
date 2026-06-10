@@ -24,6 +24,7 @@ export default function AdminPage() {
   const [groupName, setGroupName] = useState('')
   const [assignUserId, setAssignUserId] = useState('')
   const [archiving, setArchiving] = useState(false)
+  const [copiedGroupId, setCopiedGroupId] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -238,13 +239,34 @@ export default function AdminPage() {
               <input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Group name" className={inputClass} />
               <button onClick={createGroup} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Create Group</button>
             </div>
-            <div className="space-y-2">
-              {groups.map(g => (
-                <div key={g.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm">
-                  <p className="font-semibold text-gray-900">{g.name}</p>
-                  <p className="text-gray-400 text-xs mt-0.5">{users.filter(u => u.group_id === g.id).length} members</p>
-                </div>
-              ))}
+            <div className="space-y-3">
+              {groups.map(g => {
+                const inviteLink = `${process.env.NEXT_PUBLIC_APP_URL}/join?group=${g.id}`
+                const copied = copiedGroupId === g.id
+                return (
+                  <div key={g.id} className="bg-white rounded-2xl px-4 py-4 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-900">{g.name}</p>
+                        <p className="text-gray-400 text-xs mt-0.5">{users.filter(u => u.group_id === g.id).length} members</p>
+                      </div>
+                    </div>
+                    <div className="bg-bt-pale rounded-xl p-3">
+                      <p className="text-xs text-gray-400 mb-1.5 font-medium">Invite Link</p>
+                      <p className="text-xs text-gray-600 break-all font-mono leading-relaxed">{inviteLink}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(inviteLink)
+                        setCopiedGroupId(g.id)
+                        setTimeout(() => setCopiedGroupId(''), 2500)
+                      }}
+                      className="w-full py-2.5 rounded-xl text-sm font-semibold border-2 border-bt-blue text-bt-blue transition-colors">
+                      {copied ? '✓ Copied!' : 'Copy Invite Link'}
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           </>
         )}
