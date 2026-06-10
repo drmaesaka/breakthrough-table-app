@@ -25,6 +25,8 @@ export default function AdminPage() {
   const [assignUserId, setAssignUserId] = useState('')
   const [archiving, setArchiving] = useState(false)
   const [copiedGroupId, setCopiedGroupId] = useState('')
+  const [contentError, setContentError] = useState('')
+  const [contentSaving, setContentSaving] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -109,12 +111,18 @@ export default function AdminPage() {
   }
 
   async function addContent() {
-    if (!contentTitle.trim() || !contentUrl.trim() || !selectedGroup) return
+    setContentError('')
+    if (!contentTitle.trim()) { setContentError('Title is required'); return }
+    if (!contentUrl.trim()) { setContentError('URL is required'); return }
+    if (!selectedGroup) { setContentError('No group selected'); return }
+    setContentSaving(true)
     const supabase = createClient()
-    const { data } = await supabase.from('content').insert({
+    const { data, error } = await supabase.from('content').insert({
       group_id: selectedGroup, title: contentTitle.trim(), url: contentUrl.trim(),
       type: contentType, description: contentDesc.trim()
     }).select().single()
+    setContentSaving(false)
+    if (error) { setContentError(error.message); return }
     if (data) { setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc('') }
   }
 
@@ -219,7 +227,11 @@ export default function AdminPage() {
                 <option value="article">📰 Article</option>
                 <option value="link">🔗 Link</option>
               </select>
-              <button onClick={addContent} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Add Content</button>
+              {contentError && <p className="text-red-500 text-sm">{contentError}</p>}
+              <button onClick={addContent} disabled={contentSaving}
+                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
+                {contentSaving ? 'Adding...' : 'Add Content'}
+              </button>
             </div>
             <div className="space-y-2">
               {content.map(item => (
