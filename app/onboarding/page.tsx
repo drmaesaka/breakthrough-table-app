@@ -90,7 +90,7 @@ export default function OnboardingPage() {
         </p>
       )}
       <p className="text-bt-light/60 text-sm leading-relaxed mb-10 max-w-xs">
-        This app tracks two things every period: your <span className="text-white font-semibold">reading</span> and your <span className="text-white font-semibold">personal habit</span>. Let's get you set up.
+        This app tracks two things every period: your <span className="text-white font-semibold">content assignments</span> and your <span className="text-white font-semibold">personal habit</span>. Let's get you set up.
       </p>
       <button onClick={() => setStep(1)}
         className="w-full bg-white text-bt-navy py-4 rounded-2xl font-bold text-base">
