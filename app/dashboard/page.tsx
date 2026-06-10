@@ -99,7 +99,7 @@ export default function DashboardPage() {
               {[
                 { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
                 { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
-                { href: '/content', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
+                { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
                 { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
                 { href: '/preferences', emoji: '🔔', title: 'Nudge Settings', sub: 'Customize check-ins' },
               ].map(card => (
