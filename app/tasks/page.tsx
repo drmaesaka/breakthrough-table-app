@@ -10,6 +10,7 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [periodLabel, setPeriodLabel] = useState('Current')
+  const [streak, setStreak] = useState(0)
   const router = useRouter()
 
   useEffect(() => { loadTasks() }, [])
@@ -20,8 +21,14 @@ export default function TasksPage() {
     if (!user) { router.push('/login'); return }
     setUserId(user.id)
 
-    const { data: prof } = await supabase.from('profiles').select('group_id').eq('id', user.id).single()
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('group_id, streak')
+      .eq('id', user.id)
+      .single()
+
     if (!prof?.group_id) { setLoading(false); return }
+    setStreak(prof.streak || 0)
 
     const [{ data: taskData }, { data: completions }] = await Promise.all([
       supabase.from('tasks').select('*').eq('group_id', prof.group_id).eq('archived', false).order('created_at', { ascending: false }),
@@ -49,7 +56,17 @@ export default function TasksPage() {
 
     setCompletedIds(newSet)
     const adherence = tasks.length > 0 ? Math.round((newSet.size / tasks.length) * 100) : 0
-    await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
+
+    // If just hit 100%, increment streak
+    const justFinished = newSet.size === tasks.length && tasks.length > 0
+    const newStreak = justFinished ? streak + 1 : streak
+
+    await supabase.from('profiles').update({
+      adherence_percent: adherence,
+      ...(justFinished ? { streak: newStreak } : {})
+    }).eq('id', userId)
+
+    if (justFinished) setStreak(newStreak)
   }
 
   const adherence = tasks.length > 0 ? Math.round((completedIds.size / tasks.length) * 100) : 0
@@ -58,8 +75,18 @@ export default function TasksPage() {
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
-        <h1 className="text-white text-2xl font-bold">My Tasks</h1>
-        <p className="text-bt-light/70 text-sm mt-0.5">{periodLabel} period</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-white text-2xl font-bold">My Tasks</h1>
+            <p className="text-bt-light/70 text-sm mt-0.5">{periodLabel} period</p>
+          </div>
+          {streak > 0 && (
+            <div className="text-right">
+              <p className="text-2xl">🔥</p>
+              <p className="text-white text-sm font-bold">{streak} streak</p>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-3 mt-4">
           <div className="flex-1 h-2 bg-white/20 rounded-full overflow-hidden">
             <div className="h-full bg-bt-light rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
@@ -73,7 +100,9 @@ export default function TasksPage() {
           <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 text-center">
             <p className="text-4xl mb-2">🎉</p>
             <p className="font-bold text-green-700 text-lg">You crushed it!</p>
-            <p className="text-green-600 text-sm mt-1">100% this period. Your table sees it. Keep it up.</p>
+            <p className="text-green-600 text-sm mt-1">
+              100% this period. Your table sees it.{streak > 1 ? ` ${streak} periods in a row! 🔥` : ' Keep it up.'}
+            </p>
           </div>
         )}
         {loading && <p className="text-center text-gray-400 py-10">Loading...</p>}

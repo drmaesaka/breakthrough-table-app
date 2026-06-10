@@ -17,7 +17,7 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('*, groups(name)').eq('id', user.id).single()
+      const { data: prof } = await supabase.from('profiles').select('*, groups(name), streak').eq('id', user.id).single()
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
@@ -87,6 +87,13 @@ export default function DashboardPage() {
               <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-bt-blue rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
               </div>
+              {profile?.streak > 0 && (
+                <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                  <span className="text-xl">🔥</span>
+                  <p className="text-sm font-semibold text-gray-700">{profile.streak} period streak</p>
+                  <p className="text-xs text-gray-400">— keep it going!</p>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

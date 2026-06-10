@@ -66,6 +66,11 @@ export default function AdminPage() {
     // Archive existing tasks
     await supabase.from('tasks').update({ archived: true }).eq('group_id', selectedGroup).eq('archived', false)
 
+    // Reset streak for anyone who didn't hit 100% this period
+    await supabase.from('profiles').update({ streak: 0 })
+      .eq('group_id', selectedGroup)
+      .lt('adherence_percent', 100)
+
     // Reset adherence for all group members
     await supabase.from('profiles').update({ adherence_percent: 0 }).eq('group_id', selectedGroup)
 

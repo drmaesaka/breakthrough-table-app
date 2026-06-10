@@ -105,13 +105,17 @@ export default function ProfilePage() {
         {/* Stats */}
         <div className="bg-white rounded-2xl p-5 shadow-sm">
           <h3 className="font-bold text-bt-navy mb-3">This Period</h3>
-          <div className="flex gap-4">
+          <div className="flex gap-3">
             <div className="flex-1 text-center bg-bt-pale rounded-xl py-3">
               <p className="text-2xl font-bold text-bt-navy">{profile?.adherence_percent || 0}%</p>
               <p className="text-gray-400 text-xs mt-0.5">Adherence</p>
             </div>
             <div className="flex-1 text-center bg-bt-pale rounded-xl py-3">
-              <p className="text-2xl font-bold text-bt-navy capitalize">{profile?.role || 'member'}</p>
+              <p className="text-2xl font-bold text-bt-navy">{profile?.streak || 0}🔥</p>
+              <p className="text-gray-400 text-xs mt-0.5">Streak</p>
+            </div>
+            <div className="flex-1 text-center bg-bt-pale rounded-xl py-3">
+              <p className="text-lg font-bold text-bt-navy capitalize">{profile?.role || 'member'}</p>
               <p className="text-gray-400 text-xs mt-0.5">Role</p>
             </div>
           </div>
