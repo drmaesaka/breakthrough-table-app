@@ -26,7 +26,7 @@ export default function ForgotPasswordPage() {
       <div className="bg-bt-navy pt-20 pb-14 px-6 flex flex-col items-center">
         <div className="text-center">
           <div className="text-white text-3xl">
-            <span className="font-normal">break</span><span className="font-bold">Through</span>
+            <span className="font-normal">break</span><span className="font-bold">through</span>
           </div>
           <div className="text-bt-light text-2xl font-normal text-right -mt-1">table</div>
         </div>

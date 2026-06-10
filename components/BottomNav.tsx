@@ -41,7 +41,7 @@ export default function BottomNav() {
         <Link href="/dashboard"
           className="fixed top-4 left-4 z-50 bg-bt-navy/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-lg flex flex-col active:scale-95 transition-transform">
           <div>
-            <span className="text-white text-xs font-normal">break</span><span className="text-white text-xs font-bold">Through</span>
+            <span className="text-white text-xs font-normal">break</span><span className="text-white text-xs font-bold">through</span>
           </div>
           <div className="text-bt-light text-xs font-normal text-right -mt-0.5">table</div>
         </Link>
