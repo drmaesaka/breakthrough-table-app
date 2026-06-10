@@ -60,7 +60,7 @@ function JoinForm() {
   return (
     <div className="min-h-screen bg-bt-pale flex flex-col">
       <div className="bg-bt-navy pt-16 pb-14 px-6 flex flex-col items-center">
-        <Image src="/bt-logo.png" alt="Breakthrough Table" width={220} height={80} className="object-contain" />
+        <div className="bg-white rounded-2xl px-5 py-3"><Image src="/bt-logo.png" alt="Breakthrough Table" width={200} height={70} className="object-contain" /></div>
         {groupName && (
           <div className="mt-5 bg-white/15 rounded-xl px-4 py-2 text-center">
             <p className="text-bt-light/70 text-xs">You're joining</p>

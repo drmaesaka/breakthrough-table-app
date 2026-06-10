@@ -25,7 +25,7 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen bg-bt-pale flex flex-col">
       <div className="bg-bt-navy pt-16 pb-14 px-6 flex flex-col items-center">
-        <Image src="/bt-logo.png" alt="Breakthrough Table" width={220} height={80} className="object-contain" />
+        <div className="bg-white rounded-2xl px-5 py-3"><Image src="/bt-logo.png" alt="Breakthrough Table" width={200} height={70} className="object-contain" /></div>
       </div>
 
       <div className="flex-1 px-5 -mt-6 pb-10">
