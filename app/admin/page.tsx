@@ -106,6 +106,8 @@ export default function AdminPage() {
 
   async function deleteTask(id: string) {
     const supabase = createClient()
+    // Delete completions first to avoid FK constraint
+    await supabase.from('task_completions').delete().eq('task_id', id)
     await supabase.from('tasks').delete().eq('id', id)
     setTasks(p => p.filter(t => t.id !== id))
   }
