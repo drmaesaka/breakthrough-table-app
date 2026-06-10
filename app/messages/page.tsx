@@ -1,14 +1,15 @@
 'use client'
-
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
+import BottomNav from '@/components/BottomNav'
 
 export default function MessagesPage() {
   const [messages, setMessages] = useState<any[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [user, setUser] = useState<any>(null)
   const [groupId, setGroupId] = useState<string | null>(null)
+  const [groupName, setGroupName] = useState('')
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const groupIdRef = useRef<string | null>(null)
@@ -32,12 +33,13 @@ export default function MessagesPage() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('group_id, full_name')
+        .select('group_id, groups(name)')
         .eq('id', user.id)
         .single()
 
       if (profile?.group_id) {
         setGroupId(profile.group_id)
+        setGroupName((profile.groups as any)?.name || 'Group Chat')
         groupIdRef.current = profile.group_id
         await fetchMessages(profile.group_id)
       }
@@ -49,9 +51,7 @@ export default function MessagesPage() {
   // Poll every 3 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      if (groupIdRef.current) {
-        fetchMessages(groupIdRef.current)
-      }
+      if (groupIdRef.current) fetchMessages(groupIdRef.current)
     }, 3000)
     return () => clearInterval(interval)
   }, [])
@@ -72,60 +72,92 @@ export default function MessagesPage() {
     fetchMessages(groupId)
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-700">Loading...</div>
+  function getInitials(name: string) {
+    return name?.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || '?'
+  }
+
+  if (loading) return (
+    <div className="min-h-screen bg-bt-pale flex items-center justify-center">
+      <p className="text-gray-400">Loading...</p>
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Breakthrough Table</h1>
-        <a href="/dashboard" className="text-sm text-blue-600 hover:underline">← Dashboard</a>
-      </nav>
+    <div style={{ height: '100dvh' }} className="bg-bt-pale flex flex-col">
+      {/* Header */}
+      <div className="bg-bt-navy px-5 pt-14 pb-4 flex-shrink-0">
+        <h1 className="text-white text-2xl font-bold">Group Chat</h1>
+        <p className="text-bt-light/60 text-sm mt-0.5">{groupName}</p>
+      </div>
 
-      <main className="max-w-3xl w-full mx-auto px-6 py-6 flex flex-col flex-1">
-        <h2 className="text-2xl font-semibold text-gray-900 mb-6">Group Chat</h2>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {messages.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-4xl mb-3">💬</p>
+            <p className="text-gray-500 font-medium">No messages yet</p>
+            <p className="text-gray-400 text-sm mt-1">Say hello to your table!</p>
+          </div>
+        )}
+        {messages.map((msg, i) => {
+          const isMe = msg.user_id === user?.id
+          const name = msg.profiles?.full_name || 'Member'
+          const prevMsg = messages[i - 1]
+          const showName = !isMe && (!prevMsg || prevMsg.user_id !== msg.user_id)
 
-        <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-6 flex flex-col gap-4 overflow-y-auto min-h-[400px] max-h-[500px]">
-          {messages.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center mt-auto mb-auto">No messages yet. Say hello!</p>
-          ) : (
-            messages.map(msg => (
-              <div key={msg.id} className={`flex flex-col ${msg.user_id === user?.id ? 'items-end' : 'items-start'}`}>
-                <span className="text-xs font-semibold text-gray-600 mb-1">
-                  {msg.profiles?.full_name || 'Member'}
-                </span>
-                <div className={`px-4 py-2 rounded-2xl text-sm font-medium max-w-xs ${
-                  msg.user_id === user?.id
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-900'
+          return (
+            <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+              {/* Avatar — only show for others, on last message in a run */}
+              {!isMe && (
+                <div className="w-7 h-7 rounded-full bg-bt-pale border border-gray-200 flex items-center justify-center flex-shrink-0 mb-0.5">
+                  <span className="text-bt-navy font-bold text-xs">{getInitials(name)}</span>
+                </div>
+              )}
+
+              <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
+                {showName && (
+                  <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>
+                )}
+                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                  isMe
+                    ? 'bg-bt-navy text-white rounded-br-sm'
+                    : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
                 }`}>
                   {msg.content}
                 </div>
               </div>
-            ))
-          )}
-          <div ref={bottomRef} />
-        </div>
+            </div>
+          )
+        })}
+        <div ref={bottomRef} />
+      </div>
 
-        {!groupId ? (
-          <p className="text-gray-600 text-sm text-center mt-4">You need to be assigned to a group to chat.</p>
-        ) : (
-          <form onSubmit={sendMessage} className="mt-4 flex gap-3">
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type a message..."
-              className="flex-1 border border-gray-300 rounded-xl px-4 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              type="submit"
-              className="bg-blue-600 text-white px-5 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition"
-            >
-              Send
-            </button>
-          </form>
-        )}
-      </main>
+      {/* Input */}
+      {!groupId ? (
+        <div className="px-5 py-4 text-center text-gray-400 text-sm">
+          You need to be in a group to chat.
+        </div>
+      ) : (
+        <form onSubmit={sendMessage}
+          className="flex-shrink-0 px-4 py-3 bg-white border-t border-gray-100 flex items-center gap-3"
+          style={{ paddingBottom: 'calc(0.75rem + 60px)' }}>
+          <input
+            type="text"
+            value={newMessage}
+            onChange={e => setNewMessage(e.target.value)}
+            placeholder="Message your table..."
+            className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
+          />
+          <button type="submit" disabled={!newMessage.trim()}
+            className="w-10 h-10 bg-bt-navy rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+              <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/>
+            </svg>
+          </button>
+        </form>
+      )}
+
+      <BottomNav />
     </div>
   )
 }
