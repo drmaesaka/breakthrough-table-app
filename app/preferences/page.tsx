@@ -62,13 +62,19 @@ export default function PreferencesPage() {
   function handleFrequencyChange(f: number) {
     setFrequency(f)
     const current = [...nudgeTimes]
+    const defaults = ['07:00', '09:00', '11:00', '13:00', '15:00', '17:00', '19:00', '20:00', '21:00', '22:00']
     if (f > current.length) {
-      const defaults = ['09:00', '13:00', '19:00']
-      while (current.length < f) current.push(defaults[current.length])
+      while (current.length < f) current.push(defaults[current.length] || '12:00')
     } else {
       current.splice(f)
     }
     setNudgeTimes(current)
+  }
+
+  function nudgeLabel(i: number, total: number) {
+    if (total === 1) return 'Time'
+    const labels = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th']
+    return labels[i] || `#${i + 1}`
   }
 
   function handleTimeChange(index: number, value: string) {
@@ -138,22 +144,26 @@ export default function PreferencesPage() {
         {enabled && (
           <>
             {/* Frequency */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
-              <div>
-                <h3 className="font-bold text-bt-navy">How often?</h3>
-                <p className="text-gray-400 text-xs mt-0.5">Number of nudges per day</p>
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-bt-navy">How often?</h3>
+                  <p className="text-gray-400 text-xs mt-0.5">Number of nudges per day</p>
+                </div>
+                <span className="text-2xl font-bold text-bt-navy">{frequency}x</span>
               </div>
-              <div className="flex gap-2">
-                {[1, 2, 3].map(n => (
-                  <button key={n} onClick={() => handleFrequencyChange(n)}
-                    className={`flex-1 py-3 rounded-xl font-semibold text-sm transition-colors ${
-                      frequency === n
-                        ? 'bg-bt-navy text-white'
-                        : 'bg-bt-pale text-gray-500'
-                    }`}>
-                    {n}x
-                  </button>
-                ))}
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={frequency}
+                onChange={e => handleFrequencyChange(Number(e.target.value))}
+                className="w-full accent-bt-navy h-2 rounded-full cursor-pointer"
+              />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>1</span>
+                <span>5</span>
+                <span>10</span>
               </div>
             </div>
 
@@ -165,8 +175,8 @@ export default function PreferencesPage() {
               </div>
               {nudgeTimes.map((t, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-gray-400 text-sm w-16">
-                    {i === 0 ? 'Morning' : i === 1 ? 'Midday' : 'Evening'}
+                  <span className="text-gray-400 text-sm w-8">
+                    {nudgeLabel(i, nudgeTimes.length)}
                   </span>
                   <select
                     value={t}
