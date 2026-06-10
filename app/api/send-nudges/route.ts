@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-// This endpoint is called by n8n on a schedule
-// It finds participants with incomplete tasks and sends them a push nudge
-
 export async function POST(req: NextRequest) {
-  // Verify secret so only n8n can call this
   const authHeader = req.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.NUDGE_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -16,10 +12,12 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SECRET_KEY!
   )
 
-  // Get all participants who are in a group, joined with their nudge preferences
+  const today = new Date().toISOString().split('T')[0]
+
+  // Get participants with their preferences and habit info
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, onesignal_id, group_id, adherence_percent, nudge_preferences(enabled, tone)')
+    .select('id, full_name, onesignal_id, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone)')
     .eq('role', 'participant')
     .not('group_id', 'is', null)
     .not('onesignal_id', 'is', null)
@@ -28,66 +26,116 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No participants to nudge' })
   }
 
-  // Only nudge people who: aren't at 100%, and haven't disabled nudges
-  const toNudge = participants.filter(p => {
-    const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
-    if (prefs && prefs.enabled === false) return false
-    return (p.adherence_percent || 0) < 100
-  })
+  // Get today's habit completions
+  const { data: habitDoneToday } = await supabase
+    .from('habit_completions')
+    .select('user_id')
+    .eq('completed_date', today)
+
+  const habitDoneSet = new Set((habitDoneToday || []).map((h: any) => h.user_id))
+
+  // Get reading completions for current period (tasks not archived)
+  // We check if user has completed ALL current tasks for their group
+  const { data: allTasks } = await supabase
+    .from('tasks')
+    .select('id, group_id')
+    .eq('archived', false)
+
+  const { data: allCompletions } = await supabase
+    .from('task_completions')
+    .select('user_id, task_id')
+
+  // Build: which users have finished all reading for their group
+  const readingDoneSet = new Set<string>()
+  for (const p of participants) {
+    const groupTasks = (allTasks || []).filter((t: any) => t.group_id === p.group_id)
+    if (groupTasks.length === 0) {
+      readingDoneSet.add(p.id) // no reading assigned = reading done
+      continue
+    }
+    const userCompletedIds = new Set(
+      (allCompletions || []).filter((c: any) => c.user_id === p.id).map((c: any) => c.task_id)
+    )
+    const allRead = groupTasks.every((t: any) => userCompletedIds.has(t.id))
+    if (allRead) readingDoneSet.add(p.id)
+  }
 
   const results = await Promise.all(
-    toNudge.map(async (participant) => {
-      const firstName = participant.full_name?.split(' ')[0] || 'there'
-      const adherence = participant.adherence_percent || 0
-      const prefs = Array.isArray(participant.nudge_preferences) ? participant.nudge_preferences[0] : participant.nudge_preferences
-      const tone = prefs?.tone || 'encouraging'
-
-      let message: string
-      if (tone === 'direct') {
-        message = adherence === 0
-          ? `${firstName}: tasks not started. Get on it.`
-          : adherence >= 75
-          ? `${firstName}: ${adherence}% done. Close it out.`
-          : `${firstName}: ${adherence}% this period. Keep moving.`
-      } else if (tone === 'gentle') {
-        message = adherence === 0
-          ? `Hey ${firstName}, just a soft reminder — your tasks are ready when you are 🌱`
-          : adherence >= 75
-          ? `You're so close ${firstName}! ${adherence}% done — no rush, you've got this 😊`
-          : `Just checking in ${firstName} — you're at ${adherence}%. Every little bit counts 💙`
-      } else if (tone === 'competitive') {
-        message = adherence === 0
-          ? `${firstName} — your table is moving and you're at 0%. Time to compete. 🏆`
-          : adherence >= 75
-          ? `${firstName} at ${adherence}%! Don't let anyone catch you — FINISH IT. 🔥`
-          : `${firstName}: ${adherence}% is not your ceiling. Push harder. 💪`
-      } else {
-        // encouraging (default)
-        message = adherence === 0
-          ? `Hey ${firstName} — your tasks are waiting! Start strong this period. 💪`
-          : adherence >= 75
-          ? `Almost there ${firstName}! You're at ${adherence}% — finish strong! 🔥`
-          : `Hey ${firstName} — don't forget to check off your tasks! You're at ${adherence}% this period.`
-      }
-
-      const response = await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
-        },
-        body: JSON.stringify({
-          app_id: process.env.ONESIGNAL_APP_ID,
-          include_aliases: { external_id: [participant.id] },
-          target_channel: 'push',
-          headings: { en: 'Breakthrough Table' },
-          contents: { en: message },
-          url: `${process.env.NEXT_PUBLIC_APP_URL}/tasks`,
-        }),
+    participants
+      .filter(p => {
+        const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
+        if (prefs && prefs.enabled === false) return false
+        // Only nudge if habit not done OR reading not done
+        return !habitDoneSet.has(p.id) || !readingDoneSet.has(p.id)
       })
+      .map(async (participant) => {
+        const firstName = participant.full_name?.split(' ')[0] || 'there'
+        const habit = participant.current_habit || 'your habit'
+        const prefs = Array.isArray(participant.nudge_preferences) ? participant.nudge_preferences[0] : participant.nudge_preferences
+        const tone = prefs?.tone || 'encouraging'
 
-      return { id: participant.id, name: participant.full_name, status: response.status }
-    })
+        const habitDone = habitDoneSet.has(participant.id)
+        const readingDone = readingDoneSet.has(participant.id)
+
+        // Pick what to nudge about
+        const needsHabit = !habitDone
+        const needsReading = !readingDone
+
+        let message: string
+
+        if (needsHabit && needsReading) {
+          // Both outstanding
+          if (tone === 'direct') {
+            message = `${firstName}: reading and "${habit}" still pending. Get both done.`
+          } else if (tone === 'gentle') {
+            message = `Hey ${firstName} — when you get a moment, your reading and "${habit}" are both still waiting 🌱`
+          } else if (tone === 'competitive') {
+            message = `${firstName} — your table is checking things off. Reading + "${habit}" still open. Don't fall behind. 🏆`
+          } else {
+            message = `Hey ${firstName}! Two things still open: your reading and "${habit}". You've got this 💪`
+          }
+        } else if (needsHabit) {
+          // Only habit outstanding
+          if (tone === 'direct') {
+            message = `${firstName}: "${habit}" not checked in today. Do it.`
+          } else if (tone === 'gentle') {
+            message = `Just a soft reminder ${firstName} — did you get to "${habit}" today? 🌱`
+          } else if (tone === 'competitive') {
+            message = `${firstName} — streak on the line. "${habit}" isn't checked yet. 🔥`
+          } else {
+            message = `Hey ${firstName} — don't forget to check in "${habit}" today! Keep that streak alive 🔥`
+          }
+        } else {
+          // Only reading outstanding
+          if (tone === 'direct') {
+            message = `${firstName}: reading not done this period. Finish it.`
+          } else if (tone === 'gentle') {
+            message = `Hey ${firstName}, just a reminder — your reading material is still waiting when you're ready 📚`
+          } else if (tone === 'competitive') {
+            message = `${firstName} — habit is done but reading isn't. Finish strong. 📚`
+          } else {
+            message = `Nice work on your habit ${firstName}! Reading material still needs a check — almost at 100% 📚`
+          }
+        }
+
+        const response = await fetch('https://api.onesignal.com/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
+          },
+          body: JSON.stringify({
+            app_id: process.env.ONESIGNAL_APP_ID,
+            include_aliases: { external_id: [participant.id] },
+            target_channel: 'push',
+            headings: { en: 'Breakthrough Table' },
+            contents: { en: message },
+            url: `${process.env.NEXT_PUBLIC_APP_URL}/tasks`,
+          }),
+        })
+
+        return { id: participant.id, name: participant.full_name, message, status: response.status }
+      })
   )
 
   return NextResponse.json({ sent: results.length, results })

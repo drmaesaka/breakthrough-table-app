@@ -11,6 +11,17 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  // Habit state
+  const [currentHabit, setCurrentHabit] = useState('')
+  const [habitInput, setHabitInput] = useState('')
+  const [habitSaving, setHabitSaving] = useState(false)
+  const [habitSaved, setHabitSaved] = useState(false)
+  const [graduatedHabits, setGraduatedHabits] = useState<any[]>([])
+  const [graduating, setGraduating] = useState(false)
+  const [showGradHistory, setShowGradHistory] = useState(false)
+  const [userId, setUserId] = useState('')
+
   const router = useRouter()
 
   useEffect(() => {
@@ -19,17 +30,20 @@ export default function ProfilePage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
       setEmail(user.email || '')
+      setUserId(user.id)
 
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('*, groups(name)')
-        .eq('id', user.id)
-        .single()
+      const [{ data: prof }, { data: history }] = await Promise.all([
+        supabase.from('profiles').select('*, groups(name)').eq('id', user.id).single(),
+        supabase.from('habit_history').select('*').eq('user_id', user.id).order('graduated_at', { ascending: false }),
+      ])
 
       if (prof) {
         setProfile(prof)
         setName(prof.full_name || '')
+        setCurrentHabit(prof.current_habit || '')
+        setHabitInput(prof.current_habit || '')
       }
+      setGraduatedHabits(history || [])
       setLoading(false)
     }
     load()
@@ -47,6 +61,42 @@ export default function ProfilePage() {
     setTimeout(() => setSaved(false), 2500)
   }
 
+  async function saveHabit() {
+    if (!habitInput.trim()) return
+    setHabitSaving(true)
+    const supabase = createClient()
+    await supabase.from('profiles').update({ current_habit: habitInput.trim() }).eq('id', userId)
+    setCurrentHabit(habitInput.trim())
+    setHabitSaving(false)
+    setHabitSaved(true)
+    setTimeout(() => setHabitSaved(false), 2500)
+  }
+
+  async function graduateHabit() {
+    if (!currentHabit) return
+    setGraduating(true)
+    const supabase = createClient()
+
+    // Archive to history
+    await supabase.from('habit_history').insert({
+      user_id: userId,
+      habit_name: currentHabit,
+      graduated_at: new Date().toISOString(),
+    })
+
+    // Clear current habit
+    await supabase.from('profiles').update({ current_habit: null }).eq('id', userId)
+
+    // Refresh history
+    const { data: history } = await supabase
+      .from('habit_history').select('*').eq('user_id', userId).order('graduated_at', { ascending: false })
+
+    setGraduatedHabits(history || [])
+    setCurrentHabit('')
+    setHabitInput('')
+    setGraduating(false)
+  }
+
   async function handleLogout() {
     const supabase = createClient()
     await supabase.auth.signOut()
@@ -54,7 +104,12 @@ export default function ProfilePage() {
   }
 
   function getInitials(n: string) {
-    return n?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
+    const parts = (n || '').trim().split(' ')
+    return parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : n.slice(0, 2).toUpperCase() || '?'
+  }
+
+  function formatDate(d: string) {
+    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
   if (loading) return (
@@ -72,35 +127,78 @@ export default function ProfilePage() {
           </div>
           <h1 className="text-white text-2xl font-bold">{name || 'Your Name'}</h1>
           <p className="text-bt-light/60 text-sm mt-0.5">{email}</p>
-          {profile?.groups?.name && (
-            <span className="mt-2 text-xs bg-white/15 text-bt-light px-3 py-1 rounded-full">
-              {profile.groups.name}
-            </span>
-          )}
-          {profile?.role === 'leader' && (
-            <span className="mt-2 text-xs bg-white/15 text-bt-light px-3 py-1 rounded-full">
-              Leader
-            </span>
-          )}
+          <div className="flex gap-2 mt-2 flex-wrap justify-center">
+            {profile?.groups?.name && (
+              <span className="text-xs bg-white/15 text-bt-light px-3 py-1 rounded-full">{profile.groups.name}</span>
+            )}
+            {profile?.role === 'leader' && (
+              <span className="text-xs bg-white/15 text-bt-light px-3 py-1 rounded-full">Leader</span>
+            )}
+            {graduatedHabits.length > 0 && (
+              <span className="text-xs bg-white/15 text-bt-light px-3 py-1 rounded-full">
+                🏅 {graduatedHabits.length} habit{graduatedHabits.length !== 1 ? 's' : ''} installed
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
 
-        {/* Edit name */}
+        {/* Current Habit */}
         <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
-          <h3 className="font-bold text-bt-navy">Edit Name</h3>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-bt-navy">Current Habit</h3>
+              <p className="text-gray-400 text-xs mt-0.5">What you're actively building</p>
+            </div>
+            <span className="text-2xl">🎯</span>
+          </div>
           <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Your full name"
+            value={habitInput}
+            onChange={e => setHabitInput(e.target.value)}
+            placeholder="e.g. Morning cold plunge, Daily journaling..."
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />
-          <button onClick={saveName} disabled={saving || !name.trim()}
-            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
-            {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save Name'}
+          <button onClick={saveHabit} disabled={habitSaving || !habitInput.trim() || habitInput.trim() === currentHabit}
+            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+            {habitSaving ? 'Saving...' : habitSaved ? '✓ Saved!' : currentHabit ? 'Update Habit' : 'Set Habit'}
           </button>
+          {currentHabit && (
+            <button onClick={graduateHabit} disabled={graduating}
+              className="w-full bg-green-50 text-green-700 border-2 border-green-200 py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
+              {graduating ? 'Graduating...' : '🏅 I\'ve fully installed this habit'}
+            </button>
+          )}
         </div>
+
+        {/* Graduated Habits */}
+        {graduatedHabits.length > 0 && (
+          <div className="bg-white rounded-2xl p-5 shadow-sm">
+            <button
+              onClick={() => setShowGradHistory(!showGradHistory)}
+              className="w-full flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-bt-navy">Installed Habits</h3>
+                <p className="text-gray-400 text-xs mt-0.5">{graduatedHabits.length} habit{graduatedHabits.length !== 1 ? 's' : ''} fully built</p>
+              </div>
+              <span className="text-gray-400 text-lg">{showGradHistory ? '▲' : '▼'}</span>
+            </button>
+            {showGradHistory && (
+              <div className="mt-3 space-y-2">
+                {graduatedHabits.map((h: any) => (
+                  <div key={h.id} className="flex items-center gap-3 px-3 py-2.5 bg-bt-pale rounded-xl">
+                    <span className="text-lg">🏅</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-gray-800">{h.habit_name}</p>
+                      <p className="text-xs text-gray-400">Installed {formatDate(h.graduated_at)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Stats */}
         <div className="bg-white rounded-2xl p-5 shadow-sm">
@@ -119,6 +217,21 @@ export default function ProfilePage() {
               <p className="text-gray-400 text-xs mt-0.5">Role</p>
             </div>
           </div>
+        </div>
+
+        {/* Edit name */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+          <h3 className="font-bold text-bt-navy">Edit Name</h3>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Your full name"
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
+          />
+          <button onClick={saveName} disabled={saving || !name.trim()}
+            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
+            {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save Name'}
+          </button>
         </div>
 
         {/* Sign out */}
