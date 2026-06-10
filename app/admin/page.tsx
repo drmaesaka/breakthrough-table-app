@@ -274,9 +274,17 @@ export default function AdminPage() {
             </div>
             <div className="space-y-2">
               {content.map(item => (
-                <div key={item.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm">
-                  <p className="font-medium text-gray-900 text-sm">{item.title}</p>
-                  <p className="text-gray-400 text-xs mt-0.5 capitalize">{item.type}</p>
+                <div key={item.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900 text-sm">{item.title}</p>
+                    <p className="text-gray-400 text-xs mt-0.5 capitalize">{item.type}</p>
+                  </div>
+                  <button onClick={async () => {
+                    if (!confirm(`Remove "${item.title}"?`)) return
+                    const supabase = createClient()
+                    await supabase.from('content').delete().eq('id', item.id)
+                    setContent(p => p.filter(c => c.id !== item.id))
+                  }} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
                 </div>
               ))}
             </div>
