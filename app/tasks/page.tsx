@@ -53,6 +53,7 @@ export default function TasksPage() {
   }
 
   const adherence = tasks.length > 0 ? Math.round((completedIds.size / tasks.length) * 100) : 0
+  const allDone = tasks.length > 0 && completedIds.size === tasks.length
 
   return (
     <div className="min-h-screen bg-bt-pale">
@@ -68,6 +69,13 @@ export default function TasksPage() {
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-3">
+        {allDone && (
+          <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-5 text-center">
+            <p className="text-4xl mb-2">🎉</p>
+            <p className="font-bold text-green-700 text-lg">You crushed it!</p>
+            <p className="text-green-600 text-sm mt-1">100% this period. Your table sees it. Keep it up.</p>
+          </div>
+        )}
         {loading && <p className="text-center text-gray-400 py-10">Loading...</p>}
         {!loading && tasks.length === 0 && (
           <div className="text-center py-16">

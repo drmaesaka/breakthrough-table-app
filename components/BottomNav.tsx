@@ -22,8 +22,8 @@ export default function BottomNav() {
   const tabs = [
     { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
     { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
-    { href: '/content', label: 'Library', icon: <LibraryIcon /> },
     { href: '/group', label: 'Group', icon: <GroupIcon /> },
+    { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
     ...(isLeader ? [{ href: '/admin', label: 'Admin', icon: <AdminIcon /> }] : []),
   ]
 
@@ -73,6 +73,13 @@ function GroupIcon() {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
       <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+    </svg>
+  )
+}
+function ProfileIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
     </svg>
   )
 }
