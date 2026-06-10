@@ -37,13 +37,13 @@ export default function AdminPage() {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
-      const [groupsRes, usersRes] = await Promise.all([
+      const [groupsRes, membersRes] = await Promise.all([
         supabase.from('groups').select('*, last_period_start'),
-        supabase.from('profiles').select('id, full_name, group_id, role, adherence_percent, streak')
+        fetch('/api/admin/members').then(r => r.json())
       ])
       const grps = groupsRes.data || []
       setGroups(grps)
-      setUsers(usersRes.data || [])
+      setUsers(membersRes.members || [])
       if (grps[0]) { setSelectedGroup(grps[0].id); loadGroupData(grps[0].id) }
       setLoading(false)
     }
@@ -140,24 +140,33 @@ export default function AdminPage() {
   }
 
   async function assignUserToGroup(userId: string, groupId: string) {
-    const supabase = createClient()
     const val = groupId === '' ? null : groupId
-    await supabase.from('profiles').update({ group_id: val }).eq('id', userId)
+    await fetch('/api/admin/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, groupId: val })
+    })
     setUsers(p => p.map(u => u.id === userId ? { ...u, group_id: val } : u))
   }
 
   async function deleteMember(userId: string, name: string) {
     if (!confirm(`Remove ${name} from the app? This cannot be undone.`)) return
-    const supabase = createClient()
-    await supabase.from('profiles').delete().eq('id', userId)
+    await fetch('/api/admin/members', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    })
     setUsers(p => p.filter(u => u.id !== userId))
   }
 
   async function toggleLeader(userId: string, currentRole: string) {
     const newRole = currentRole === 'leader' ? 'participant' : 'leader'
     if (!confirm(`${newRole === 'leader' ? 'Promote to leader' : 'Demote to participant'}?`)) return
-    const supabase = createClient()
-    await supabase.from('profiles').update({ role: newRole }).eq('id', userId)
+    await fetch('/api/admin/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, role: newRole })
+    })
     setUsers(p => p.map(u => u.id === userId ? { ...u, role: newRole } : u))
   }
 
