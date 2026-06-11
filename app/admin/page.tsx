@@ -62,6 +62,11 @@ export default function AdminPage() {
   const [roomDesc, setRoomDesc] = useState('')
   const [roomCapacity, setRoomCapacity] = useState('')
   const [roomSaving, setRoomSaving] = useState(false)
+  const [adminBookDate, setAdminBookDate] = useState(new Date().toISOString().split('T')[0])
+  const [adminBookUserId, setAdminBookUserId] = useState('')
+  const [adminBookRoomId, setAdminBookRoomId] = useState('')
+  const [adminBookTime, setAdminBookTime] = useState('')
+  const [adminBooking, setAdminBooking] = useState(false)
 
   const router = useRouter()
 
@@ -833,54 +838,130 @@ export default function AdminPage() {
           </div>
         )}
 
-        {tab === 'rooms' && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
-              <h3 className="font-bold text-bt-navy">Add Room</h3>
-              <input value={roomName} onChange={e => setRoomName(e.target.value)}
-                placeholder="Room name (e.g. Conference Room A)" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
-              <input value={roomDesc} onChange={e => setRoomDesc(e.target.value)}
-                placeholder="Description (optional)" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
-              <input type="number" value={roomCapacity} onChange={e => setRoomCapacity(e.target.value)}
-                placeholder="Capacity (optional)" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
-              <button onClick={addRoom} disabled={roomSaving || !roomName.trim()}
-                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                {roomSaving ? 'Saving...' : 'Add Room'}
-              </button>
-            </div>
+        {tab === 'rooms' && (() => {
+          const TIME_SLOTS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00']
+          function fmtSlot(t: string) { const [h,m] = t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` }
+          function fmtDate(d: string) { return new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) }
+          const [adminDate, setAdminDate] = [adminBookDate, setAdminBookDate] as any
+          const todayStr = new Date().toISOString().split('T')[0]
+          const dayBookings = allBookings.filter((b:any) => b.booking_date === adminBookDate)
+          const suites = ['Suite 1','Suite 2']
 
-            {rooms.length > 0 && (
-              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-2">
-                <h3 className="font-bold text-bt-navy mb-1">Rooms</h3>
-                {rooms.map(room => (
-                  <div key={room.id} className="flex items-center justify-between bg-bt-pale rounded-xl px-4 py-3">
-                    <div>
-                      <p className="font-semibold text-sm text-gray-900">{room.name}</p>
-                      {room.capacity && <p className="text-xs text-gray-400">Up to {room.capacity} people</p>}
-                    </div>
-                    <button onClick={() => deleteRoom(room.id)} className="text-red-400 text-xs font-medium">Remove</button>
-                  </div>
-                ))}
-              </div>
-            )}
+          return (
+            <div className="space-y-5">
 
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <h3 className="font-bold text-bt-navy mb-3">Upcoming Bookings</h3>
-              {allBookings.length === 0 && <p className="text-gray-400 text-sm text-center py-4">No bookings yet</p>}
-              <div className="space-y-2">
-                {allBookings.map((b: any) => (
-                  <div key={b.id} className="flex items-center justify-between bg-bt-pale rounded-xl px-4 py-3">
-                    <div>
-                      <p className="font-semibold text-sm text-gray-900">{b.rooms?.name}</p>
-                      <p className="text-xs text-gray-400">{b.profiles?.full_name} · {new Date(b.booking_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {(() => { const [h,m] = b.start_time.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` })()}</p>
-                      {b.notes && <p className="text-xs text-gray-400 mt-0.5">{b.notes}</p>}
+              {/* Dashboard — pick a date, see all rooms */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-bt-navy">Room Dashboard</h3>
+                </div>
+                <input type="date" value={adminBookDate} min={todayStr}
+                  onChange={async e => {
+                    setAdminBookDate(e.target.value)
+                    const supabase = createClient()
+                    const { data } = await supabase.from('room_bookings')
+                      .select('*, rooms(name,suite), profiles(full_name)')
+                      .eq('booking_date', e.target.value)
+                      .order('start_time')
+                    setAllBookings(data || [])
+                  }}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+
+                {suites.map(suite => {
+                  const suiteRooms = rooms.filter(r => r.suite === suite)
+                  if (!suiteRooms.length) return null
+                  return (
+                    <div key={suite}>
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">{suite}</p>
+                      <div className="space-y-2">
+                        {suiteRooms.map(room => {
+                          const roomBookings = dayBookings.filter((b:any) => b.room_id === room.id)
+                          const bookedSlots = new Set(roomBookings.map((b:any) => b.start_time))
+                          const available = TIME_SLOTS.some(s => !bookedSlots.has(s))
+                          return (
+                            <div key={room.id} className="rounded-xl border border-gray-100 overflow-hidden">
+                              <div className="flex items-center gap-3 px-4 py-3 bg-bt-pale">
+                                <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${available ? 'bg-green-400' : 'bg-red-400'}`} />
+                                <div className="flex-1">
+                                  <p className="font-semibold text-sm text-gray-900">{room.name}</p>
+                                  <p className="text-xs text-gray-400">{room.room_type === 'private_office' ? 'Private Office' : 'Conference Room'}</p>
+                                </div>
+                                <span className={`text-xs font-semibold ${available ? 'text-green-600' : 'text-red-500'}`}>
+                                  {available ? 'Available' : 'Full'}
+                                </span>
+                              </div>
+                              {roomBookings.length > 0 && (
+                                <div className="px-4 py-2 space-y-1">
+                                  {roomBookings.map((b:any) => (
+                                    <div key={b.id} className="flex items-center justify-between text-xs py-1">
+                                      <span className="text-gray-600 font-medium">{fmtSlot(b.start_time)}</span>
+                                      <span className="text-gray-400">{b.profiles?.full_name}</span>
+                                      <button onClick={async () => {
+                                        if (!confirm('Cancel this booking?')) return
+                                        const supabase = createClient()
+                                        await supabase.from('room_bookings').delete().eq('id', b.id)
+                                        setAllBookings((prev:any) => prev.filter((x:any) => x.id !== b.id))
+                                      }} className="text-red-400 font-medium">Cancel</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
+
+              {/* Book on behalf of member */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+                <h3 className="font-bold text-bt-navy">Book on Behalf of Member</h3>
+                <select value={adminBookUserId} onChange={e => setAdminBookUserId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue">
+                  <option value="">Select member...</option>
+                  {users.map((u:any) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                </select>
+                <select value={adminBookRoomId} onChange={e => setAdminBookRoomId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue">
+                  <option value="">Select room...</option>
+                  {rooms.map((r:any) => <option key={r.id} value={r.id}>{r.name} · {r.suite}</option>)}
+                </select>
+                <input type="date" value={adminBookDate} min={todayStr}
+                  onChange={e => setAdminBookDate(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                <select value={adminBookTime} onChange={e => setAdminBookTime(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue">
+                  <option value="">Select time...</option>
+                  {TIME_SLOTS.map(t => <option key={t} value={t}>{fmtSlot(t)}</option>)}
+                </select>
+                <button
+                  disabled={!adminBookUserId || !adminBookRoomId || !adminBookDate || !adminBookTime || adminBooking}
+                  onClick={async () => {
+                    setAdminBooking(true)
+                    const supabase = createClient()
+                    const [h] = adminBookTime.split(':').map(Number)
+                    await supabase.from('room_bookings').insert({
+                      room_id: adminBookRoomId,
+                      user_id: adminBookUserId,
+                      booking_date: adminBookDate,
+                      start_time: adminBookTime,
+                      end_time: `${String(h+1).padStart(2,'0')}:00`,
+                    })
+                    setAdminBookUserId(''); setAdminBookRoomId(''); setAdminBookTime('')
+                    setAdminBooking(false)
+                    loadRooms()
+                    alert('Booking added!')
+                  }}
+                  className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                  {adminBooking ? 'Booking...' : 'Add Booking'}
+                </button>
+              </div>
+
             </div>
-          </div>
-        )}
+          )
+        })()}
 
       </div>
       <BottomNav />
