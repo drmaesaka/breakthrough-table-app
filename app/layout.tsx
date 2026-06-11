@@ -5,6 +5,12 @@ import OneSignalInit from "@/components/OneSignalInit";
 export const metadata: Metadata = {
   title: "Breakthrough Table",
   description: "Your habit accountability platform",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Breakthrough Table",
+  },
 };
 
 export default function RootLayout({
