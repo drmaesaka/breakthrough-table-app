@@ -72,9 +72,20 @@ export default function PreferencesPage() {
   async function enableNotifications() {
     setRequestingPermission(true)
     try {
-      const OneSignal = (await import('react-onesignal')).default
-      await OneSignal.Notifications.requestPermission()
-      setNotifPermission(Notification.permission)
+      // Use native API directly — iOS requires this to be called synchronously
+      // from a user gesture, not buried inside an async SDK call
+      const permission = await Notification.requestPermission()
+      setNotifPermission(permission)
+
+      // Once granted, register with OneSignal
+      if (permission === 'granted') {
+        const supabase = createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const OneSignal = (await import('react-onesignal')).default
+          await OneSignal.login(user.id)
+        }
+      }
     } catch (e) {
       console.error(e)
     }
