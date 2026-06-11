@@ -158,6 +158,10 @@ export default function AdminPage() {
     })
     const result = await res.json()
     setBroadcasting(false)
+    if (!res.ok) {
+      alert(`Broadcast failed (${res.status}): ${result.error || JSON.stringify(result)}`)
+      return
+    }
     setBroadcastSent(true)
     setBroadcastMessage('')
     setTimeout(() => setBroadcastSent(false), 3000)
