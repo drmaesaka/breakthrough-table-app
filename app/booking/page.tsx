@@ -126,7 +126,7 @@ export default function BookingPage() {
     return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
   }
 
-  const suites = ['Suite 1', 'Suite 2']
+  const suites = ['Suite 145', 'Suite 120']
 
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
