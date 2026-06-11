@@ -36,6 +36,8 @@ export default function PreferencesPage() {
   const [frequency, setFrequency] = useState(1)
   const [nudgeTimes, setNudgeTimes] = useState(['09:00'])
   const [tone, setTone] = useState('encouraging')
+  const [notifPermission, setNotifPermission] = useState<string>('default')
+  const [requestingPermission, setRequestingPermission] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -56,10 +58,28 @@ export default function PreferencesPage() {
         setNudgeTimes(prefs.nudge_times || ['09:00'])
         setTone(prefs.tone)
       }
+
+      // Check current notification permission status
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        setNotifPermission(Notification.permission)
+      }
+
       setLoading(false)
     }
     load()
   }, [router])
+
+  async function enableNotifications() {
+    setRequestingPermission(true)
+    try {
+      const OneSignal = (await import('react-onesignal')).default
+      await OneSignal.Notifications.requestPermission()
+      setNotifPermission(Notification.permission)
+    } catch (e) {
+      console.error(e)
+    }
+    setRequestingPermission(false)
+  }
 
   // Keep nudgeTimes array in sync with frequency
   function handleFrequencyChange(f: number) {
@@ -133,6 +153,32 @@ export default function PreferencesPage() {
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
+
+        {/* Permission prompt — only shows if not yet granted */}
+        {notifPermission !== 'granted' && (
+          <div className={`rounded-2xl p-5 shadow-sm ${notifPermission === 'denied' ? 'bg-red-50 border-2 border-red-100' : 'bg-bt-blue/10 border-2 border-bt-blue/20'}`}>
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">🔔</span>
+              <div className="flex-1">
+                {notifPermission === 'denied' ? (
+                  <>
+                    <p className="font-semibold text-red-700 text-sm">Notifications blocked</p>
+                    <p className="text-red-500 text-xs mt-1 leading-relaxed">You've blocked notifications for this app. To fix it: go to your phone's Settings → Safari → your phone's notification settings, and allow notifications for this site.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold text-bt-navy text-sm">Enable push notifications</p>
+                    <p className="text-gray-500 text-xs mt-1 leading-relaxed">Tap below to allow notifications so your nudges can reach you.</p>
+                    <button onClick={enableNotifications} disabled={requestingPermission}
+                      className="mt-3 bg-bt-navy text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50">
+                      {requestingPermission ? 'Requesting...' : 'Allow Notifications'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Master toggle */}
         <div className="bg-white rounded-2xl px-5 py-4 shadow-sm flex items-center justify-between">
