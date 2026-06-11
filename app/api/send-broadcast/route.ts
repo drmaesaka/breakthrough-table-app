@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { sendPush } from '@/lib/send-push'
 
 export async function POST(req: NextRequest) {
   const supabase = createClient(
@@ -7,7 +8,6 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SECRET_KEY!
   )
 
-  // Verify the caller is a logged-in leader
   const authHeader = req.headers.get('authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -25,36 +25,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'group_id and message are required' }, { status: 400 })
   }
 
-  // Get all participants in the group
-  const { data: participants } = await supabase
+  // Get all members in the group
+  const { data: members } = await supabase
     .from('profiles')
-    .select('id, full_name')
+    .select('id')
     .eq('group_id', group_id)
 
-  if (!participants || participants.length === 0) {
-    return NextResponse.json({ message: 'No participants to notify', sent: 0 })
+  if (!members || members.length === 0) {
+    return NextResponse.json({ message: 'No members in group', sent: 0 })
+  }
+
+  const memberIds = members.map((m: any) => m.id)
+
+  // Get their push subscriptions
+  const { data: subs } = await supabase
+    .from('push_subscriptions')
+    .select('*')
+    .in('user_id', memberIds)
+
+  if (!subs || subs.length === 0) {
+    return NextResponse.json({ message: 'No push subscriptions found', sent: 0 })
   }
 
   const results = await Promise.all(
-    participants.map(async (p: any) => {
-      const response = await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
-        },
-        body: JSON.stringify({
-          app_id: process.env.ONESIGNAL_APP_ID,
-          include_aliases: { external_id: [p.id] },
-          target_channel: 'push',
-          headings: { en: 'Breakthrough Table' },
-          contents: { en: message.trim() },
-          // No url — pure notification, no CTA
-        }),
+    subs.map(async (sub: any) => {
+      const result = await sendPush(sub, {
+        title: 'Breakthrough Table',
+        body: message.trim(),
       })
-      return { id: p.id, name: p.full_name, status: response.status }
+      if (result === 'expired') {
+        await supabase.from('push_subscriptions').delete().eq('user_id', sub.user_id)
+      }
+      return result
     })
   )
 
-  return NextResponse.json({ sent: results.length, results })
+  const sent = results.filter(r => r === true).length
+  return NextResponse.json({ sent, total: subs.length })
 }

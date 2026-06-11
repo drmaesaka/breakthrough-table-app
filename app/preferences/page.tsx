@@ -69,24 +69,18 @@ export default function PreferencesPage() {
     load()
   }, [router])
 
-  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent)
-
   async function enableNotifications() {
-    if (isIOS) return // iOS must use Settings — handled in UI
     setRequestingPermission(true)
     try {
-      const permission = await Notification.requestPermission()
-      setNotifPermission(permission)
-      if (permission === 'granted') {
-        const supabase = createClient()
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-          const OneSignal = (await import('react-onesignal')).default
-          await OneSignal.login(user.id)
-        }
-      }
-    } catch (e) {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { subscribePush } = await import('@/components/PushInit')
+      await subscribePush(user.id)
+      setNotifPermission('granted')
+    } catch (e: any) {
       console.error(e)
+      if (e?.message === 'Permission denied') setNotifPermission('denied')
     }
     setRequestingPermission(false)
   }
@@ -166,20 +160,14 @@ export default function PreferencesPage() {
 
         {/* Permission prompt — only shows if not yet granted */}
         {notifPermission !== 'granted' && (
-          <div className={`rounded-2xl p-5 shadow-sm ${isIOS || notifPermission === 'denied' ? 'bg-amber-50 border-2 border-amber-100' : 'bg-bt-blue/10 border-2 border-bt-blue/20'}`}>
+          <div className={`rounded-2xl p-5 shadow-sm ${notifPermission === 'denied' ? 'bg-amber-50 border-2 border-amber-100' : 'bg-bt-blue/10 border-2 border-bt-blue/20'}`}>
             <div className="flex items-start gap-3">
               <span className="text-2xl">🔔</span>
               <div className="flex-1">
-                {isIOS || notifPermission === 'denied' ? (
+                {notifPermission === 'denied' ? (
                   <>
-                    <p className="font-semibold text-amber-800 text-sm">Enable notifications in iPhone Settings</p>
-                    <p className="text-amber-700 text-xs mt-1 leading-relaxed">iOS requires you to enable this manually:</p>
-                    <ol className="text-amber-700 text-xs mt-2 space-y-1.5 list-decimal list-inside leading-relaxed">
-                      <li>Open <strong>Settings</strong> on your iPhone</li>
-                      <li>Scroll down and tap <strong>breakthrough-table-app</strong></li>
-                      <li>Tap <strong>Notifications</strong> → turn on <strong>Allow Notifications</strong></li>
-                      <li>Return here and pull down to refresh</li>
-                    </ol>
+                    <p className="font-semibold text-amber-800 text-sm">Notifications blocked</p>
+                    <p className="text-amber-700 text-xs mt-1 leading-relaxed">You've blocked notifications. To fix it, go to your browser or phone settings, find this site, and allow notifications. Then refresh.</p>
                   </>
                 ) : (
                   <>
@@ -187,7 +175,7 @@ export default function PreferencesPage() {
                     <p className="text-gray-500 text-xs mt-1 leading-relaxed">Tap below to allow notifications so your nudges can reach you.</p>
                     <button onClick={enableNotifications} disabled={requestingPermission}
                       className="mt-3 bg-bt-navy text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50">
-                      {requestingPermission ? 'Requesting...' : 'Allow Notifications'}
+                      {requestingPermission ? 'Enabling...' : 'Allow Notifications'}
                     </button>
                   </>
                 )}

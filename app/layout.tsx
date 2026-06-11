@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import OneSignalInit from "@/components/OneSignalInit";
+import PushInit from "@/components/PushInit";
 
 export const metadata: Metadata = {
   title: "Breakthrough Table",
@@ -21,7 +21,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <OneSignalInit />
+        <PushInit />
         {children}
       </body>
     </html>

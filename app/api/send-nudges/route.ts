@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { sendPush } from '@/lib/send-push'
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -67,6 +68,14 @@ export async function POST(req: NextRequest) {
   if (!participants || participants.length === 0) {
     return NextResponse.json({ message: 'No participants to nudge' })
   }
+
+  // Fetch push subscriptions for all participants
+  const participantIds = participants.map((p: any) => p.id)
+  const { data: allSubs } = await supabase
+    .from('push_subscriptions')
+    .select('*')
+    .in('user_id', participantIds)
+  const subMap: Record<string, any> = Object.fromEntries((allSubs || []).map((s: any) => [s.user_id, s]))
 
   // Get today's habit completions
   const { data: habitDoneToday } = await supabase
@@ -165,23 +174,11 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const response = await fetch('https://api.onesignal.com/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
-          },
-          body: JSON.stringify({
-            app_id: process.env.ONESIGNAL_APP_ID,
-            include_aliases: { external_id: [participant.id] },
-            target_channel: 'push',
-            headings: { en: 'Breakthrough Table' },
-            contents: { en: message },
-            url: `${process.env.NEXT_PUBLIC_APP_URL}/tasks`,
-          }),
-        })
-
-        return { id: participant.id, name: participant.full_name, message, status: response.status }
+        const sub = subMap[participant.id]
+        if (!sub) return null
+        const result = await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/tasks' })
+        if (result === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', participant.id)
+        return { id: participant.id, name: participant.full_name, message, result }
       })
   )
 
@@ -207,23 +204,16 @@ export async function POST(req: NextRequest) {
 
       if (!groupParticipants) continue
 
+      const gpIds = groupParticipants.map((p: any) => p.id)
+      const { data: gpSubs } = await supabase.from('push_subscriptions').select('*').in('user_id', gpIds)
+      const subMap = Object.fromEntries((gpSubs || []).map((s: any) => [s.user_id, s]))
+
       for (const p of groupParticipants) {
-        const res = await fetch('https://api.onesignal.com/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
-          },
-          body: JSON.stringify({
-            app_id: process.env.ONESIGNAL_APP_ID,
-            include_aliases: { external_id: [p.id] },
-            target_channel: 'push',
-            headings: { en: 'Breakthrough Table' },
-            contents: { en: setting.reminder_message },
-            // No url — pure message, no action
-          }),
-        })
-        reminderResults.push({ id: p.id, name: p.full_name, status: res.status })
+        const sub = subMap[p.id]
+        if (!sub) continue
+        const res = await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
+        if (res === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', p.id)
+        reminderResults.push({ id: p.id, name: p.full_name, result: res })
       }
     }
   }

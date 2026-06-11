@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { sendPush } from '@/lib/send-push'
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -14,7 +15,6 @@ export async function POST(req: NextRequest) {
 
   const now = new Date()
 
-  // Build 30-min UTC window
   const timeWindow: string[] = []
   for (let offset = 0; offset < 30; offset++) {
     const d = new Date(now.getTime() - offset * 60 * 1000)
@@ -36,12 +36,9 @@ export async function POST(req: NextRequest) {
       const uh = Math.floor(utcMin / 60).toString().padStart(2, '0')
       const um = (utcMin % 60) < 30 ? '00' : '30'
       return `${uh}:${um}`
-    } catch {
-      return localTime
-    }
+    } catch { return localTime }
   }
 
-  // Get all groups with check-in notifications enabled
   const { data: settings } = await supabase
     .from('group_notification_settings')
     .select('group_id, checkin_enabled, checkin_time, checkin_timezone')
@@ -51,7 +48,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No check-in settings configured' })
   }
 
-  // Filter to groups whose check-in time falls in current window
   const activeGroups = settings.filter((s: any) => {
     const utcTime = localTimeToUTC(s.checkin_time, s.checkin_timezone || 'America/Chicago')
     return timeWindow.includes(utcTime)
@@ -63,41 +59,44 @@ export async function POST(req: NextRequest) {
 
   const groupIds = activeGroups.map((s: any) => s.group_id)
 
-  // Get all participants in those groups
   const { data: participants } = await supabase
     .from('profiles')
     .select('id, full_name')
     .in('group_id', groupIds)
-    .eq('role', 'participant')
 
   if (!participants || participants.length === 0) {
     return NextResponse.json({ message: 'No participants to notify' })
   }
 
+  const userIds = participants.map((p: any) => p.id)
+  const { data: subs } = await supabase
+    .from('push_subscriptions')
+    .select('*')
+    .in('user_id', userIds)
+
+  if (!subs || subs.length === 0) {
+    return NextResponse.json({ message: 'No push subscriptions found', sent: 0 })
+  }
+
+  const subMap = Object.fromEntries(subs.map((s: any) => [s.user_id, s]))
+
   const results = await Promise.all(
     participants.map(async (p: any) => {
+      const sub = subMap[p.id]
+      if (!sub) return null
       const firstName = p.full_name?.split(' ')[0] || 'there'
-      const message = `Hey ${firstName} — time to check in your habit and reading for today! 📋`
-
-      const response = await fetch('https://api.onesignal.com/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
-        },
-        body: JSON.stringify({
-          app_id: process.env.ONESIGNAL_APP_ID,
-          include_aliases: { external_id: [p.id] },
-          target_channel: 'push',
-          headings: { en: 'Breakthrough Table' },
-          contents: { en: message },
-          url: `${process.env.NEXT_PUBLIC_APP_URL}/tasks`,
-        }),
+      const result = await sendPush(sub, {
+        title: 'Breakthrough Table',
+        body: `Hey ${firstName} — time to check in your habit and reading for today! 📋`,
+        url: '/tasks',
       })
-
-      return { id: p.id, name: p.full_name, status: response.status }
+      if (result === 'expired') {
+        await supabase.from('push_subscriptions').delete().eq('user_id', p.id)
+      }
+      return result
     })
   )
 
-  return NextResponse.json({ sent: results.length, results })
+  const sent = results.filter(r => r === true).length
+  return NextResponse.json({ sent })
 }
