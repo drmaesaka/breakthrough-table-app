@@ -4,11 +4,71 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 
-const TYPE_ICONS: Record<string, string> = {
-  video: '🎥',
-  pdf: '📄',
-  article: '📰',
-  link: '🔗',
+const TYPE_CONFIG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
+  video:   { label: 'Video',   bg: 'bg-red-50',    text: 'text-red-500',    icon: '▶' },
+  pdf:     { label: 'PDF',     bg: 'bg-orange-50', text: 'text-orange-500', icon: '📄' },
+  article: { label: 'Article', bg: 'bg-blue-50',   text: 'text-blue-500',   icon: '📰' },
+  link:    { label: 'Link',    bg: 'bg-purple-50', text: 'text-purple-500', icon: '🔗' },
+}
+
+function getYouTubeId(url: string): string | null {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+  ]
+  for (const p of patterns) {
+    const m = url.match(p)
+    if (m) return m[1]
+  }
+  return null
+}
+
+function ContentCard({ item }: { item: any }) {
+  const ytId = item.url ? getYouTubeId(item.url) : null
+  const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null
+  const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.link
+
+  return (
+    <a href={item.url} target="_blank" rel="noopener noreferrer"
+      className="block bg-white rounded-2xl shadow-sm overflow-hidden active:opacity-80 transition-opacity">
+
+      {/* Thumbnail for YouTube videos */}
+      {thumbUrl && (
+        <div className="relative w-full aspect-video bg-gray-100 overflow-hidden">
+          <img src={thumbUrl} alt={item.title}
+            className="w-full h-full object-cover" />
+          {/* Play button overlay */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+              <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            {/* Type badge */}
+            <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full mb-2 ${cfg.bg} ${cfg.text}`}>
+              <span className="text-[10px]">{cfg.icon}</span> {cfg.label}
+            </span>
+            <p className="font-semibold text-gray-900 text-sm leading-snug">{item.title}</p>
+            {item.description && (
+              <p className="text-gray-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{item.description}</p>
+            )}
+          </div>
+          {/* Only show icon if no thumbnail */}
+          {!thumbUrl && (
+            <svg className="w-4 h-4 text-gray-300 flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          )}
+        </div>
+      </div>
+    </a>
+  )
 }
 
 export default function LibraryPage() {
@@ -34,7 +94,6 @@ export default function LibraryPage() {
       if (!prof?.group_id) { setLoading(false); return }
       setGroupName((prof.groups as any)?.name || '')
 
-      // Get all content for group, newest first
       const { data: contentData } = await supabase
         .from('content')
         .select('*')
@@ -43,53 +102,16 @@ export default function LibraryPage() {
 
       if (!contentData || contentData.length === 0) { setLoading(false); return }
 
-      // Most recently added item(s) in the same period = current
-      // We group by period_label if present, otherwise just take the newest batch (same day or newest)
-      // Simple rule: items added within 7 days of the newest item = current
       const newestDate = new Date(contentData[0].created_at)
       const cutoff = new Date(newestDate)
       cutoff.setDate(cutoff.getDate() - 7)
 
-      const curr = contentData.filter(item => new Date(item.created_at) >= cutoff)
-      const prev = contentData.filter(item => new Date(item.created_at) < cutoff)
-
-      setCurrent(curr)
-      setPrevious(prev)
+      setCurrent(contentData.filter(item => new Date(item.created_at) >= cutoff))
+      setPrevious(contentData.filter(item => new Date(item.created_at) < cutoff))
       setLoading(false)
     }
     load()
   }, [router])
-
-  function formatDate(d: string) {
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  }
-
-  function ContentCard({ item }: { item: any }) {
-    return (
-      <a href={item.url} target="_blank" rel="noopener noreferrer"
-        className="block bg-white rounded-2xl p-4 shadow-sm active:opacity-70 transition-opacity">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-bt-pale flex items-center justify-center flex-shrink-0 text-lg">
-            {TYPE_ICONS[item.type] || '🔗'}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-gray-900 text-sm leading-snug">{item.title}</p>
-            {item.description && (
-              <p className="text-gray-400 text-xs mt-1 leading-relaxed line-clamp-2">{item.description}</p>
-            )}
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-xs text-gray-400 capitalize">{item.type}</span>
-              <span className="text-gray-300">·</span>
-              <span className="text-xs text-gray-400">{formatDate(item.created_at)}</span>
-            </div>
-          </div>
-          <svg className="w-4 h-4 text-gray-300 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-        </div>
-      </a>
-    )
-  }
 
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
