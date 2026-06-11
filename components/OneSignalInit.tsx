@@ -19,6 +19,12 @@ export default function OneSignalInit() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      // Request push permission if not already granted
+      const permission = OneSignal.Notifications.permission
+      if (!permission) {
+        await OneSignal.Notifications.requestPermission()
+      }
+
       // Set external user ID so we can target by Supabase user ID
       await OneSignal.login(user.id)
 
