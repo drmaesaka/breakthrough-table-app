@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { MEETING_PLANS, type MeetingPlan } from '@/lib/meeting-plans'
 
-type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms'
+type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings'
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
@@ -54,6 +55,9 @@ export default function AdminPage() {
   const [eventLocation, setEventLocation] = useState('')
   const [eventLink, setEventLink] = useState('')
   const [eventSaving, setEventSaving] = useState(false)
+
+  // Meetings state
+  const [selectedMeeting, setSelectedMeeting] = useState<MeetingPlan | null>(null)
 
   // Rooms state
   const [rooms, setRooms] = useState<any[]>([])
@@ -362,8 +366,8 @@ export default function AdminPage() {
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms'] as Tab[]).map(t => (
-            <button key={t} onClick={() => { setTab(t); if (t === 'events') loadEvents(); if (t === 'rooms') loadRooms(); }}
+          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings'] as Tab[]).map(t => (
+            <button key={t} onClick={() => { setTab(t); if (t === 'events') loadEvents(); if (t === 'rooms') loadRooms(); if (t === 'meetings') setSelectedMeeting(null); }}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
               }`}>
@@ -962,6 +966,135 @@ export default function AdminPage() {
             </div>
           )
         })()}
+
+        {/* MEETINGS TAB */}
+        {tab === 'meetings' && (
+          <div className="space-y-4">
+            {!selectedMeeting ? (
+              <>
+                <div className="bg-white rounded-2xl p-5 shadow-sm">
+                  <h3 className="font-bold text-bt-navy mb-1">Meeting Plans</h3>
+                  <p className="text-xs text-gray-400 mb-4">Full curriculum for each BT table meeting.</p>
+                  <div className="space-y-2">
+                    {MEETING_PLANS.map(m => (
+                      <button key={m.number} onClick={() => setSelectedMeeting(m)}
+                        className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl bg-bt-pale hover:bg-bt-light/30 transition-colors text-left">
+                        <div>
+                          <span className="text-xs font-bold text-bt-blue uppercase tracking-wider">Meeting #{m.number}</span>
+                          <p className="font-semibold text-gray-900 text-sm mt-0.5">{m.title}</p>
+                        </div>
+                        <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setSelectedMeeting(null)}
+                  className="flex items-center gap-2 text-sm font-medium text-bt-blue">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                  All Meetings
+                </button>
+
+                <div className="bg-white rounded-2xl p-5 shadow-sm">
+                  <p className="text-xs font-bold text-bt-blue uppercase tracking-wider">Meeting #{selectedMeeting.number}</p>
+                  <h2 className="text-xl font-bold text-bt-navy mt-1">{selectedMeeting.title}</h2>
+                </div>
+
+                {selectedMeeting.resources.length > 0 && (
+                  <div className="bg-white rounded-2xl p-5 shadow-sm">
+                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
+                      <span className="text-lg">📎</span> Resources & Handouts
+                    </h4>
+                    <ul className="space-y-2">
+                      {selectedMeeting.resources.map((r, i) => (
+                        <li key={i} className="text-sm text-gray-600 flex gap-2">
+                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
+                          <span>{r.includes('https://') ? (
+                            <>
+                              {r.split('https://')[0].replace(/:\s*$/, '')}
+                              {' '}
+                              <a href={'https://' + r.split('https://')[1]} target="_blank" rel="noopener noreferrer"
+                                className="text-bt-blue underline break-all">link</a>
+                            </>
+                          ) : r}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {selectedMeeting.foundations.length > 0 && (
+                  <div className="bg-white rounded-2xl p-5 shadow-sm">
+                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
+                      <span className="text-lg">🔁</span> Recap & BT Foundations
+                    </h4>
+                    <ul className="space-y-2">
+                      {selectedMeeting.foundations.map((f, i) => (
+                        <li key={i} className="text-sm text-gray-600 flex gap-2">
+                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
+                          <span>{f}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {selectedMeeting.curriculum.length > 0 && (
+                  <div className="bg-white rounded-2xl p-5 shadow-sm">
+                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
+                      <span className="text-lg">📋</span> Curriculum
+                    </h4>
+                    <ul className="space-y-2">
+                      {selectedMeeting.curriculum.map((c, i) => (
+                        <li key={i} className="text-sm text-gray-600 flex gap-2">
+                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
+                          <span>{c}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {selectedMeeting.challenges.length > 0 && (
+                  <div className="bg-white rounded-2xl p-5 shadow-sm">
+                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
+                      <span className="text-lg">🎯</span> Challenges
+                    </h4>
+                    <ul className="space-y-2">
+                      {selectedMeeting.challenges.map((ch, i) => (
+                        <li key={i} className="text-sm text-gray-600 flex gap-2">
+                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
+                          <span>{ch}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  {selectedMeeting.number > 0 && (
+                    <button onClick={() => setSelectedMeeting(MEETING_PLANS[selectedMeeting.number - 1])}
+                      className="flex-1 bg-white border border-gray-200 text-bt-navy py-3 rounded-xl font-semibold text-sm">
+                      ← Meeting #{selectedMeeting.number - 1}
+                    </button>
+                  )}
+                  {selectedMeeting.number < MEETING_PLANS.length - 1 && (
+                    <button onClick={() => setSelectedMeeting(MEETING_PLANS[selectedMeeting.number + 1])}
+                      className="flex-1 bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">
+                      Meeting #{selectedMeeting.number + 1} →
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
       </div>
       <BottomNav />
