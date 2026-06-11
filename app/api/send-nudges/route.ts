@@ -14,11 +14,40 @@ export async function POST(req: NextRequest) {
 
   const today = new Date().toISOString().split('T')[0]
 
-  // Current time as HH:MM and HH:30 window for matching user preferences
   const now = new Date()
-  const currentHour = now.getUTCHours()
-  const currentMinute = now.getUTCMinutes()
-  // Build a list of time strings that fall within the last 30 min window
+
+  // Convert a local HH:MM time string in a given timezone to UTC HH:MM
+  function localTimeToUTC(localTime: string, timezone: string): string {
+    try {
+      const [h, m] = localTime.split(':').map(Number)
+      // Build a date for today at that local time
+      const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone }) // YYYY-MM-DD
+      const localDate = new Date(`${todayStr}T${localTime}:00`)
+      // Shift by the offset between UTC and the target timezone
+      const utcFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      })
+      // Get what "now" looks like in the user's timezone
+      const nowInTZ = new Intl.DateTimeFormat('en-GB', {
+        timeZone: timezone,
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(now)
+      // Calculate offset: UTC time = local time - offset
+      const [tzH, tzM] = nowInTZ.split(':').map(Number)
+      const tzOffsetMin = (tzH * 60 + tzM) - (now.getUTCHours() * 60 + now.getUTCMinutes())
+      const utcMin = (h * 60 + m - tzOffsetMin + 1440) % 1440
+      const uh = Math.floor(utcMin / 60).toString().padStart(2, '0')
+      const um = (utcMin % 60).toString().padStart(2, '0')
+      // Round to nearest 30 min for matching
+      const roundedUm = Number(um) < 30 ? '00' : '30'
+      return `${uh}:${roundedUm}`
+    } catch {
+      return localTime // fallback: treat as UTC
+    }
+  }
+
+  // Current UTC window (last 30 min, snapped to :00 or :30)
   const timeWindow: string[] = []
   for (let offset = 0; offset < 30; offset++) {
     const d = new Date(now.getTime() - offset * 60 * 1000)
@@ -31,7 +60,7 @@ export async function POST(req: NextRequest) {
   // Get participants with their preferences and habit info
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, onesignal_id, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times)')
+    .select('id, full_name, onesignal_id, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
     .eq('role', 'participant')
     .not('group_id', 'is', null)
     .not('onesignal_id', 'is', null)
@@ -81,9 +110,10 @@ export async function POST(req: NextRequest) {
         if (prefs && prefs.enabled === false) return false
         // Only nudge if habit not done OR reading not done
         if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) return false
-        // Check if current time matches any of the user's nudge times
+        // Convert user's local nudge times to UTC and check against current window
         const nudgeTimes: string[] = prefs?.nudge_times || ['09:00']
-        const scheduledNow = nudgeTimes.some(t => timeWindow.includes(t))
+        const userTZ: string = prefs?.timezone || 'America/Chicago'
+        const scheduledNow = nudgeTimes.some(t => timeWindow.includes(localTimeToUTC(t, userTZ)))
         return scheduledNow
       })
       .map(async (participant) => {

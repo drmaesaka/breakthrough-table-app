@@ -92,12 +92,15 @@ export default function PreferencesPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
     await supabase.from('nudge_preferences').upsert({
       user_id: user.id,
       enabled,
       frequency,
       nudge_times: nudgeTimes,
       tone,
+      timezone,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' })
 
