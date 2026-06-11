@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 
-type Tab = 'tasks' | 'content' | 'groups' | 'members' | 'scores'
+type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores'
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
@@ -28,6 +28,9 @@ export default function AdminPage() {
   const [contentError, setContentError] = useState('')
   const [contentSaving, setContentSaving] = useState(false)
   const [memberFilter, setMemberFilter] = useState('all')
+  const [prompts, setPrompts] = useState<any[]>([])
+  const [promptText, setPromptText] = useState('')
+  const [promptSaving, setPromptSaving] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -54,12 +57,14 @@ export default function AdminPage() {
 
   async function loadGroupData(gid: string) {
     const supabase = createClient()
-    const [t, c] = await Promise.all([
+    const [t, c, p] = await Promise.all([
       supabase.from('tasks').select('*').eq('group_id', gid).eq('archived', false).order('created_at', { ascending: false }),
-      supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false })
+      supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
+      supabase.from('journal_prompts').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
     ])
     setTasks(t.data || [])
     setContent(c.data || [])
+    setPrompts(p.data || [])
   }
 
   async function startNewPeriod() {
@@ -198,7 +203,7 @@ export default function AdminPage() {
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'groups', 'members', 'scores'] as Tab[]).map(t => (
+          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
@@ -286,6 +291,57 @@ export default function AdminPage() {
                     await supabase.from('content').delete().eq('id', item.id)
                     setContent(p => p.filter(c => c.id !== item.id))
                   }} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab === 'prompts' && (
+          <>
+            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Post a Reflection Prompt</h3>
+              <p className="text-gray-400 text-xs">Members will see this in their Reflections tab and can write a response before the next meeting.</p>
+              <textarea
+                value={promptText}
+                onChange={e => setPromptText(e.target.value)}
+                placeholder="e.g. What's one belief you're ready to let go of? What would change if you did?"
+                rows={3}
+                className={`${inputClass} resize-none leading-relaxed`}
+              />
+              <button onClick={async () => {
+                if (!promptText.trim() || !selectedGroup) return
+                setPromptSaving(true)
+                const supabase = createClient()
+                const { data: { user } } = await supabase.auth.getUser()
+                const { data } = await supabase.from('journal_prompts').insert({
+                  group_id: selectedGroup,
+                  prompt: promptText.trim(),
+                  posted_by: user?.id,
+                }).select().single()
+                if (data) { setPrompts(p => [data, ...p]); setPromptText('') }
+                setPromptSaving(false)
+              }} disabled={promptSaving || !promptText.trim()}
+                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                {promptSaving ? 'Posting...' : 'Post Prompt'}
+              </button>
+            </div>
+            <div className="space-y-2">
+              {prompts.length === 0 && (
+                <p className="text-center text-gray-400 text-sm py-4">No prompts yet. Post one above.</p>
+              )}
+              {prompts.map((p: any) => (
+                <div key={p.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-start gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-900 leading-snug">{p.prompt}</p>
+                    <p className="text-gray-400 text-xs mt-1">{new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                  </div>
+                  <button onClick={async () => {
+                    if (!confirm('Delete this prompt?')) return
+                    const supabase = createClient()
+                    await supabase.from('journal_prompts').delete().eq('id', p.id)
+                    setPrompts(prev => prev.filter(x => x.id !== p.id))
+                  }} className="text-red-400 text-sm font-medium px-2 py-1 flex-shrink-0">Remove</button>
                 </div>
               ))}
             </div>
