@@ -100,7 +100,7 @@ export default function DashboardPage() {
                 { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
                 { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
                 { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
-                { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
+                { href: '/group', emoji: '🏆', title: 'My Group', sub: 'See group progress' },
                 { href: '/journal', emoji: '🪞', title: 'Reflections', sub: 'Weekly prompts' },
                 { href: '/directory', emoji: '👥', title: 'Directory', sub: 'Find BT members' },
               ].map(card => (
