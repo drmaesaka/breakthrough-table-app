@@ -72,12 +72,14 @@ export default function PreferencesPage() {
   async function enableNotifications() {
     setRequestingPermission(true)
     try {
-      // Use native API directly — iOS requires this to be called synchronously
-      // from a user gesture, not buried inside an async SDK call
-      const permission = await Notification.requestPermission()
+      // Race against a 4s timeout — iOS sometimes silently ignores the request
+      const permission = await Promise.race([
+        Notification.requestPermission(),
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+      ]) as NotificationPermission
+
       setNotifPermission(permission)
 
-      // Once granted, register with OneSignal
       if (permission === 'granted') {
         const supabase = createClient()
         const { data: { user } } = await supabase.auth.getUser()
@@ -86,8 +88,11 @@ export default function PreferencesPage() {
           await OneSignal.login(user.id)
         }
       }
-    } catch (e) {
-      console.error(e)
+    } catch (e: any) {
+      if (e?.message === 'timeout') {
+        // iOS didn't show a prompt — permission was likely already set
+        setNotifPermission(Notification.permission === 'granted' ? 'granted' : 'blocked-by-ios')
+      }
     }
     setRequestingPermission(false)
   }
@@ -167,14 +172,24 @@ export default function PreferencesPage() {
 
         {/* Permission prompt — only shows if not yet granted */}
         {notifPermission !== 'granted' && (
-          <div className={`rounded-2xl p-5 shadow-sm ${notifPermission === 'denied' ? 'bg-red-50 border-2 border-red-100' : 'bg-bt-blue/10 border-2 border-bt-blue/20'}`}>
+          <div className={`rounded-2xl p-5 shadow-sm ${
+            notifPermission === 'denied' || notifPermission === 'blocked-by-ios'
+              ? 'bg-amber-50 border-2 border-amber-100'
+              : 'bg-bt-blue/10 border-2 border-bt-blue/20'
+          }`}>
             <div className="flex items-start gap-3">
               <span className="text-2xl">🔔</span>
               <div className="flex-1">
-                {notifPermission === 'denied' ? (
+                {notifPermission === 'denied' || notifPermission === 'blocked-by-ios' ? (
                   <>
-                    <p className="font-semibold text-red-700 text-sm">Notifications blocked</p>
-                    <p className="text-red-500 text-xs mt-1 leading-relaxed">You've blocked notifications for this app. To fix it: go to your phone's Settings → Safari → your phone's notification settings, and allow notifications for this site.</p>
+                    <p className="font-semibold text-amber-800 text-sm">Enable notifications in Settings</p>
+                    <p className="text-amber-700 text-xs mt-1 leading-relaxed">iOS has already recorded a permission decision for this app. To enable notifications:</p>
+                    <ol className="text-amber-700 text-xs mt-2 space-y-1 list-decimal list-inside">
+                      <li>Open iPhone <strong>Settings</strong></li>
+                      <li>Scroll down and tap <strong>breakthrough-table-app</strong></li>
+                      <li>Tap <strong>Notifications → Allow</strong></li>
+                      <li>Come back here and refresh</li>
+                    </ol>
                   </>
                 ) : (
                   <>
