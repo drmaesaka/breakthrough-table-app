@@ -39,7 +39,7 @@ export default function TasksPage() {
 
     const [{ data: taskData }, { data: completions }, { data: habitToday }, { data: habitHistory }] = await Promise.all([
       supabase.from('tasks').select('*').eq('group_id', prof.group_id).eq('archived', false).order('created_at', { ascending: false }),
-      supabase.from('task_completions').select('task_id').eq('user_id', user.id),
+      supabase.from('task_completions').select('task_id, tasks!inner(archived)').eq('user_id', user.id).eq('tasks.archived', false),
       supabase.from('habit_completions').select('id').eq('user_id', user.id).eq('completed_date', today).single(),
       supabase.from('habit_completions').select('completed_date').eq('user_id', user.id).order('completed_date', { ascending: false }).limit(60),
     ])
