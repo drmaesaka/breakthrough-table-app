@@ -30,7 +30,6 @@ export async function POST(req: NextRequest) {
     .from('profiles')
     .select('id, full_name')
     .eq('group_id', group_id)
-    .eq('role', 'participant')
 
   if (!participants || participants.length === 0) {
     return NextResponse.json({ message: 'No participants to notify', sent: 0 })
