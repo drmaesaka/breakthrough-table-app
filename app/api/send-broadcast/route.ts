@@ -28,10 +28,9 @@ export async function POST(req: NextRequest) {
   // Get all participants in the group
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, onesignal_id')
+    .select('id, full_name')
     .eq('group_id', group_id)
     .eq('role', 'participant')
-    .not('onesignal_id', 'is', null)
 
   if (!participants || participants.length === 0) {
     return NextResponse.json({ message: 'No participants to notify', sent: 0 })

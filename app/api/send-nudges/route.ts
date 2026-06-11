@@ -60,10 +60,9 @@ export async function POST(req: NextRequest) {
   // Get participants with their preferences and habit info
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, onesignal_id, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
+    .select('id, full_name, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
     .eq('role', 'participant')
     .not('group_id', 'is', null)
-    .not('onesignal_id', 'is', null)
 
   if (!participants || participants.length === 0) {
     return NextResponse.json({ message: 'No participants to nudge' })
@@ -202,10 +201,9 @@ export async function POST(req: NextRequest) {
 
       const { data: groupParticipants } = await supabase
         .from('profiles')
-        .select('id, full_name, onesignal_id')
+        .select('id, full_name')
         .eq('group_id', setting.group_id)
         .eq('role', 'participant')
-        .not('onesignal_id', 'is', null)
 
       if (!groupParticipants) continue
 
