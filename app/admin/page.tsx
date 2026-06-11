@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 
-type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores'
+type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications'
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
@@ -31,6 +31,20 @@ export default function AdminPage() {
   const [prompts, setPrompts] = useState<any[]>([])
   const [promptText, setPromptText] = useState('')
   const [promptSaving, setPromptSaving] = useState(false)
+
+  // Notification settings state
+  const [notifSettings, setNotifSettings] = useState<any>(null)
+  const [checkinEnabled, setCheckinEnabled] = useState(true)
+  const [checkinTime, setCheckinTime] = useState('20:00')
+  const [reminderEnabled, setReminderEnabled] = useState(false)
+  const [reminderMessage, setReminderMessage] = useState('')
+  const [reminderTime, setReminderTime] = useState('12:00')
+  const [notifSaving, setNotifSaving] = useState(false)
+  const [notifSaved, setNotifSaved] = useState(false)
+  const [broadcastMessage, setBroadcastMessage] = useState('')
+  const [broadcasting, setBroadcasting] = useState(false)
+  const [broadcastSent, setBroadcastSent] = useState(false)
+
   const router = useRouter()
 
   useEffect(() => {
@@ -57,14 +71,70 @@ export default function AdminPage() {
 
   async function loadGroupData(gid: string) {
     const supabase = createClient()
-    const [t, c, p] = await Promise.all([
+    const [t, c, p, n] = await Promise.all([
       supabase.from('tasks').select('*').eq('group_id', gid).eq('archived', false).order('created_at', { ascending: false }),
       supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
       supabase.from('journal_prompts').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
+      supabase.from('group_notification_settings').select('*').eq('group_id', gid).single(),
     ])
     setTasks(t.data || [])
     setContent(c.data || [])
     setPrompts(p.data || [])
+    if (n.data) {
+      setNotifSettings(n.data)
+      setCheckinEnabled(n.data.checkin_enabled ?? true)
+      setCheckinTime(n.data.checkin_time || '20:00')
+      setReminderEnabled(n.data.reminder_enabled ?? false)
+      setReminderMessage(n.data.reminder_message || '')
+      setReminderTime(n.data.reminder_time || '12:00')
+    } else {
+      setNotifSettings(null)
+      setCheckinEnabled(true)
+      setCheckinTime('20:00')
+      setReminderEnabled(false)
+      setReminderMessage('')
+      setReminderTime('12:00')
+    }
+  }
+
+  async function saveNotifSettings() {
+    if (!selectedGroup) return
+    setNotifSaving(true)
+    const supabase = createClient()
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    await supabase.from('group_notification_settings').upsert({
+      group_id: selectedGroup,
+      checkin_enabled: checkinEnabled,
+      checkin_time: checkinTime,
+      checkin_timezone: timezone,
+      reminder_enabled: reminderEnabled,
+      reminder_message: reminderMessage.trim(),
+      reminder_time: reminderTime,
+    }, { onConflict: 'group_id' })
+    setNotifSaving(false)
+    setNotifSaved(true)
+    setTimeout(() => setNotifSaved(false), 2500)
+  }
+
+  async function sendBroadcast() {
+    if (!broadcastMessage.trim() || !selectedGroup) return
+    setBroadcasting(true)
+    const supabase = createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch('/api/send-broadcast', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ group_id: selectedGroup, message: broadcastMessage.trim() }),
+    })
+    const result = await res.json()
+    setBroadcasting(false)
+    setBroadcastSent(true)
+    setBroadcastMessage('')
+    setTimeout(() => setBroadcastSent(false), 3000)
+    alert(`Broadcast sent to ${result.sent} member${result.sent !== 1 ? 's' : ''}!`)
   }
 
   async function startNewPeriod() {
@@ -203,7 +273,7 @@ export default function AdminPage() {
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores'] as Tab[]).map(t => (
+          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications'] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
@@ -523,6 +593,109 @@ export default function AdminPage() {
             })}
           </div>
         )}
+        {tab === 'notifications' && (
+          <div className="space-y-4">
+
+            {/* Daily Check-in */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-bt-navy">Daily Check-in Push</h3>
+                  <p className="text-gray-400 text-xs mt-0.5">Reminds everyone to log habit + reading once per day</p>
+                </div>
+                <button onClick={() => setCheckinEnabled(!checkinEnabled)}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${checkinEnabled ? 'bg-bt-navy' : 'bg-gray-200'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${checkinEnabled ? 'translate-x-6' : ''}`} />
+                </button>
+              </div>
+              {checkinEnabled && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Send at (your local time)</label>
+                  <select value={checkinTime} onChange={e => setCheckinTime(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue bg-white">
+                    {['06:00','06:30','07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
+                      '12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30',
+                      '18:00','18:30','19:00','19:30','20:00','20:30','21:00','21:30','22:00','22:30'].map(t => {
+                      const [h, m] = t.split(':').map(Number)
+                      const ampm = h >= 12 ? 'PM' : 'AM'
+                      const hour = h % 12 || 12
+                      return <option key={t} value={t}>{hour}:{m.toString().padStart(2,'0')} {ampm}</option>
+                    })}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1.5">Message sent: "Hey [Name] — time to check in your habit and reading for today! 📋"</p>
+                </div>
+              )}
+            </div>
+
+            {/* Scheduled Reminder */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-bt-navy">Scheduled Reminder</h3>
+                  <p className="text-gray-400 text-xs mt-0.5">Your message, sent daily at a set time. No link.</p>
+                </div>
+                <button onClick={() => setReminderEnabled(!reminderEnabled)}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${reminderEnabled ? 'bg-bt-navy' : 'bg-gray-200'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${reminderEnabled ? 'translate-x-6' : ''}`} />
+                </button>
+              </div>
+              {reminderEnabled && (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Message</label>
+                    <textarea
+                      value={reminderMessage}
+                      onChange={e => setReminderMessage(e.target.value)}
+                      placeholder="e.g. The standard you walk past is the standard you accept. Show up today."
+                      rows={3}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Send at (your local time)</label>
+                    <select value={reminderTime} onChange={e => setReminderTime(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue bg-white">
+                      {['06:00','06:30','07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
+                        '12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30',
+                        '18:00','18:30','19:00','19:30','20:00','20:30','21:00','21:30','22:00','22:30'].map(t => {
+                        const [h, m] = t.split(':').map(Number)
+                        const ampm = h >= 12 ? 'PM' : 'AM'
+                        const hour = h % 12 || 12
+                        return <option key={t} value={t}>{hour}:{m.toString().padStart(2,'0')} {ampm}</option>
+                      })}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button onClick={saveNotifSettings} disabled={notifSaving}
+              className="w-full bg-bt-navy text-white py-4 rounded-2xl font-semibold disabled:opacity-50">
+              {notifSaving ? 'Saving...' : notifSaved ? '✓ Saved!' : 'Save Notification Settings'}
+            </button>
+
+            {/* Broadcast */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+              <div>
+                <h3 className="font-bold text-bt-navy">Send Broadcast Now</h3>
+                <p className="text-gray-400 text-xs mt-0.5">One-time push to everyone on this table. No link.</p>
+              </div>
+              <textarea
+                value={broadcastMessage}
+                onChange={e => setBroadcastMessage(e.target.value)}
+                placeholder="Type your message to the table..."
+                rows={3}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue resize-none"
+              />
+              <button onClick={sendBroadcast} disabled={broadcasting || !broadcastMessage.trim()}
+                className="w-full bg-bt-blue text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                {broadcasting ? 'Sending...' : broadcastSent ? '✓ Sent!' : '📣 Send to Table Now'}
+              </button>
+            </div>
+
+          </div>
+        )}
+
       </div>
       <BottomNav />
     </div>

@@ -186,5 +186,54 @@ export async function POST(req: NextRequest) {
       })
   )
 
-  return NextResponse.json({ sent: results.length, results })
+  // --- Scheduled reminders (no CTA, leader-configured message) ---
+  const { data: reminderSettings } = await supabase
+    .from('group_notification_settings')
+    .select('group_id, reminder_enabled, reminder_time, reminder_message, checkin_timezone')
+    .eq('reminder_enabled', true)
+    .not('reminder_message', 'is', null)
+
+  const reminderResults: any[] = []
+
+  if (reminderSettings && reminderSettings.length > 0) {
+    for (const setting of reminderSettings) {
+      const utcTime = localTimeToUTC(setting.reminder_time, setting.checkin_timezone || 'America/Chicago')
+      if (!timeWindow.includes(utcTime)) continue
+
+      const { data: groupParticipants } = await supabase
+        .from('profiles')
+        .select('id, full_name, onesignal_id')
+        .eq('group_id', setting.group_id)
+        .eq('role', 'participant')
+        .not('onesignal_id', 'is', null)
+
+      if (!groupParticipants) continue
+
+      for (const p of groupParticipants) {
+        const res = await fetch('https://api.onesignal.com/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Key ${process.env.ONESIGNAL_API_KEY}`,
+          },
+          body: JSON.stringify({
+            app_id: process.env.ONESIGNAL_APP_ID,
+            include_aliases: { external_id: [p.id] },
+            target_channel: 'push',
+            headings: { en: 'Breakthrough Table' },
+            contents: { en: setting.reminder_message },
+            // No url — pure message, no action
+          }),
+        })
+        reminderResults.push({ id: p.id, name: p.full_name, status: res.status })
+      }
+    }
+  }
+
+  return NextResponse.json({
+    nudges_sent: results.length,
+    reminders_sent: reminderResults.length,
+    results,
+    reminderResults,
+  })
 }
