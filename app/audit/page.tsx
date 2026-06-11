@@ -340,13 +340,13 @@ export default function AuditPage() {
             <p className="text-bt-light/60 text-sm leading-relaxed mb-5">
               Breakthrough Table is a small group of peers who challenge each other, track real commitments, and do the inner work together. No content dumps. No sales pitches. Just the right people in the room.
             </p>
-            <a href="/signup"
-              className="block w-full bg-white text-bt-navy py-4 rounded-xl font-bold text-base mb-3">
-              Join Sunrise Network — $20/month →
-            </a>
             <a href="https://breakthroughtable.com" target="_blank" rel="noopener noreferrer"
+              className="block w-full bg-white text-bt-navy py-4 rounded-xl font-bold text-base mb-3">
+              Join a Free Virtual Table Taster →
+            </a>
+            <a href="/signup"
               className="block text-bt-light/50 text-sm">
-              Learn about full membership →
+              Already a member? Sign in →
             </a>
           </div>
 
