@@ -22,6 +22,14 @@ export default function ProfilePage() {
   const [showGradHistory, setShowGradHistory] = useState(false)
   const [userId, setUserId] = useState('')
 
+  // Directory state
+  const [directoryOptIn, setDirectoryOptIn] = useState(false)
+  const [bio, setBio] = useState('')
+  const [linkedinUrl, setLinkedinUrl] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
+  const [dirSaving, setDirSaving] = useState(false)
+  const [dirSaved, setDirSaved] = useState(false)
+
   const router = useRouter()
 
   useEffect(() => {
@@ -42,6 +50,10 @@ export default function ProfilePage() {
         setName(prof.full_name || '')
         setCurrentHabit(prof.current_habit || '')
         setHabitInput(prof.current_habit || '')
+        setDirectoryOptIn(prof.directory_opt_in || false)
+        setBio(prof.bio || '')
+        setLinkedinUrl(prof.linkedin_url || '')
+        setContactEmail(prof.contact_email || '')
       }
       setGraduatedHabits(history || [])
       setLoading(false)
@@ -95,6 +107,20 @@ export default function ProfilePage() {
     setCurrentHabit('')
     setHabitInput('')
     setGraduating(false)
+  }
+
+  async function saveDirectory() {
+    setDirSaving(true)
+    const supabase = createClient()
+    await supabase.from('profiles').update({
+      directory_opt_in: directoryOptIn,
+      bio: bio.trim(),
+      linkedin_url: linkedinUrl.trim(),
+      contact_email: contactEmail.trim(),
+    }).eq('id', userId)
+    setDirSaving(false)
+    setDirSaved(true)
+    setTimeout(() => setDirSaved(false), 2500)
   }
 
   async function handleLogout() {
@@ -217,6 +243,57 @@ export default function ProfilePage() {
               <p className="text-gray-400 text-xs mt-0.5">Role</p>
             </div>
           </div>
+        </div>
+
+        {/* Member Directory */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-bold text-bt-navy">Member Directory</h3>
+              <p className="text-gray-400 text-xs mt-0.5">Let other BT members find you</p>
+            </div>
+            <button
+              onClick={() => setDirectoryOptIn(!directoryOptIn)}
+              className={`relative w-12 h-6 rounded-full transition-colors ${directoryOptIn ? 'bg-bt-navy' : 'bg-gray-200'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${directoryOptIn ? 'translate-x-6' : ''}`} />
+            </button>
+          </div>
+          {directoryOptIn && (
+            <>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1.5 block">Bio — what do you do? what are you building?</label>
+                <textarea
+                  value={bio}
+                  onChange={e => setBio(e.target.value)}
+                  placeholder="e.g. Entrepreneur building a fitness brand in Austin. 3 years in..."
+                  rows={3}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1.5 block">LinkedIn URL (optional)</label>
+                <input
+                  value={linkedinUrl}
+                  onChange={e => setLinkedinUrl(e.target.value)}
+                  placeholder="https://linkedin.com/in/yourname"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1.5 block">Contact Email (optional)</label>
+                <input
+                  value={contactEmail}
+                  onChange={e => setContactEmail(e.target.value)}
+                  placeholder="you@email.com"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
+                />
+              </div>
+            </>
+          )}
+          <button onClick={saveDirectory} disabled={dirSaving}
+            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+            {dirSaving ? 'Saving...' : dirSaved ? '✓ Saved!' : 'Save Directory Settings'}
+          </button>
         </div>
 
         {/* Edit name */}

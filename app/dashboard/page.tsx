@@ -102,7 +102,7 @@ export default function DashboardPage() {
                 { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
                 { href: '/group', emoji: '👥', title: 'My Group', sub: 'See group progress' },
                 { href: '/journal', emoji: '🪞', title: 'Reflections', sub: 'Weekly prompts' },
-                { href: '/preferences', emoji: '🔔', title: 'Nudge Settings', sub: 'Customize check-ins' },
+                { href: '/directory', emoji: '👥', title: 'Directory', sub: 'Find BT members' },
               ].map(card => (
                 <Link key={card.href} href={card.href}
                   className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
