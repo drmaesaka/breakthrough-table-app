@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 
-type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications'
+type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms'
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
@@ -44,6 +44,24 @@ export default function AdminPage() {
   const [broadcastMessage, setBroadcastMessage] = useState('')
   const [broadcasting, setBroadcasting] = useState(false)
   const [broadcastSent, setBroadcastSent] = useState(false)
+
+  // Events state
+  const [events, setEvents] = useState<any[]>([])
+  const [eventTitle, setEventTitle] = useState('')
+  const [eventDesc, setEventDesc] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [eventType, setEventType] = useState('in_person')
+  const [eventLocation, setEventLocation] = useState('')
+  const [eventLink, setEventLink] = useState('')
+  const [eventSaving, setEventSaving] = useState(false)
+
+  // Rooms state
+  const [rooms, setRooms] = useState<any[]>([])
+  const [allBookings, setAllBookings] = useState<any[]>([])
+  const [roomName, setRoomName] = useState('')
+  const [roomDesc, setRoomDesc] = useState('')
+  const [roomCapacity, setRoomCapacity] = useState('')
+  const [roomSaving, setRoomSaving] = useState(false)
 
   const router = useRouter()
 
@@ -135,6 +153,72 @@ export default function AdminPage() {
     setBroadcastMessage('')
     setTimeout(() => setBroadcastSent(false), 3000)
     alert(`Broadcast sent to ${result.sent} member${result.sent !== 1 ? 's' : ''}!`)
+  }
+
+  async function loadEvents() {
+    const supabase = createClient()
+    const { data } = await supabase.from('events').select('*').order('event_date', { ascending: true })
+    setEvents(data || [])
+  }
+
+  async function addEvent() {
+    if (!eventTitle.trim() || !eventDate) return
+    setEventSaving(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('events').insert({
+      title: eventTitle.trim(),
+      description: eventDesc.trim() || null,
+      event_date: eventDate,
+      event_type: eventType,
+      location: eventType === 'in_person' ? eventLocation.trim() || null : null,
+      virtual_link: eventType === 'virtual' ? eventLink.trim() || null : null,
+      created_by: user!.id,
+    })
+    setEventTitle(''); setEventDesc(''); setEventDate(''); setEventLocation(''); setEventLink('')
+    setEventSaving(false)
+    loadEvents()
+  }
+
+  async function deleteEvent(id: string) {
+    if (!confirm('Delete this event?')) return
+    const supabase = createClient()
+    await supabase.from('events').delete().eq('id', id)
+    setEvents(e => e.filter(x => x.id !== id))
+  }
+
+  async function loadRooms() {
+    const supabase = createClient()
+    const [{ data: r }, { data: b }] = await Promise.all([
+      supabase.from('rooms').select('*').order('name'),
+      supabase.from('room_bookings')
+        .select('*, rooms(name), profiles(full_name)')
+        .gte('booking_date', new Date().toISOString().split('T')[0])
+        .order('booking_date', { ascending: true }),
+    ])
+    setRooms(r || [])
+    setAllBookings(b || [])
+  }
+
+  async function addRoom() {
+    if (!roomName.trim()) return
+    setRoomSaving(true)
+    const supabase = createClient()
+    await supabase.from('rooms').insert({
+      name: roomName.trim(),
+      description: roomDesc.trim() || null,
+      capacity: roomCapacity ? parseInt(roomCapacity) : null,
+    })
+    setRoomName(''); setRoomDesc(''); setRoomCapacity('')
+    setRoomSaving(false)
+    loadRooms()
+  }
+
+  async function deleteRoom(id: string) {
+    if (!confirm('Delete this room and all its bookings?')) return
+    const supabase = createClient()
+    await supabase.from('rooms').delete().eq('id', id)
+    loadRooms()
   }
 
   async function startNewPeriod() {
@@ -273,8 +357,8 @@ export default function AdminPage() {
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications'] as Tab[]).map(t => (
-            <button key={t} onClick={() => setTab(t)}
+          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms'] as Tab[]).map(t => (
+            <button key={t} onClick={() => { setTab(t); if (t === 'events') loadEvents(); if (t === 'rooms') loadRooms(); }}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
               }`}>
@@ -693,6 +777,108 @@ export default function AdminPage() {
               </button>
             </div>
 
+          </div>
+        )}
+
+        {tab === 'events' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Add Event</h3>
+              <input value={eventTitle} onChange={e => setEventTitle(e.target.value)}
+                placeholder="Event title" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              <textarea value={eventDesc} onChange={e => setEventDesc(e.target.value)}
+                placeholder="Description (optional)" rows={2}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue resize-none" />
+              <input type="datetime-local" value={eventDate} onChange={e => setEventDate(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              <div className="flex gap-2">
+                {['in_person', 'virtual'].map(t => (
+                  <button key={t} onClick={() => setEventType(t)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 ${eventType === t ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
+                    {t === 'in_person' ? '📍 In Person' : '💻 Virtual'}
+                  </button>
+                ))}
+              </div>
+              {eventType === 'in_person' && (
+                <input value={eventLocation} onChange={e => setEventLocation(e.target.value)}
+                  placeholder="Location / address" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              )}
+              {eventType === 'virtual' && (
+                <input value={eventLink} onChange={e => setEventLink(e.target.value)}
+                  placeholder="Zoom / meeting link" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              )}
+              <button onClick={addEvent} disabled={eventSaving || !eventTitle.trim() || !eventDate}
+                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                {eventSaving ? 'Saving...' : 'Add Event'}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {events.length === 0 && <p className="text-center text-gray-400 py-6">No events yet</p>}
+              {events.map(event => (
+                <div key={event.id} className="bg-white rounded-2xl p-4 shadow-sm flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-medium text-gray-400">{event.event_type === 'virtual' ? '💻' : '📍'}</span>
+                      <p className="font-semibold text-gray-900 text-sm">{event.title}</p>
+                    </div>
+                    <p className="text-xs text-gray-400">{new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
+                    {event.location && <p className="text-xs text-gray-400 mt-0.5">📍 {event.location}</p>}
+                    {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
+                  </div>
+                  <button onClick={() => deleteEvent(event.id)} className="text-red-400 text-xs font-medium flex-shrink-0">Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === 'rooms' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Add Room</h3>
+              <input value={roomName} onChange={e => setRoomName(e.target.value)}
+                placeholder="Room name (e.g. Conference Room A)" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              <input value={roomDesc} onChange={e => setRoomDesc(e.target.value)}
+                placeholder="Description (optional)" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              <input type="number" value={roomCapacity} onChange={e => setRoomCapacity(e.target.value)}
+                placeholder="Capacity (optional)" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              <button onClick={addRoom} disabled={roomSaving || !roomName.trim()}
+                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                {roomSaving ? 'Saving...' : 'Add Room'}
+              </button>
+            </div>
+
+            {rooms.length > 0 && (
+              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-2">
+                <h3 className="font-bold text-bt-navy mb-1">Rooms</h3>
+                {rooms.map(room => (
+                  <div key={room.id} className="flex items-center justify-between bg-bt-pale rounded-xl px-4 py-3">
+                    <div>
+                      <p className="font-semibold text-sm text-gray-900">{room.name}</p>
+                      {room.capacity && <p className="text-xs text-gray-400">Up to {room.capacity} people</p>}
+                    </div>
+                    <button onClick={() => deleteRoom(room.id)} className="text-red-400 text-xs font-medium">Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="bg-white rounded-2xl p-5 shadow-sm">
+              <h3 className="font-bold text-bt-navy mb-3">Upcoming Bookings</h3>
+              {allBookings.length === 0 && <p className="text-gray-400 text-sm text-center py-4">No bookings yet</p>}
+              <div className="space-y-2">
+                {allBookings.map((b: any) => (
+                  <div key={b.id} className="flex items-center justify-between bg-bt-pale rounded-xl px-4 py-3">
+                    <div>
+                      <p className="font-semibold text-sm text-gray-900">{b.rooms?.name}</p>
+                      <p className="text-xs text-gray-400">{b.profiles?.full_name} · {new Date(b.booking_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {(() => { const [h,m] = b.start_time.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` })()}</p>
+                      {b.notes && <p className="text-xs text-gray-400 mt-0.5">{b.notes}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 

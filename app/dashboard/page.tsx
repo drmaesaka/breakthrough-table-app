@@ -98,11 +98,11 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
-                { href: '/messages', emoji: '💬', title: 'Group Chat', sub: 'Talk to your table' },
+                { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
                 { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
-                { href: '/group', emoji: '🏆', title: 'My Group', sub: 'See group progress' },
-                { href: '/journal', emoji: '🪞', title: 'Reflections', sub: 'Weekly prompts' },
+                { href: '/booking', emoji: '🏢', title: 'Book a Room', sub: 'Reserve your space' },
                 { href: '/directory', emoji: '👥', title: 'Directory', sub: 'Find BT members' },
+                { href: '/preferences', emoji: '🔔', title: 'Nudge Settings', sub: 'Customize check-ins' },
               ].map(card => (
                 <Link key={card.href} href={card.href}
                   className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
