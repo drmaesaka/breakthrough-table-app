@@ -1,11 +1,5 @@
 import webpush from 'web-push'
 
-webpush.setVapidDetails(
-  'mailto:admin@breakthrough-table.com',
-  process.env.VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-)
-
 export type PushSubscription = {
   endpoint: string
   p256dh: string
@@ -16,6 +10,13 @@ export async function sendPush(
   subscription: PushSubscription,
   payload: { title: string; body: string; url?: string }
 ) {
+  // Set at call time so env vars are available at runtime not build time
+  webpush.setVapidDetails(
+    'mailto:admin@breakthrough-table.com',
+    process.env.VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!
+  )
+
   try {
     await webpush.sendNotification(
       {
