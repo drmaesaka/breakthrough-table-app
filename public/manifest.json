@@ -4,7 +4,7 @@
   "description": "Breakthrough Table accountability app",
   "start_url": "/dashboard",
   "display": "standalone",
-  "background_color": "#0f2044",
+  "background_color": "#ffffff",
   "theme_color": "#0f2044",
   "orientation": "portrait",
   "icons": [
