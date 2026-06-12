@@ -29,8 +29,8 @@ export default function BottomNav() {
       ]
     : [
         { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
+        { href: '/group', label: 'My Table', icon: <GroupIcon /> },
         { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
-        { href: '/events', label: 'Events', icon: <EventsIcon /> },
         { href: '/library', label: 'Library', icon: <LibraryIcon /> },
         { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
       ]
