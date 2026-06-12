@@ -60,7 +60,7 @@ export default function WelcomeScreen({ userId, firstName }: Props) {
       </p>
 
       {/* Tap hint */}
-      <p className="absolute bottom-14 text-white/30 text-sm tracking-widest uppercase">
+      <p className="text-white/30 text-sm tracking-widest uppercase mt-16">
         Tap to continue
       </p>
     </div>
