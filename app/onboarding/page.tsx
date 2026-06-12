@@ -74,7 +74,7 @@ export default function OnboardingPage() {
             {memberCount} member{memberCount !== 1 ? 's' : ''} in your group
           </p>
         )}
-        <p className="text-white/40 text-sm leading-relaxed mt-6 mb-12">
+        <p className="text-white/40 text-sm leading-relaxed mt-4 mb-6">
           Accountability starts here.
         </p>
       </div>
