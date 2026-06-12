@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import InstallBanner from '@/components/InstallBanner'
+import WelcomeScreen from '@/components/WelcomeScreen'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -41,6 +42,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-bt-pale">
+      {profile && <WelcomeScreen userId={profile.id} firstName={firstName} />}
       <div className="bg-bt-navy px-5 pt-16 pb-8">
         <div className="flex items-start justify-between">
           <div>
