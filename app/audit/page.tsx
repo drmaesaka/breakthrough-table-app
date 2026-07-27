@@ -110,9 +110,12 @@ export default function AuditPage() {
     setEmailSaving(true)
     setEmailError('')
 
+    // Never block the visitor's results on this save, but do not let a failure
+    // pass silently either — supabase-js returns errors rather than throwing,
+    // so a swallowed `error` here means leads vanish with no signal anywhere.
     try {
       const supabase = createClient()
-      await supabase.from('audit_responses').insert({
+      const { error } = await supabase.from('audit_responses').insert({
         email: email.trim(),
         scores: results.dims,
         archetype: results.archetype,
@@ -123,7 +126,10 @@ export default function AuditPage() {
         dim_execution: results.dims.execution,
         dim_community: results.dims.community,
       })
-    } catch (e) { /* non-blocking */ }
+      if (error) console.error('audit_responses insert failed:', error.message, error.code)
+    } catch (e: any) {
+      console.error('audit_responses insert threw:', e?.message)
+    }
 
     setEmailSaving(false)
     setPhase('results')
