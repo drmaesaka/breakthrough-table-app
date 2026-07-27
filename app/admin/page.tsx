@@ -74,6 +74,14 @@ export default function AdminPage() {
 
   const router = useRouter()
 
+  async function authHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await createClient().auth.getSession()
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session?.access_token ?? ''}`,
+    }
+  }
+
   useEffect(() => {
     async function load() {
       const supabase = createClient()
@@ -82,9 +90,8 @@ export default function AdminPage() {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
-      const membersReq = await fetch('/api/admin/members')
+      const membersReq = await fetch('/api/admin/members', { headers: await authHeaders() })
       const membersRes = await membersReq.json()
-      console.log('Admin members API response:', membersReq.status, membersRes)
 
       const groupsRes = await supabase.from('groups').select('*, last_period_start')
       const grps = groupsRes.data || []
@@ -315,32 +322,43 @@ export default function AdminPage() {
 
   async function assignUserToGroup(userId: string, groupId: string) {
     const val = groupId === '' ? null : groupId
-    await fetch('/api/admin/members', {
+    const res = await fetch('/api/admin/members', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ userId, groupId: val })
     })
+    if (!res.ok) { alert('Could not update group. Please try again.'); return }
     setUsers(p => p.map(u => u.id === userId ? { ...u, group_id: val } : u))
   }
 
   async function deleteMember(userId: string, name: string) {
     if (!confirm(`Remove ${name} from the app? This cannot be undone.`)) return
-    await fetch('/api/admin/members', {
+    const res = await fetch('/api/admin/members', {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ userId })
     })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      alert(error || 'Could not remove member. Please try again.')
+      return
+    }
     setUsers(p => p.filter(u => u.id !== userId))
   }
 
   async function toggleLeader(userId: string, currentRole: string) {
     const newRole = currentRole === 'leader' ? 'participant' : 'leader'
     if (!confirm(`${newRole === 'leader' ? 'Promote to leader' : 'Demote to participant'}?`)) return
-    await fetch('/api/admin/members', {
+    const res = await fetch('/api/admin/members', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ userId, role: newRole })
     })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      alert(error || 'Could not change role. Please try again.')
+      return
+    }
     setUsers(p => p.map(u => u.id === userId ? { ...u, role: newRole } : u))
   }
 

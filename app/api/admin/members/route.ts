@@ -1,51 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { adminClient, requireLeader } from '@/lib/api-auth'
 
-// Uses service role key — bypasses RLS for admin operations
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SECRET_KEY!
-  )
-}
+export async function GET(req: NextRequest) {
+  const auth = await requireLeader(req)
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-export async function GET() {
-  try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const key = process.env.SUPABASE_SECRET_KEY
-    if (!url || !key) {
-      return NextResponse.json({ error: `Missing env: url=${!!url} key=${!!key}` }, { status: 500 })
-    }
-    const supabase = adminClient()
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, full_name, group_id, role, adherence_percent, streak')
-      .order('full_name', { ascending: true })
+  const { data, error } = await adminClient()
+    .from('profiles')
+    .select('id, full_name, group_id, role, adherence_percent, streak')
+    .order('full_name', { ascending: true })
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ members: data })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
-  }
+  if (error) return NextResponse.json({ error: 'Failed to load members' }, { status: 500 })
+  return NextResponse.json({ members: data })
 }
 
 export async function PATCH(req: NextRequest) {
-  const { userId, groupId, role } = await req.json()
-  const supabase = adminClient()
+  const auth = await requireLeader(req)
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const updates: any = {}
+  const { userId, groupId, role } = await req.json()
+  if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 })
+
+  if (role !== undefined && role !== 'leader' && role !== 'participant') {
+    return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+  }
+  // Guard against a lone leader demoting themselves and locking everyone out of admin.
+  if (role === 'participant' && userId === auth.userId) {
+    return NextResponse.json({ error: 'You cannot demote yourself' }, { status: 400 })
+  }
+
+  const updates: Record<string, unknown> = {}
   if (groupId !== undefined) updates.group_id = groupId || null
   if (role !== undefined) updates.role = role
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+  }
 
-  const { error } = await supabase.from('profiles').update(updates).eq('id', userId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const { error } = await adminClient().from('profiles').update(updates).eq('id', userId)
+  if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 })
   return NextResponse.json({ success: true })
 }
 
 export async function DELETE(req: NextRequest) {
+  const auth = await requireLeader(req)
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
   const { userId } = await req.json()
-  const supabase = adminClient()
-  const { error } = await supabase.from('profiles').delete().eq('id', userId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 })
+  if (userId === auth.userId) {
+    return NextResponse.json({ error: 'You cannot delete yourself' }, { status: 400 })
+  }
+
+  const { error } = await adminClient().from('profiles').delete().eq('id', userId)
+  if (error) return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
   return NextResponse.json({ success: true })
 }
