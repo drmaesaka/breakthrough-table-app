@@ -39,10 +39,21 @@ export async function POST(req: NextRequest) {
     } catch { return localTime }
   }
 
-  const { data: settings } = await supabase
+  const { data: settings, error: settingsError } = await supabase
     .from('group_notification_settings')
     .select('group_id, checkin_enabled, checkin_time, checkin_timezone')
     .eq('checkin_enabled', true)
+
+  // A dead database returns `{ data: null, error }` rather than throwing, which
+  // would otherwise read as "nothing configured" and let the cron report success
+  // through a total outage. 503 fails the workflow run so GitHub emails us.
+  if (settingsError) {
+    console.error('send-checkin: settings query failed:', settingsError.message)
+    return NextResponse.json(
+      { error: 'Database unreachable', detail: settingsError.message },
+      { status: 503 }
+    )
+  }
 
   if (!settings || settings.length === 0) {
     return NextResponse.json({ message: 'No check-in settings configured' })

@@ -61,11 +61,22 @@ export async function POST(req: NextRequest) {
   // Get members with their preferences and habit info. Leaders are included
   // only once they have a nudge_preferences row — participants get nudges by
   // default, leaders opt in by saving their Nudge Settings.
-  const { data: participants } = await supabase
+  const { data: participants, error: participantsError } = await supabase
     .from('profiles')
     .select('id, full_name, role, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
     .in('role', ['participant', 'leader'])
     .not('group_id', 'is', null)
+
+  // A dead database returns `{ data: null, error }` rather than throwing, which
+  // would otherwise read as "nobody to nudge" and let the cron report success
+  // through a total outage. 503 fails the workflow run so GitHub emails us.
+  if (participantsError) {
+    console.error('send-nudges: profiles query failed:', participantsError.message)
+    return NextResponse.json(
+      { error: 'Database unreachable', detail: participantsError.message },
+      { status: 503 }
+    )
+  }
 
   if (!participants || participants.length === 0) {
     return NextResponse.json({ message: 'No participants to nudge' })
@@ -220,10 +231,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    nudges_sent: results.length,
-    reminders_sent: reminderResults.length,
+  // `results` holds a null for every matched member without a subscription, so
+  // its length was never the number of notifications that actually went out.
+  const attempted = results.filter(r => r !== null) as Array<{ result: boolean | 'expired' }>
+  const delivered = attempted.filter(r => r.result === true).length
+  const hardFailed = attempted.filter(r => r.result === false).length
+  const reminderDelivered = reminderResults.filter(r => r.result === true).length
+  const reminderHardFailed = reminderResults.filter(r => r.result === false).length
+
+  const body = {
+    nudges_delivered: delivered,
+    nudges_failed: hardFailed,
+    reminders_delivered: reminderDelivered,
+    reminders_failed: reminderHardFailed,
     results,
     reminderResults,
-  })
+  }
+
+  // Pushes actively rejected with nothing getting through points at the push
+  // setup itself (bad VAPID keys, missing env vars), not one stale device.
+  // Expired subscriptions are excluded — those are normal and self-healing.
+  if (hardFailed + reminderHardFailed > 0 && delivered + reminderDelivered === 0) {
+    return NextResponse.json({ ...body, error: 'All push sends failed' }, { status: 500 })
+  }
+
+  return NextResponse.json(body)
 }
