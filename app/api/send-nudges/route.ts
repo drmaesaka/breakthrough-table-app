@@ -272,6 +272,11 @@ export async function POST(req: NextRequest) {
     reminders_failed: reminderHardFailed,
     utc_window: timeWindow,
     members_considered: participants.length,
+    // Who could receive a push right now, regardless of whether one was due.
+    // Without this, a member whose notifications never worked stays invisible
+    // until their nudge time arrives and quietly delivers nothing.
+    push_ready: participants.filter(p => subMap[p.id]).length,
+    members_without_push: participants.filter(p => !subMap[p.id]).map(p => p.full_name || p.id),
     skipped,
     results,
     reminderResults,
