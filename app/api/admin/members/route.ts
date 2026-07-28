@@ -5,13 +5,22 @@ export async function GET(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { data, error } = await adminClient()
+  const supabase = adminClient()
+
+  const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, group_id, role, adherence_percent, streak')
     .order('full_name', { ascending: true })
 
   if (error) return NextResponse.json({ error: 'Failed to load members' }, { status: 500 })
-  return NextResponse.json({ members: data })
+
+  // A member with no push subscription silently receives nothing — the leader
+  // has no other way to tell them apart from a member who is simply never due.
+  const { data: subs } = await supabase.from('push_subscriptions').select('user_id')
+  const subscribed = new Set((subs || []).map((s: any) => s.user_id))
+
+  const members = (data || []).map(m => ({ ...m, push_enabled: subscribed.has(m.id) }))
+  return NextResponse.json({ members })
 }
 
 export async function PATCH(req: NextRequest) {

@@ -592,6 +592,25 @@ export default function AdminPage() {
 
         {tab === 'members' && (
           <div className="space-y-3">
+            {/* Who cannot receive notifications — otherwise invisible until
+                their nudge time arrives and quietly delivers nothing. */}
+            {(() => {
+              const noPush = users.filter(u => !u.push_enabled)
+              if (noPush.length === 0) return null
+              return (
+                <div className="bg-amber-50 border-2 border-amber-100 rounded-2xl p-4">
+                  <p className="font-semibold text-amber-800 text-sm">
+                    🔕 {noPush.length} of {users.length} can&apos;t receive notifications
+                  </p>
+                  <p className="text-amber-700 text-xs mt-1 leading-relaxed">
+                    {noPush.map(u => u.full_name).join(', ')} — nudges are calculated for them but
+                    have nowhere to go. On iPhone they must add the app to their Home Screen, open it
+                    from there, then tap Allow in Nudge Settings.
+                  </p>
+                </div>
+              )
+            })()}
+
             {/* Filter dropdown */}
             <select
               value={memberFilter}
@@ -631,6 +650,9 @@ export default function AdminPage() {
                         <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
                         {u.role === 'leader' && (
                           <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
+                        )}
+                        {!u.push_enabled && (
+                          <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">🔕 No notifications</span>
                         )}
                       </div>
                       <p className="text-gray-400 text-xs">{groupForUser?.name || 'Unassigned'}</p>
