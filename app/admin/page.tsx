@@ -251,26 +251,30 @@ export default function AdminPage() {
     if (!selectedGroup || !periodLabel.trim()) return
     if (!confirm(`Archive all current tasks and start period "${periodLabel}"?`)) return
     setArchiving(true)
-    const supabase = createClient()
 
-    // Archive existing tasks
-    await supabase.from('tasks').update({ archived: true }).eq('group_id', selectedGroup).eq('archived', false)
+    // Group-wide resets run server-side — the browser client can only write
+    // its own profile row, so doing this here silently skipped every member.
+    const res = await fetch('/api/admin/start-period', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ group_id: selectedGroup }),
+    })
+    const result = await res.json()
+    setArchiving(false)
 
-    // Record when this period started
-    await supabase.from('groups').update({ last_period_start: new Date().toISOString() }).eq('id', selectedGroup)
-
-    // Reset streak for anyone who didn't hit 100% this period
-    await supabase.from('profiles').update({ streak: 0 })
-      .eq('group_id', selectedGroup)
-      .lt('adherence_percent', 100)
-
-    // Reset adherence for all group members
-    await supabase.from('profiles').update({ adherence_percent: 0 }).eq('group_id', selectedGroup)
+    if (!res.ok) {
+      alert(`Could not start the new period: ${result.error || res.status}`)
+      return
+    }
 
     setTasks([])
     setPeriodLabel('')
-    setArchiving(false)
-    alert(`New period "${periodLabel}" started. Add new tasks below.`)
+    const summary = [
+      `${result.credited.length} kept their streak`,
+      `${result.reset.length} reset`,
+      result.failed.length ? `${result.failed.length} FAILED (${result.failed.join(', ')})` : '',
+    ].filter(Boolean).join(', ')
+    alert(`New period "${periodLabel}" started. ${summary}. Add new tasks below.`)
   }
 
   async function createGroup() {

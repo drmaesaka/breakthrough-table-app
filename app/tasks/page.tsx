@@ -91,15 +91,11 @@ export default function TasksPage() {
 
     setCompletedIds(newSet)
     const adherence = calcAdherence(newSet, habitDoneToday, tasks.length)
-    const allDone = newSet.size === tasks.length && habitDoneToday && tasks.length > 0
-    const newStreak = allDone ? streak + 1 : streak
 
-    await supabase.from('profiles').update({
-      adherence_percent: adherence,
-      ...(allDone ? { streak: newStreak } : {})
-    }).eq('id', userId)
-
-    if (allDone) setStreak(newStreak)
+    // Streak is credited once per period when the leader rolls the period over,
+    // not here — incrementing on each toggle meant unchecking and rechecking an
+    // item inflated it every time.
+    await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
   }
 
   async function toggleHabit() {
@@ -121,15 +117,7 @@ export default function TasksPage() {
 
     setHabitDoneToday(newHabitDone)
     const adherence = calcAdherence(completedIds, newHabitDone, tasks.length)
-    const allDone = completedIds.size === tasks.length && newHabitDone && tasks.length > 0
-    const newStreak = allDone ? streak + 1 : streak
-
-    await supabase.from('profiles').update({
-      adherence_percent: adherence,
-      ...(allDone ? { streak: newStreak } : {})
-    }).eq('id', userId)
-
-    if (allDone) setStreak(newStreak)
+    await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
   }
 
   const adherence = calcAdherence(completedIds, habitDoneToday, tasks.length)
@@ -146,7 +134,7 @@ export default function TasksPage() {
           {streak > 0 && (
             <div className="text-right">
               <p className="text-2xl">🔥</p>
-              <p className="text-white text-sm font-bold">{streak} streak</p>
+              <p className="text-white text-sm font-bold">{streak} period{streak !== 1 ? 's' : ''}</p>
             </div>
           )}
         </div>
