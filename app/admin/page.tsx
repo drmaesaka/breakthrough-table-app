@@ -24,7 +24,6 @@ export default function AdminPage() {
   const [contentType, setContentType] = useState('video')
   const [contentDesc, setContentDesc] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [assignUserId, setAssignUserId] = useState('')
   const [archiving, setArchiving] = useState(false)
   const [copiedGroupId, setCopiedGroupId] = useState('')
   const [contentError, setContentError] = useState('')
@@ -64,10 +63,6 @@ export default function AdminPage() {
   // Rooms state
   const [rooms, setRooms] = useState<any[]>([])
   const [allBookings, setAllBookings] = useState<any[]>([])
-  const [roomName, setRoomName] = useState('')
-  const [roomDesc, setRoomDesc] = useState('')
-  const [roomCapacity, setRoomCapacity] = useState('')
-  const [roomSaving, setRoomSaving] = useState(false)
   const [adminBookDate, setAdminBookDate] = useState(localDay())
   const [adminBookUserId, setAdminBookUserId] = useState('')
   const [adminBookRoomId, setAdminBookRoomId] = useState('')
@@ -227,27 +222,6 @@ export default function AdminPage() {
     setAllBookings(b || [])
   }
 
-  async function addRoom() {
-    if (!roomName.trim()) return
-    setRoomSaving(true)
-    const supabase = createClient()
-    await supabase.from('rooms').insert({
-      name: roomName.trim(),
-      description: roomDesc.trim() || null,
-      capacity: roomCapacity ? parseInt(roomCapacity) : null,
-    })
-    setRoomName(''); setRoomDesc(''); setRoomCapacity('')
-    setRoomSaving(false)
-    loadRooms()
-  }
-
-  async function deleteRoom(id: string) {
-    if (!confirm('Delete this room and all its bookings?')) return
-    const supabase = createClient()
-    await supabase.from('rooms').delete().eq('id', id)
-    loadRooms()
-  }
-
   async function startNewPeriod() {
     if (!selectedGroup || !periodLabel.trim()) return
     if (!confirm(`Archive all current tasks and start period "${periodLabel}"?`)) return
@@ -321,14 +295,6 @@ export default function AdminPage() {
     setContentSaving(false)
     if (error) { setContentError(error.message); return }
     if (data) { setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc('') }
-  }
-
-  async function assignUser() {
-    if (!assignUserId || !selectedGroup) return
-    const supabase = createClient()
-    await supabase.from('profiles').update({ group_id: selectedGroup }).eq('id', assignUserId)
-    setUsers(p => p.map(u => u.id === assignUserId ? { ...u, group_id: selectedGroup } : u))
-    setAssignUserId('')
   }
 
   async function assignUserToGroup(userId: string, groupId: string) {
@@ -901,10 +867,13 @@ export default function AdminPage() {
           const TIME_SLOTS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00']
           function fmtSlot(t: string) { const [h,m] = t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` }
           function fmtDate(d: string) { return new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) }
-          const [adminDate, setAdminDate] = [adminBookDate, setAdminBookDate] as any
           const todayStr = localDay()
           const dayBookings = allBookings.filter((b:any) => b.booking_date === adminBookDate)
-          const suites = ['Suite 1','Suite 2']
+          // Derived from the rooms themselves rather than hardcoded. This read
+          // ['Suite 1','Suite 2'] while the member booking page uses
+          // ['Suite 145','Suite 120'], so every suite group matched nothing and
+          // the whole dashboard rendered blank.
+          const suites = Array.from(new Set(rooms.map((r: any) => r.suite).filter(Boolean)))
 
           return (
             <div className="space-y-5">

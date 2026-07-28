@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
+import { localDay } from '@/lib/dates'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -26,11 +27,22 @@ export default function DashboardPage() {
       }
 
       if (prof?.group_id) {
-        const { data: tasks } = await supabase.from('tasks').select('id').eq('group_id', prof.group_id)
-        const { data: completions } = await supabase.from('task_completions').select('task_id').eq('user_id', user.id)
+        // Must match /tasks exactly: only the current period's tasks, plus the
+        // daily habit as one more item. Counting archived tasks and omitting
+        // the habit made this number drift further from the tasks page every
+        // period — by period five it showed roughly a fifth of the real figure.
+        const [{ data: tasks }, { data: completions }, { data: habitToday }] = await Promise.all([
+          supabase.from('tasks').select('id').eq('group_id', prof.group_id).eq('archived', false),
+          supabase.from('task_completions').select('task_id').eq('user_id', user.id),
+          supabase.from('habit_completions').select('id')
+            .eq('user_id', user.id).eq('completed_date', localDay()).maybeSingle(),
+        ])
         if (tasks) {
           const completedIds = new Set(completions?.map((c: any) => c.task_id))
-          setTaskStats({ total: tasks.length, completed: tasks.filter((t: any) => completedIds.has(t.id)).length })
+          setTaskStats({
+            total: tasks.length + 1,
+            completed: tasks.filter((t: any) => completedIds.has(t.id)).length + (habitToday ? 1 : 0),
+          })
         }
       }
     }
@@ -83,7 +95,7 @@ export default function DashboardPage() {
               <p className="text-gray-400 text-sm font-medium">Your Adherence This Period</p>
               <div className="flex items-end gap-2 mt-2 mb-3">
                 <span className="text-5xl font-bold text-bt-navy">{adherence}%</span>
-                <span className="text-gray-400 text-sm pb-1.5">{taskStats.completed} of {taskStats.total} tasks</span>
+                <span className="text-gray-400 text-sm pb-1.5">{taskStats.completed} of {taskStats.total} done</span>
               </div>
               <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-bt-blue rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
@@ -100,6 +112,9 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
+                // /journal had no inbound link anywhere, so reflection prompts
+                // were only reachable by typing the URL.
+                { href: '/journal', emoji: '📓', title: 'Reflections', sub: "Your table's prompts" },
                 { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
                 { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
                 { href: '/booking', emoji: '🏢', title: 'Book a Room', sub: 'Reserve your space' },

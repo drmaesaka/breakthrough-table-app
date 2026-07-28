@@ -8,6 +8,8 @@ export default function DirectoryPage() {
   const [members, setMembers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [startingDM, setStartingDM] = useState('')
+  const [dmError, setDmError] = useState('')
   const [myId, setMyId] = useState('')
   const router = useRouter()
 
@@ -31,9 +33,12 @@ export default function DirectoryPage() {
   }, [router])
 
   async function startDM(memberId: string) {
+    if (startingDM) return
+    setStartingDM(memberId)
+    setDmError('')
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) { setStartingDM(''); return }
 
     // Ensure consistent ordering for unique constraint
     const [p1, p2] = [user.id, memberId].sort()
@@ -50,13 +55,31 @@ export default function DirectoryPage() {
       return
     }
 
-    const { data: newConvo } = await supabase
+    const { data: newConvo, error } = await supabase
       .from('dm_conversations')
       .insert({ participant_1: p1, participant_2: p2 })
       .select()
       .single()
 
-    if (newConvo) router.push(`/dm/${newConvo.id}`)
+    if (newConvo) {
+      router.push(`/dm/${newConvo.id}`)
+      return
+    }
+
+    // Two people tapping Message on each other at once both miss the lookup
+    // above and both insert; the loser hits the unique constraint, so retry the
+    // read rather than telling them it failed.
+    if (error?.code === '23505') {
+      const { data: raced } = await supabase
+        .from('dm_conversations').select('id')
+        .eq('participant_1', p1).eq('participant_2', p2).maybeSingle()
+      if (raced) { router.push(`/dm/${raced.id}`); return }
+    }
+
+    // Previously this returned silently, so the button did nothing at all.
+    console.error('dm_conversations insert failed:', error?.message)
+    setDmError("Couldn't start that conversation. Please try again.")
+    setStartingDM('')
   }
 
   function getInitials(name: string) {
@@ -80,7 +103,11 @@ export default function DirectoryPage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-5">
         <h1 className="text-white text-2xl font-bold">Member Directory</h1>
-        <p className="text-bt-light/60 text-sm mt-0.5">{members.length} members opted in</p>
+        {/* members excludes the viewer, so "N opted in" always read one higher
+            than the number of cards below it. */}
+        <p className="text-bt-light/60 text-sm mt-0.5">
+          {members.length} other {members.length === 1 ? 'member' : 'members'} opted in
+        </p>
         <div className="mt-3">
           <input
             value={search}
@@ -92,6 +119,11 @@ export default function DirectoryPage() {
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-3">
+        {dmError && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 text-center">
+            <p className="text-red-700 text-sm font-medium">{dmError}</p>
+          </div>
+        )}
         {filtered.length === 0 && !loading && (
           <div className="text-center py-16">
             <p className="text-5xl mb-3">👥</p>
@@ -133,8 +165,9 @@ export default function DirectoryPage() {
                   )}
                   <button
                     onClick={() => startDM(member.id)}
-                    className="text-xs bg-bt-navy text-white px-3 py-1.5 rounded-full font-medium">
-                    💬 Message
+                    disabled={!!startingDM}
+                    className="text-xs bg-bt-navy text-white px-3 py-1.5 rounded-full font-medium disabled:opacity-50">
+                    {startingDM === member.id ? 'Opening…' : '💬 Message'}
                   </button>
                 </div>
               </div>

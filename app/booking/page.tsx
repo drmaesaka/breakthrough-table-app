@@ -265,7 +265,7 @@ export default function BookingPage() {
                                       isPicked ? 'bg-bt-navy text-white' :
                                       'bg-bt-pale text-bt-navy'
                                     }`}>
-                                    {isBooked ? formatSlot(slot) : formatSlot(slot)}
+                                    {formatSlot(slot)}
                                   </button>
                                 )
                               })}
