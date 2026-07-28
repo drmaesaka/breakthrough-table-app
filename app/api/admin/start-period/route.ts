@@ -33,6 +33,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Not the leader of this group' }, { status: 403 })
   }
 
+  // Whether the period being closed actually had tasks. With no tasks,
+  // adherence reduces to "did you do your habit today", so everyone who did
+  // sits at 100% and would be credited a period streak for completing nothing.
+  const { count: closingTaskCount } = await supabase
+    .from('tasks')
+    .select('id', { count: 'exact', head: true })
+    .eq('group_id', group_id)
+    .eq('archived', false)
+
+  const periodHadTasks = (closingTaskCount ?? 0) > 0
+
   const { error: archiveError } = await supabase
     .from('tasks')
     .update({ archived: true })
@@ -79,11 +90,16 @@ export async function POST(req: NextRequest) {
   const failed: string[] = []
 
   for (const m of members || []) {
-    const finishedPeriod = (m.adherence_percent || 0) >= 100
-    const streak = finishedPeriod ? (m.streak || 0) + 1 : 0
+    const finishedPeriod = periodHadTasks && (m.adherence_percent || 0) >= 100
+    // An empty period leaves streaks alone entirely — crediting it would reward
+    // doing nothing, and zeroing it would punish a period nobody could complete.
+    const streakUpdate = periodHadTasks
+      ? { streak: finishedPeriod ? (m.streak || 0) + 1 : 0 }
+      : {}
+
     const { error } = await supabase
       .from('profiles')
-      .update({ streak, adherence_percent: 0 })
+      .update({ ...streakUpdate, adherence_percent: 0 })
       .eq('id', m.id)
 
     const name = m.full_name || m.id
@@ -94,6 +110,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     members: (members || []).length,
+    period_had_tasks: periodHadTasks,
     credited,
     reset,
     failed,
