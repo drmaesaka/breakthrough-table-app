@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
-import InstallBanner from '@/components/InstallBanner'
+import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
 
 export default function DashboardPage() {
@@ -60,7 +60,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="py-5 pb-28 space-y-4">
-        <InstallBanner />
+        <PushSetupBanner />
         <div className="px-5 space-y-4">
         {/* No group state */}
         {profile && !profile.group_id && (

@@ -58,11 +58,13 @@ export async function POST(req: NextRequest) {
     if (!timeWindow.includes(t)) timeWindow.push(t)
   }
 
-  // Get participants with their preferences and habit info
+  // Get members with their preferences and habit info. Leaders are included
+  // only once they have a nudge_preferences row — participants get nudges by
+  // default, leaders opt in by saving their Nudge Settings.
   const { data: participants } = await supabase
     .from('profiles')
-    .select('id, full_name, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
-    .eq('role', 'participant')
+    .select('id, full_name, role, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
+    .in('role', ['participant', 'leader'])
     .not('group_id', 'is', null)
 
   if (!participants || participants.length === 0) {
@@ -115,6 +117,7 @@ export async function POST(req: NextRequest) {
     participants
       .filter(p => {
         const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
+        if (p.role === 'leader' && !prefs) return false
         if (prefs && prefs.enabled === false) return false
         // Only nudge if habit not done OR reading not done
         if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) return false
@@ -200,7 +203,6 @@ export async function POST(req: NextRequest) {
         .from('profiles')
         .select('id, full_name')
         .eq('group_id', setting.group_id)
-        .eq('role', 'participant')
 
       if (!groupParticipants) continue
 
