@@ -43,7 +43,7 @@ export default function DirectoryPage() {
       .select('id')
       .eq('participant_1', p1)
       .eq('participant_2', p2)
-      .single()
+      .maybeSingle()
 
     if (existing) {
       router.push(`/dm/${existing.id}`)

@@ -55,7 +55,7 @@ export default function PreferencesPage() {
         .from('nudge_preferences')
         .select('*')
         .eq('user_id', user.id)
-        .single()
+        .maybeSingle()
 
       if (prefs) {
         setEnabled(prefs.enabled)

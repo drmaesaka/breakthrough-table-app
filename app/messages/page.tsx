@@ -59,7 +59,7 @@ export default function MessagesPage() {
         .eq('conversation_id', convo.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
       return { ...convo, other: prof, otherId, lastMsg }
     }))
 

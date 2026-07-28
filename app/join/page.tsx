@@ -22,7 +22,7 @@ function JoinForm() {
     setGroupId(gid)
     async function fetchGroup() {
       const supabase = createClient()
-      const { data } = await supabase.from('groups').select('name').eq('id', gid).single()
+      const { data } = await supabase.from('groups').select('name').eq('id', gid).maybeSingle()
       if (data) setGroupName(data.name)
     }
     fetchGroup()
