@@ -8,6 +8,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // ?dry=1 reports what would be sent without sending — see send-nudges.
+  const dryRun = new URL(req.url).searchParams.get('dry') === '1'
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!
@@ -93,7 +96,7 @@ export async function POST(req: NextRequest) {
       const sub = subMap[p.id]
       if (!sub) return null
       const firstName = p.full_name?.split(' ')[0] || 'there'
-      const result = await sendPush(sub, {
+      const result = dryRun ? 'would-send' : await sendPush(sub, {
         title: 'Breakthrough Table',
         body: `Hey ${firstName} — time to check in your habit and reading for today! 📋`,
         url: '/tasks',
@@ -106,5 +109,6 @@ export async function POST(req: NextRequest) {
   )
 
   const sent = results.filter(r => r === true).length
-  return NextResponse.json({ sent })
+  const wouldSend = results.filter(r => r === 'would-send').length
+  return NextResponse.json({ dry_run: dryRun, sent, would_send: wouldSend })
 }

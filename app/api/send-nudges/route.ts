@@ -8,6 +8,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // ?dry=1 evaluates and reports exactly who is due without sending anything.
+  // The diagnostics in this response are worth inspecting at any time, but
+  // every plain call is a live send — polling this endpoint to check state
+  // will spam whoever happens to be due right now.
+  const dryRun = new URL(req.url).searchParams.get('dry') === '1'
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!
@@ -216,7 +222,9 @@ export async function POST(req: NextRequest) {
           })
           return null
         }
-        const result = await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/tasks' })
+        const result = dryRun
+          ? 'would-send'
+          : await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/tasks' })
         if (result === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', participant.id)
         return { id: participant.id, name: participant.full_name, message, result }
       })
@@ -250,7 +258,9 @@ export async function POST(req: NextRequest) {
       for (const p of groupParticipants) {
         const sub = subMap[p.id]
         if (!sub) continue
-        const res = await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
+        const res = dryRun
+          ? 'would-send'
+          : await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
         if (res === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', p.id)
         reminderResults.push({ id: p.id, name: p.full_name, result: res })
       }
@@ -266,6 +276,7 @@ export async function POST(req: NextRequest) {
   const reminderHardFailed = reminderResults.filter(r => r.result === false).length
 
   const body = {
+    dry_run: dryRun,
     nudges_delivered: delivered,
     nudges_failed: hardFailed,
     reminders_delivered: reminderDelivered,
