@@ -15,14 +15,11 @@ export async function POST(req: NextRequest) {
 
   const now = new Date()
 
-  const timeWindow: string[] = []
-  for (let offset = 0; offset < 30; offset++) {
-    const d = new Date(now.getTime() - offset * 60 * 1000)
-    const h = d.getUTCHours().toString().padStart(2, '0')
-    const m = d.getUTCMinutes() < 30 ? '00' : '30'
-    const t = `${h}:${m}`
-    if (!timeWindow.includes(t)) timeWindow.push(t)
-  }
+  // Only the half-hour slot this run belongs to — a trailing 30-minute
+  // lookback overlapped the previous slot and sent each check-in twice.
+  const timeWindow: string[] = [
+    `${now.getUTCHours().toString().padStart(2, '0')}:${now.getUTCMinutes() < 30 ? '00' : '30'}`,
+  ]
 
   function localTimeToUTC(localTime: string, timezone: string): string {
     try {

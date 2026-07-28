@@ -1,12 +1,10 @@
 name: Nudge cron
 
+# Manual trigger only. GitHub's scheduled queue never fired this workflow once
+# in 78 minutes, so cron-job.org drives the real schedule; leaving a second
+# scheduler armed here would double-nudge every member. Kept for on-demand
+# testing: gh workflow run nudge-cron.yml
 on:
-  schedule:
-    # Every 30 minutes, deliberately off :00 and :30 — GitHub queues scheduled
-    # runs globally and the top and half of the hour are the most congested,
-    # where runs get delayed or dropped outright. A run delayed past the
-    # endpoint's 30-minute matching window misses that nudge entirely.
-    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 jobs:

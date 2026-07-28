@@ -48,15 +48,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Current UTC window (last 30 min, snapped to :00 or :30)
-  const timeWindow: string[] = []
-  for (let offset = 0; offset < 30; offset++) {
-    const d = new Date(now.getTime() - offset * 60 * 1000)
-    const h = d.getUTCHours().toString().padStart(2, '0')
-    const m = d.getUTCMinutes() < 30 ? '00' : '30'
-    const t = `${h}:${m}`
-    if (!timeWindow.includes(t)) timeWindow.push(t)
-  }
+  // The half-hour slot this run belongs to. This used to look back a trailing
+  // 30 minutes, which overlapped the previous slot: a cron firing at :00 and
+  // :30 matched a 09:00 nudge time on both runs and sent every member two
+  // notifications for one scheduled time. Matching only the current block
+  // keeps it to exactly one, at the cost of missing a slot entirely if a run
+  // is delayed past its own block — which the scheduler alerts on.
+  const timeWindow: string[] = [
+    `${now.getUTCHours().toString().padStart(2, '0')}:${now.getUTCMinutes() < 30 ? '00' : '30'}`,
+  ]
 
   // Get members with their preferences and habit info. Leaders are included
   // only once they have a nudge_preferences row — participants get nudges by
