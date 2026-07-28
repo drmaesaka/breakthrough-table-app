@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { localDay } from '@/lib/dates'
 
 export default function AnalyticsPage() {
   const [groups, setGroups] = useState<any[]>([])
@@ -10,7 +11,7 @@ export default function AnalyticsPage() {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
   const router = useRouter()
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = localDay()
 
   useEffect(() => {
     async function load() {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { localDay } from '@/lib/dates'
 
 const TIME_SLOTS = [
   '08:00','09:00','10:00','11:00','12:00',
@@ -23,7 +24,7 @@ function endSlot(t: string) {
 
 export default function BookingPage() {
   const [rooms, setRooms] = useState<any[]>([])
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(localDay())
   const [bookings, setBookings] = useState<any[]>([])
   const [myBookings, setMyBookings] = useState<any[]>([])
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
@@ -35,7 +36,7 @@ export default function BookingPage() {
   const [bookingSuccess, setBookingSuccess] = useState(false)
   const router = useRouter()
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = localDay()
 
   useEffect(() => {
     async function load() {

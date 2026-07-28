@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { localDay } from '@/lib/dates'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([])
@@ -18,7 +19,7 @@ export default function TasksPage() {
   const [habitJustDone, setHabitJustDone] = useState(false)
   const router = useRouter()
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = localDay()
 
   useEffect(() => { loadTasks() }, [])
 
@@ -59,7 +60,7 @@ export default function TasksPage() {
       const d = new Date()
       if (!doneToday) d.setDate(d.getDate() - 1)
       let streak = 0
-      while (dates.has(d.toISOString().split('T')[0])) {
+      while (dates.has(localDay(d))) {
         streak++
         d.setDate(d.getDate() - 1)
       }

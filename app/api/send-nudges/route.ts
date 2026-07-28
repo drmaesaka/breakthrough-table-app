@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
+import { dayInTimezone } from '@/lib/dates'
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -18,8 +19,6 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!
   )
-
-  const today = new Date().toISOString().split('T')[0]
 
   const now = new Date()
 
@@ -96,13 +95,25 @@ export async function POST(req: NextRequest) {
     .in('user_id', participantIds)
   const subMap: Record<string, any> = Object.fromEntries((allSubs || []).map((s: any) => [s.user_id, s]))
 
-  // Get today's habit completions
-  const { data: habitDoneToday } = await supabase
+  // "Today" is each member's own calendar day, so a single UTC date would check
+  // the wrong day for anyone whose timezone has already rolled over. Fetch a
+  // three-day window and match each member against their own day.
+  const dayWindow = [-1, 0, 1].map(offset =>
+    new Date(now.getTime() + offset * 86400000).toISOString().split('T')[0]
+  )
+  const { data: habitRows } = await supabase
     .from('habit_completions')
-    .select('user_id')
-    .eq('completed_date', today)
+    .select('user_id, completed_date')
+    .in('completed_date', dayWindow)
 
-  const habitDoneSet = new Set((habitDoneToday || []).map((h: any) => h.user_id))
+  const habitDaysByUser = new Map<string, Set<string>>()
+  for (const row of habitRows || []) {
+    const set = habitDaysByUser.get(row.user_id) ?? new Set<string>()
+    set.add(row.completed_date)
+    habitDaysByUser.set(row.user_id, set)
+  }
+  const habitDoneFor = (userId: string, timezone: string) =>
+    habitDaysByUser.get(userId)?.has(dayInTimezone(timezone, now)) ?? false
 
   // Get reading completions for current period (tasks not archived)
   // We check if user has completed ALL current tasks for their group
@@ -153,7 +164,7 @@ export async function POST(req: NextRequest) {
         if (p.role === 'leader' && !prefs) return skip('leader has not saved nudge settings yet')
         if (prefs && prefs.enabled === false) return skip('nudges turned off in their settings')
         // Only nudge if habit not done OR reading not done
-        if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) {
+        if (habitDoneFor(p.id, userTZ) && readingDoneSet.has(p.id)) {
           return skip('habit and reading both already done')
         }
         // Convert user's local nudge times to UTC and check against current window
@@ -169,7 +180,7 @@ export async function POST(req: NextRequest) {
         const prefs = Array.isArray(participant.nudge_preferences) ? participant.nudge_preferences[0] : participant.nudge_preferences
         const tone = prefs?.tone || 'encouraging'
 
-        const habitDone = habitDoneSet.has(participant.id)
+        const habitDone = habitDoneFor(participant.id, prefs?.timezone || 'America/Chicago')
         const readingDone = readingDoneSet.has(participant.id)
 
         // Pick what to nudge about

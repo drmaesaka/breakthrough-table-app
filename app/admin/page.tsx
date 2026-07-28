@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { MEETING_PLANS, type MeetingPlan } from '@/lib/meeting-plans'
+import { localDay } from '@/lib/dates'
 
 type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings'
 
@@ -67,7 +68,7 @@ export default function AdminPage() {
   const [roomDesc, setRoomDesc] = useState('')
   const [roomCapacity, setRoomCapacity] = useState('')
   const [roomSaving, setRoomSaving] = useState(false)
-  const [adminBookDate, setAdminBookDate] = useState(new Date().toISOString().split('T')[0])
+  const [adminBookDate, setAdminBookDate] = useState(localDay())
   const [adminBookUserId, setAdminBookUserId] = useState('')
   const [adminBookRoomId, setAdminBookRoomId] = useState('')
   const [adminBookTime, setAdminBookTime] = useState('')
@@ -219,7 +220,7 @@ export default function AdminPage() {
       supabase.from('rooms').select('*').order('name'),
       supabase.from('room_bookings')
         .select('*, rooms(name), profiles(full_name)')
-        .gte('booking_date', new Date().toISOString().split('T')[0])
+        .gte('booking_date', localDay())
         .order('booking_date', { ascending: true }),
     ])
     setRooms(r || [])
@@ -879,7 +880,7 @@ export default function AdminPage() {
           function fmtSlot(t: string) { const [h,m] = t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` }
           function fmtDate(d: string) { return new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) }
           const [adminDate, setAdminDate] = [adminBookDate, setAdminBookDate] as any
-          const todayStr = new Date().toISOString().split('T')[0]
+          const todayStr = localDay()
           const dayBookings = allBookings.filter((b:any) => b.booking_date === adminBookDate)
           const suites = ['Suite 1','Suite 2']
 
