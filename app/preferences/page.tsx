@@ -41,6 +41,8 @@ export default function PreferencesPage() {
   const [requestingPermission, setRequestingPermission] = useState(false)
   const [pushSupport, setPushSupport] = useState<'supported' | 'ios-install' | 'unsupported'>('supported')
   const [enableError, setEnableError] = useState('')
+  const [testSending, setTestSending] = useState(false)
+  const [testStatus, setTestStatus] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -100,6 +102,24 @@ export default function PreferencesPage() {
       }
     }
     setRequestingPermission(false)
+  }
+
+  async function sendTestNotification() {
+    setTestSending(true)
+    setTestStatus('')
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/push-test', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+      })
+      const body = await res.json()
+      setTestStatus(res.ok ? 'Sent! It should appear on this device within a few seconds.' : body.error || 'Test send failed.')
+    } catch {
+      setTestStatus('Test send failed — check your connection and try again.')
+    }
+    setTestSending(false)
   }
 
   // Keep nudgeTimes array in sync with frequency
@@ -231,6 +251,25 @@ export default function PreferencesPage() {
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Test push — confirms the full pipeline to this exact device */}
+        {pushSupport === 'supported' && notifPermission === 'granted' && (
+          <div className="bg-white rounded-2xl px-5 py-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold text-gray-900 text-sm">Notifications enabled</p>
+                <p className="text-gray-400 text-xs mt-0.5">Send a test to make sure they reach this device</p>
+              </div>
+              <button onClick={sendTestNotification} disabled={testSending}
+                className="bg-bt-navy text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50 flex-shrink-0">
+                {testSending ? 'Sending...' : 'Send Test'}
+              </button>
+            </div>
+            {testStatus && (
+              <p className={`text-xs mt-2 leading-relaxed ${testStatus.startsWith('Sent!') ? 'text-green-600' : 'text-red-600'}`}>{testStatus}</p>
+            )}
           </div>
         )}
 

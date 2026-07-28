@@ -21,13 +21,18 @@ export async function POST(req: NextRequest) {
 
   const subscription = await req.json()
 
-  await supabase.from('push_subscriptions').upsert({
+  const { error } = await supabase.from('push_subscriptions').upsert({
     user_id: user.id,
     endpoint: subscription.endpoint,
     p256dh: subscription.keys.p256dh,
     auth: subscription.keys.auth,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'user_id' })
+
+  if (error) {
+    console.error('push_subscriptions upsert failed:', error.message, error.code)
+    return NextResponse.json({ error: 'Failed to save subscription' }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true })
 }
