@@ -2,9 +2,11 @@ name: Nudge cron
 
 on:
   schedule:
-    # Every 30 minutes. GitHub cron is best-effort; runs can lag a few
-    # minutes, which is fine because the endpoint matches a 30-min window.
-    - cron: "*/30 * * * *"
+    # Every 30 minutes, deliberately off :00 and :30 — GitHub queues scheduled
+    # runs globally and the top and half of the hour are the most congested,
+    # where runs get delayed or dropped outright. A run delayed past the
+    # endpoint's 30-minute matching window misses that nudge entirely.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 jobs:

@@ -124,19 +124,41 @@ export async function POST(req: NextRequest) {
     if (allRead) readingDoneSet.add(p.id)
   }
 
+  // Why each member was passed over. A nudge that never arrives is otherwise
+  // indistinguishable from one that was never due, which makes "why didn't I
+  // get nudged?" unanswerable without guessing.
+  const skipped: Array<{ name: string; reason: string }> = []
+
   const results = await Promise.all(
     participants
       .filter(p => {
         const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
-        if (p.role === 'leader' && !prefs) return false
-        if (prefs && prefs.enabled === false) return false
+        const name = p.full_name || p.id
+        if (p.role === 'leader' && !prefs) {
+          skipped.push({ name, reason: 'leader has not saved nudge settings yet' })
+          return false
+        }
+        if (prefs && prefs.enabled === false) {
+          skipped.push({ name, reason: 'nudges turned off in their settings' })
+          return false
+        }
         // Only nudge if habit not done OR reading not done
-        if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) return false
+        if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) {
+          skipped.push({ name, reason: 'habit and reading both already done' })
+          return false
+        }
         // Convert user's local nudge times to UTC and check against current window
         const nudgeTimes: string[] = prefs?.nudge_times || ['09:00']
         const userTZ: string = prefs?.timezone || 'America/Chicago'
-        const scheduledNow = nudgeTimes.some(t => timeWindow.includes(localTimeToUTC(t, userTZ)))
-        return scheduledNow
+        const slotsUTC = nudgeTimes.map(t => localTimeToUTC(t, userTZ))
+        if (!slotsUTC.some(t => timeWindow.includes(t))) {
+          skipped.push({
+            name,
+            reason: `no nudge time in this window — theirs: ${nudgeTimes.join(', ')} ${userTZ} (${slotsUTC.join(', ')} UTC)`,
+          })
+          return false
+        }
+        return true
       })
       .map(async (participant) => {
         const firstName = participant.full_name?.split(' ')[0] || 'there'
@@ -189,7 +211,13 @@ export async function POST(req: NextRequest) {
         }
 
         const sub = subMap[participant.id]
-        if (!sub) return null
+        if (!sub) {
+          skipped.push({
+            name: participant.full_name || participant.id,
+            reason: 'due for a nudge, but no push subscription saved for this account',
+          })
+          return null
+        }
         const result = await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/tasks' })
         if (result === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', participant.id)
         return { id: participant.id, name: participant.full_name, message, result }
@@ -244,6 +272,9 @@ export async function POST(req: NextRequest) {
     nudges_failed: hardFailed,
     reminders_delivered: reminderDelivered,
     reminders_failed: reminderHardFailed,
+    utc_window: timeWindow,
+    members_considered: participants.length,
+    skipped,
     results,
     reminderResults,
   }
