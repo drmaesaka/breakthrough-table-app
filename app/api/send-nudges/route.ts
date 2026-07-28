@@ -126,19 +126,45 @@ export async function POST(req: NextRequest) {
     .from('task_completions')
     .select('user_id, task_id')
 
-  // Build: which users have finished all reading for their group
+  // Build: which users have finished all reading for their group, and what each
+  // member's adherence actually is right now.
   const readingDoneSet = new Set<string>()
+  const freshAdherence = new Map<string, number>()
   for (const p of participants) {
     const groupTasks = (allTasks || []).filter((t: any) => t.group_id === p.group_id)
-    if (groupTasks.length === 0) {
-      readingDoneSet.add(p.id) // no reading assigned = reading done
-      continue
-    }
     const userCompletedIds = new Set(
       (allCompletions || []).filter((c: any) => c.user_id === p.id).map((c: any) => c.task_id)
     )
-    const allRead = groupTasks.every((t: any) => userCompletedIds.has(t.id))
-    if (allRead) readingDoneSet.add(p.id)
+    if (groupTasks.length === 0) {
+      readingDoneSet.add(p.id) // no reading assigned = reading done
+    } else if (groupTasks.every((t: any) => userCompletedIds.has(t.id))) {
+      readingDoneSet.add(p.id)
+    }
+
+    const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
+    const habitDone = habitDoneFor(p.id, prefs?.timezone || 'America/Chicago')
+    // Same formula the tasks page uses: every task plus the daily habit.
+    const total = groupTasks.length + 1
+    const done = groupTasks.filter((t: any) => userCompletedIds.has(t.id)).length + (habitDone ? 1 : 0)
+    freshAdherence.set(p.id, Math.round((done / total) * 100))
+  }
+
+  // adherence_percent was only ever written when a member tapped something on
+  // /tasks, so the leaderboard drifted: a leader adding a task left everyone's
+  // number wrong, and stale 100%s survived the daily habit reset. Recomputing
+  // on every cron run bounds the staleness to one run.
+  const adherenceUpdates: string[] = []
+  if (!dryRun) {
+    for (const p of participants) {
+      const next = freshAdherence.get(p.id)
+      if (next === undefined || next === (p.adherence_percent ?? null)) continue
+      const { error } = await supabase
+        .from('profiles')
+        .update({ adherence_percent: next })
+        .eq('id', p.id)
+      if (error) console.error('adherence update failed:', p.id, error.message)
+      else adherenceUpdates.push(`${p.full_name || p.id}: ${p.adherence_percent ?? '—'}→${next}`)
+    }
   }
 
   // Why each member was passed over. A nudge that never arrives is otherwise
@@ -297,6 +323,7 @@ export async function POST(req: NextRequest) {
     // Who could receive a push right now, regardless of whether one was due.
     // Without this, a member whose notifications never worked stays invisible
     // until their nudge time arrives and quietly delivers nothing.
+    adherence_updated: adherenceUpdates,
     push_ready: participants.filter(p => subMap[p.id]).length,
     members_without_push: participants.filter(p => !subMap[p.id]).map(p => p.full_name || p.id),
     skipped,
