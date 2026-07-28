@@ -32,12 +32,15 @@ export default function PreferencesPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   const [enabled, setEnabled] = useState(true)
   const [frequency, setFrequency] = useState(1)
   const [nudgeTimes, setNudgeTimes] = useState(['09:00'])
   const [tone, setTone] = useState('encouraging')
   const [notifPermission, setNotifPermission] = useState<string>('default')
   const [requestingPermission, setRequestingPermission] = useState(false)
+  const [pushSupport, setPushSupport] = useState<'supported' | 'ios-install' | 'unsupported'>('supported')
+  const [enableError, setEnableError] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -64,6 +67,15 @@ export default function PreferencesPage() {
         setNotifPermission(Notification.permission)
       }
 
+      // iOS Safari only exposes push APIs once the app is installed to the
+      // Home Screen — without this check, "Allow Notifications" silently no-ops
+      if (typeof window !== 'undefined' && (!('serviceWorker' in navigator) || !('PushManager' in window))) {
+        const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+        const isInstalled = window.matchMedia('(display-mode: standalone)').matches
+          || (window.navigator as any).standalone === true
+        setPushSupport(isIOS && !isInstalled ? 'ios-install' : 'unsupported')
+      }
+
       setLoading(false)
     }
     load()
@@ -71,6 +83,7 @@ export default function PreferencesPage() {
 
   async function enableNotifications() {
     setRequestingPermission(true)
+    setEnableError('')
     try {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
@@ -80,7 +93,11 @@ export default function PreferencesPage() {
       setNotifPermission('granted')
     } catch (e: any) {
       console.error(e)
-      if (e?.message === 'Permission denied') setNotifPermission('denied')
+      if (e?.message === 'Permission denied') {
+        setNotifPermission('denied')
+      } else {
+        setEnableError("Something went wrong enabling notifications. Close the app fully, reopen it, and try again.")
+      }
     }
     setRequestingPermission(false)
   }
@@ -118,7 +135,7 @@ export default function PreferencesPage() {
 
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
-    await supabase.from('nudge_preferences').upsert({
+    const { error } = await supabase.from('nudge_preferences').upsert({
       user_id: user.id,
       enabled,
       frequency,
@@ -129,6 +146,11 @@ export default function PreferencesPage() {
     }, { onConflict: 'user_id' })
 
     setSaving(false)
+    if (error) {
+      setSaveError(true)
+      setTimeout(() => setSaveError(false), 4000)
+      return
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
@@ -158,8 +180,33 @@ export default function PreferencesPage() {
 
       <div className="px-5 py-5 pb-28 space-y-4">
 
-        {/* Permission prompt — only shows if not yet granted */}
-        {notifPermission !== 'granted' && (
+        {/* Push setup — install instructions, permission prompt, or blocked notice */}
+        {pushSupport === 'ios-install' ? (
+          <div className="rounded-2xl p-5 shadow-sm bg-amber-50 border-2 border-amber-100">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">📲</span>
+              <div className="flex-1">
+                <p className="font-semibold text-amber-800 text-sm">Install the app to get nudges</p>
+                <p className="text-amber-700 text-xs mt-1 leading-relaxed">
+                  On iPhone, notifications only work once this app is on your Home Screen.
+                  In Safari, tap <span className="font-semibold">Share</span> then{' '}
+                  <span className="font-semibold">"Add to Home Screen"</span>. Then open
+                  Breakthrough Table from your Home Screen and tap Allow Notifications here.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : pushSupport === 'unsupported' ? (
+          <div className="rounded-2xl p-5 shadow-sm bg-amber-50 border-2 border-amber-100">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">🔔</span>
+              <div className="flex-1">
+                <p className="font-semibold text-amber-800 text-sm">Notifications not supported here</p>
+                <p className="text-amber-700 text-xs mt-1 leading-relaxed">This browser can't receive push notifications. Try opening the app in Safari (iPhone) or Chrome (Android) instead.</p>
+              </div>
+            </div>
+          </div>
+        ) : notifPermission !== 'granted' && (
           <div className={`rounded-2xl p-5 shadow-sm ${notifPermission === 'denied' ? 'bg-amber-50 border-2 border-amber-100' : 'bg-bt-blue/10 border-2 border-bt-blue/20'}`}>
             <div className="flex items-start gap-3">
               <span className="text-2xl">🔔</span>
@@ -177,6 +224,9 @@ export default function PreferencesPage() {
                       className="mt-3 bg-bt-navy text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50">
                       {requestingPermission ? 'Enabling...' : 'Allow Notifications'}
                     </button>
+                    {enableError && (
+                      <p className="text-red-600 text-xs mt-2 leading-relaxed">{enableError}</p>
+                    )}
                   </>
                 )}
               </div>
@@ -273,8 +323,8 @@ export default function PreferencesPage() {
 
         {/* Save button */}
         <button onClick={save} disabled={saving}
-          className="w-full bg-bt-navy text-white py-4 rounded-2xl font-semibold text-base disabled:opacity-50 transition-opacity">
-          {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save Preferences'}
+          className={`w-full py-4 rounded-2xl font-semibold text-base disabled:opacity-50 transition-opacity ${saveError ? 'bg-red-600 text-white' : 'bg-bt-navy text-white'}`}>
+          {saving ? 'Saving...' : saveError ? "Couldn't save — try again" : saved ? '✓ Saved!' : 'Save Preferences'}
         </button>
 
       </div>

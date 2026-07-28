@@ -59,7 +59,7 @@ async function subscribe(reg: ServiceWorkerRegistration, userId: string) {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) return
 
-  await fetch('/api/push-subscribe', {
+  const res = await fetch('/api/push-subscribe', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -67,6 +67,9 @@ async function subscribe(reg: ServiceWorkerRegistration, userId: string) {
     },
     body: JSON.stringify(sub.toJSON()),
   })
+  // Without this check a failed save looks like success: the browser shows
+  // permission granted but the server has no subscription to push to.
+  if (!res.ok) throw new Error(`Push subscription save failed (${res.status})`)
 }
 
 function urlBase64ToUint8Array(base64String: string) {
