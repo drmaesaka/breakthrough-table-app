@@ -127,36 +127,33 @@ export async function POST(req: NextRequest) {
   // Why each member was passed over. A nudge that never arrives is otherwise
   // indistinguishable from one that was never due, which makes "why didn't I
   // get nudged?" unanswerable without guessing.
-  const skipped: Array<{ name: string; reason: string }> = []
+  const skipped: Array<{ name: string; reason: string; times: string }> = []
 
   const results = await Promise.all(
     participants
       .filter(p => {
         const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
         const name = p.full_name || p.id
-        if (p.role === 'leader' && !prefs) {
-          skipped.push({ name, reason: 'leader has not saved nudge settings yet' })
-          return false
-        }
-        if (prefs && prefs.enabled === false) {
-          skipped.push({ name, reason: 'nudges turned off in their settings' })
-          return false
-        }
-        // Only nudge if habit not done OR reading not done
-        if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) {
-          skipped.push({ name, reason: 'habit and reading both already done' })
-          return false
-        }
-        // Convert user's local nudge times to UTC and check against current window
+        // Report the configured times on every skip, whichever check fired.
+        // Otherwise an earlier reason hides whether their settings ever saved,
+        // which is the first thing anyone asks about a missing nudge.
         const nudgeTimes: string[] = prefs?.nudge_times || ['09:00']
         const userTZ: string = prefs?.timezone || 'America/Chicago'
+        const times = prefs
+          ? `${nudgeTimes.join(', ')} ${userTZ}`
+          : 'no saved settings (default 09:00 America/Chicago)'
+        const skip = (reason: string) => { skipped.push({ name, reason, times }); return false }
+
+        if (p.role === 'leader' && !prefs) return skip('leader has not saved nudge settings yet')
+        if (prefs && prefs.enabled === false) return skip('nudges turned off in their settings')
+        // Only nudge if habit not done OR reading not done
+        if (habitDoneSet.has(p.id) && readingDoneSet.has(p.id)) {
+          return skip('habit and reading both already done')
+        }
+        // Convert user's local nudge times to UTC and check against current window
         const slotsUTC = nudgeTimes.map(t => localTimeToUTC(t, userTZ))
         if (!slotsUTC.some(t => timeWindow.includes(t))) {
-          skipped.push({
-            name,
-            reason: `no nudge time in this window — theirs: ${nudgeTimes.join(', ')} ${userTZ} (${slotsUTC.join(', ')} UTC)`,
-          })
-          return false
+          return skip(`no nudge time in this window (${slotsUTC.join(', ')} UTC)`)
         }
         return true
       })
@@ -215,6 +212,7 @@ export async function POST(req: NextRequest) {
           skipped.push({
             name: participant.full_name || participant.id,
             reason: 'due for a nudge, but no push subscription saved for this account',
+            times: `${prefs?.nudge_times?.join(', ') || '09:00'} ${prefs?.timezone || 'America/Chicago'}`,
           })
           return null
         }
