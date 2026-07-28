@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   // default, leaders opt in by saving their Nudge Settings.
   const { data: participants, error: participantsError } = await supabase
     .from('profiles')
-    .select('id, full_name, role, group_id, adherence_percent, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
+    .select('id, full_name, role, group_id, adherence_percent, streak, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
     .in('role', ['participant', 'leader'])
     .not('group_id', 'is', null)
 
@@ -154,17 +154,20 @@ export async function POST(req: NextRequest) {
   // number wrong, and stale 100%s survived the daily habit reset. Recomputing
   // on every cron run bounds the staleness to one run.
   const adherenceUpdates: string[] = []
-  if (!dryRun) {
-    for (const p of participants) {
-      const next = freshAdherence.get(p.id)
-      if (next === undefined || next === (p.adherence_percent ?? null)) continue
+  for (const p of participants) {
+    const next = freshAdherence.get(p.id)
+    if (next === undefined || next === (p.adherence_percent ?? null)) continue
+    if (!dryRun) {
       const { error } = await supabase
         .from('profiles')
         .update({ adherence_percent: next })
         .eq('id', p.id)
-      if (error) console.error('adherence update failed:', p.id, error.message)
-      else adherenceUpdates.push(`${p.full_name || p.id}: ${p.adherence_percent ?? '—'}→${next}`)
+      if (error) {
+        console.error('adherence update failed:', p.id, error.message)
+        continue
+      }
     }
+    adherenceUpdates.push(`${p.full_name || p.id}: ${p.adherence_percent ?? '—'}→${next}`)
   }
 
   // Why each member was passed over. A nudge that never arrives is otherwise
@@ -324,6 +327,16 @@ export async function POST(req: NextRequest) {
     // Without this, a member whose notifications never worked stays invisible
     // until their nudge time arrives and quietly delivers nothing.
     adherence_updated: adherenceUpdates,
+    // Stored vs freshly computed, for verifying admin actions like a period
+    // reset actually landed. Dry runs only — keeps normal cron output small.
+    ...(dryRun ? {
+      member_state: participants.map(p => ({
+        name: p.full_name || p.id,
+        stored_adherence: p.adherence_percent,
+        computed_adherence: freshAdherence.get(p.id),
+        streak: p.streak,
+      })),
+    } : {}),
     push_ready: participants.filter(p => subMap[p.id]).length,
     members_without_push: participants.filter(p => !subMap[p.id]).map(p => p.full_name || p.id),
     skipped,
