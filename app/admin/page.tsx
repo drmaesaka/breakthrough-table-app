@@ -42,6 +42,7 @@ export default function AdminPage() {
   const [reminderTime, setReminderTime] = useState('12:00')
   const [notifSaving, setNotifSaving] = useState(false)
   const [notifSaved, setNotifSaved] = useState(false)
+  const [notifSaveError, setNotifSaveError] = useState(false)
   const [broadcastMessage, setBroadcastMessage] = useState('')
   const [broadcasting, setBroadcasting] = useState(false)
   const [broadcastSent, setBroadcastSent] = useState(false)
@@ -109,7 +110,7 @@ export default function AdminPage() {
       supabase.from('tasks').select('*').eq('group_id', gid).eq('archived', false).order('created_at', { ascending: false }),
       supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
       supabase.from('journal_prompts').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
-      supabase.from('group_notification_settings').select('*').eq('group_id', gid).single(),
+      supabase.from('group_notification_settings').select('*').eq('group_id', gid).maybeSingle(),
     ])
     setTasks(t.data || [])
     setContent(c.data || [])
@@ -136,7 +137,7 @@ export default function AdminPage() {
     setNotifSaving(true)
     const supabase = createClient()
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    await supabase.from('group_notification_settings').upsert({
+    const { error } = await supabase.from('group_notification_settings').upsert({
       group_id: selectedGroup,
       checkin_enabled: checkinEnabled,
       checkin_time: checkinTime,
@@ -146,6 +147,11 @@ export default function AdminPage() {
       reminder_time: reminderTime,
     }, { onConflict: 'group_id' })
     setNotifSaving(false)
+    if (error) {
+      setNotifSaveError(true)
+      setTimeout(() => setNotifSaveError(false), 4000)
+      return
+    }
     setNotifSaved(true)
     setTimeout(() => setNotifSaved(false), 2500)
   }
@@ -785,8 +791,8 @@ export default function AdminPage() {
             </div>
 
             <button onClick={saveNotifSettings} disabled={notifSaving}
-              className="w-full bg-bt-navy text-white py-4 rounded-2xl font-semibold disabled:opacity-50">
-              {notifSaving ? 'Saving...' : notifSaved ? '✓ Saved!' : 'Save Notification Settings'}
+              className={`w-full py-4 rounded-2xl font-semibold disabled:opacity-50 ${notifSaveError ? 'bg-red-600 text-white' : 'bg-bt-navy text-white'}`}>
+              {notifSaving ? 'Saving...' : notifSaveError ? "Couldn't save — try again" : notifSaved ? '✓ Saved!' : 'Save Notification Settings'}
             </button>
 
             {/* Broadcast */}
