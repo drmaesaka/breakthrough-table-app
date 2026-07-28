@@ -8,20 +8,28 @@ export default function DMPage() {
   const { id: conversationId } = useParams<{ id: string }>()
   const [messages, setMessages] = useState<any[]>([])
   const [newMessage, setNewMessage] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [otherPerson, setOtherPerson] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const lastCountRef = useRef(0)
   const router = useRouter()
   const supabase = createClient()
 
   async function fetchMessages() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('direct_messages')
       .select('*, profiles(full_name)')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true })
-    setMessages(data || [])
+    // Keep the conversation on screen if a poll fails — see app/messages.
+    if (error || !data) {
+      if (error) console.error('dm fetch failed:', error.message)
+      return
+    }
+    setMessages(data)
   }
 
   useEffect(() => {
@@ -59,18 +67,30 @@ export default function DMPage() {
     return () => clearInterval(interval)
   }, [conversationId])
 
+  // Only scroll when a message actually arrives, not on every poll.
   useEffect(() => {
+    if (messages.length === lastCountRef.current) return
+    lastCountRef.current = messages.length
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault()
-    if (!newMessage.trim() || !user) return
-    await supabase.from('direct_messages').insert({
+    if (!newMessage.trim() || !user || sending) return
+    const text = newMessage.trim()
+    setSending(true)
+    const { error } = await supabase.from('direct_messages').insert({
       conversation_id: conversationId,
       sender_id: user.id,
-      content: newMessage.trim(),
+      content: text,
     })
+    setSending(false)
+    if (error) {
+      console.error('dm send failed:', error.message)
+      setSendError(true)
+      return
+    }
+    setSendError(false)
     setNewMessage('')
     fetchMessages()
   }
@@ -155,8 +175,9 @@ export default function DMPage() {
           placeholder={`Message ${otherName.split(' ')[0]}...`}
           className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
         />
-        <button type="submit" disabled={!newMessage.trim()}
-          className="w-10 h-10 bg-bt-navy rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity">
+        <button type="submit" disabled={!newMessage.trim() || sending}
+          className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
+          title={sendError ? "Didn't send — tap to try again" : 'Send'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
             <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/>
           </svg>

@@ -11,12 +11,15 @@ export default function MessagesPage() {
   // Table chat state
   const [messages, setMessages] = useState<any[]>([])
   const [newMessage, setNewMessage] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [groupId, setGroupId] = useState<string | null>(null)
   const [groupName, setGroupName] = useState('')
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const groupIdRef = useRef<string | null>(null)
+  const lastCountRef = useRef(0)
 
   // DM state
   const [conversations, setConversations] = useState<any[]>([])
@@ -26,12 +29,19 @@ export default function MessagesPage() {
   const supabase = createClient()
 
   async function fetchMessages(gid: string) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('messages')
       .select('*, profiles(full_name)')
       .eq('group_id', gid)
       .order('created_at', { ascending: true })
-    setMessages(data || [])
+    // Keep what is on screen if a poll fails. `setMessages(data || [])` wiped
+    // the whole conversation to the "Say hello to your table!" empty state on
+    // any transient error, three seconds at a time.
+    if (error || !data) {
+      if (error) console.error('messages fetch failed:', error.message)
+      return
+    }
+    setMessages(data)
   }
 
   async function fetchDMs(userId: string) {
@@ -98,7 +108,12 @@ export default function MessagesPage() {
     return () => clearInterval(interval)
   }, [tab])
 
+  // Scroll only when a message actually arrives. The 3s poll hands back a new
+  // array object every time, so depending on `messages` re-scrolled on a loop
+  // and made it impossible to read back through the conversation.
   useEffect(() => {
+    if (messages.length === lastCountRef.current) return
+    lastCountRef.current = messages.length
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
@@ -108,12 +123,23 @@ export default function MessagesPage() {
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault()
-    if (!newMessage.trim() || !groupId || !user) return
-    await supabase.from('messages').insert({
+    if (!newMessage.trim() || !groupId || !user || sending) return
+    const text = newMessage.trim()
+    setSending(true)
+    const { error } = await supabase.from('messages').insert({
       group_id: groupId,
       user_id: user.id,
-      content: newMessage.trim()
+      content: text,
     })
+    setSending(false)
+    // Keep the member's text in the box if the send failed — clearing it
+    // unconditionally destroyed what they had written.
+    if (error) {
+      console.error('message send failed:', error.message)
+      setSendError(true)
+      return
+    }
+    setSendError(false)
     setNewMessage('')
     fetchMessages(groupId)
   }
@@ -202,8 +228,9 @@ export default function MessagesPage() {
                 placeholder="Message your table..."
                 className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
               />
-              <button type="submit" disabled={!newMessage.trim()}
-                className="w-10 h-10 bg-bt-navy rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity">
+              <button type="submit" disabled={!newMessage.trim() || sending}
+                className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
+                title={sendError ? "Didn't send — tap to try again" : 'Send'}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
                   <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/>
                 </svg>
