@@ -21,3 +21,13 @@ jobs:
           echo "HTTP $http_code"
           cat response.json
           [ "$http_code" = "200" ]
+      - name: Call /api/send-checkin
+        if: always()
+        run: |
+          http_code=$(curl -sS -o checkin.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.NUDGE_SECRET }}" \
+            https://breakthrough-table-app.vercel.app/api/send-checkin)
+          echo "HTTP $http_code"
+          cat checkin.json
+          [ "$http_code" = "200" ]
