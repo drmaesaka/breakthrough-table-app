@@ -14,6 +14,7 @@ export default function TasksPage() {
   const [periodLabel, setPeriodLabel] = useState('Current')
   const [streak, setStreak] = useState(0)
   const [habitStreak, setHabitStreak] = useState(0)
+  const [habitStreakAtRisk, setHabitStreakAtRisk] = useState(false)
   const [habitJustDone, setHabitJustDone] = useState(false)
   const router = useRouter()
 
@@ -49,19 +50,21 @@ export default function TasksPage() {
     setCompletedIds(new Set(completions?.map((c: any) => c.task_id)))
     setHabitDoneToday(!!habitToday)
 
-    // Calculate habit streak (consecutive days ending today)
+    // Calculate habit streak. When today's check-in is still outstanding, count
+    // back from yesterday instead — a run in progress should read as intact and
+    // at risk, not collapse to 0 every morning before the member has tapped in.
     if (habitHistory && habitHistory.length > 0) {
-      const dates = habitHistory.map((h: any) => h.completed_date)
-      let streak = 0
+      const dates = new Set(habitHistory.map((h: any) => h.completed_date))
+      const doneToday = !!habitToday
       const d = new Date()
-      while (true) {
-        const dateStr = d.toISOString().split('T')[0]
-        if (dates.includes(dateStr)) {
-          streak++
-          d.setDate(d.getDate() - 1)
-        } else break
+      if (!doneToday) d.setDate(d.getDate() - 1)
+      let streak = 0
+      while (dates.has(d.toISOString().split('T')[0])) {
+        streak++
+        d.setDate(d.getDate() - 1)
       }
       setHabitStreak(streak)
+      setHabitStreakAtRisk(!doneToday && streak > 0)
     }
 
     setLoading(false)
@@ -105,10 +108,13 @@ export default function TasksPage() {
 
     if (habitDoneToday) {
       await supabase.from('habit_completions').delete().eq('user_id', userId).eq('completed_date', today)
-      if (habitStreak > 0) setHabitStreak(habitStreak - 1)
+      const reverted = Math.max(0, habitStreak - 1)
+      setHabitStreak(reverted)
+      setHabitStreakAtRisk(reverted > 0)
     } else {
       await supabase.from('habit_completions').insert({ user_id: userId, completed_date: today })
       setHabitStreak(habitStreak + 1)
+      setHabitStreakAtRisk(false)
       setHabitJustDone(true)
       setTimeout(() => setHabitJustDone(false), 3000)
     }
@@ -172,7 +178,10 @@ export default function TasksPage() {
               <div className="flex items-center justify-between mb-2 px-1">
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Daily Habit</p>
                 {habitStreak > 0 && (
-                  <p className="text-xs text-orange-500 font-semibold">🔥 {habitStreak} day{habitStreak !== 1 ? 's' : ''}</p>
+                  <p className={`text-xs font-semibold ${habitStreakAtRisk ? 'text-gray-400' : 'text-orange-500'}`}>
+                    🔥 {habitStreak} day{habitStreak !== 1 ? 's' : ''}
+                    {habitStreakAtRisk && ' — check in to keep it'}
+                  </p>
                 )}
               </div>
               {habitJustDone && (
