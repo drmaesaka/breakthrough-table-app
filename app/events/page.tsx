@@ -10,6 +10,7 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [rsvping, setRsvping] = useState<string | null>(null)
+  const [rsvpError, setRsvpError] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -39,12 +40,19 @@ export default function EventsPage() {
     const supabase = createClient()
     const hasRsvp = rsvps.has(eventId)
 
+    // Only move the RSVP locally once the write lands — showing "I'm going" for
+    // a rejected insert leaves the member registered in their head only, and the
+    // leader's headcount short by one.
     if (hasRsvp) {
-      await supabase.from('event_rsvps').delete().eq('event_id', eventId).eq('user_id', userId)
-      setRsvps(r => { const s = new Set(r); s.delete(eventId); return s })
+      const { error } = await supabase.from('event_rsvps').delete().eq('event_id', eventId).eq('user_id', userId)
+      if (error) console.error('rsvp delete failed:', error.message)
+      else setRsvps(r => { const s = new Set(r); s.delete(eventId); return s })
+      setRsvpError(error ? eventId : null)
     } else {
-      await supabase.from('event_rsvps').insert({ event_id: eventId, user_id: userId })
-      setRsvps(r => new Set([...r, eventId]))
+      const { error } = await supabase.from('event_rsvps').insert({ event_id: eventId, user_id: userId })
+      if (error) console.error('rsvp insert failed:', error.message)
+      else setRsvps(r => new Set([...r, eventId]))
+      setRsvpError(error ? eventId : null)
     }
     setRsvping(null)
   }
@@ -56,8 +64,12 @@ export default function EventsPage() {
     return new Date(d).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   }
   function daysUntil(d: string) {
-    const diff = Math.ceil((new Date(d).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-    if (diff === 0) return 'Today'
+    // Compare calendar days, not elapsed hours. Dividing a millisecond gap by
+    // 24h and rounding up made an event later tonight read as "Tomorrow", and
+    // made the 'Today' branch unreachable outside an exact millisecond match.
+    const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+    const diff = Math.round((startOfDay(new Date(d)) - startOfDay(new Date())) / 86400000)
+    if (diff <= 0) return 'Today'
     if (diff === 1) return 'Tomorrow'
     return `In ${diff} days`
   }
@@ -129,6 +141,9 @@ export default function EventsPage() {
                     }`}>
                     {rsvping === event.id ? '...' : isRsvped ? '✓ I\'m going' : 'RSVP'}
                   </button>
+                  {rsvpError === event.id && (
+                    <span className="text-red-600 text-xs">Didn&apos;t save — try again</span>
+                  )}
                   {isVirtual && event.virtual_link && isRsvped && (
                     <a href={event.virtual_link} target="_blank" rel="noopener noreferrer"
                       className="flex-1 py-2.5 rounded-xl font-semibold text-sm bg-bt-blue text-white text-center">

@@ -10,6 +10,7 @@ export default function ProfilePage() {
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   const [loading, setLoading] = useState(true)
 
   // Habit state
@@ -17,8 +18,10 @@ export default function ProfilePage() {
   const [habitInput, setHabitInput] = useState('')
   const [habitSaving, setHabitSaving] = useState(false)
   const [habitSaved, setHabitSaved] = useState(false)
+  const [habitError, setHabitError] = useState(false)
   const [graduatedHabits, setGraduatedHabits] = useState<any[]>([])
   const [graduating, setGraduating] = useState(false)
+  const [graduateError, setGraduateError] = useState(false)
   const [showGradHistory, setShowGradHistory] = useState(false)
   const [userId, setUserId] = useState('')
 
@@ -29,6 +32,7 @@ export default function ProfilePage() {
   const [contactEmail, setContactEmail] = useState('')
   const [dirSaving, setDirSaving] = useState(false)
   const [dirSaved, setDirSaved] = useState(false)
+  const [dirError, setDirError] = useState(false)
 
   const router = useRouter()
 
@@ -66,9 +70,15 @@ export default function ProfilePage() {
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('profiles').update({ full_name: name.trim() }).eq('id', user.id)
+    if (!user) { setSaving(false); return }
+    const { error } = await supabase.from('profiles').update({ full_name: name.trim() }).eq('id', user.id)
     setSaving(false)
+    if (error) {
+      console.error('profile name save failed:', error.message)
+      setSaveError(true)
+      setTimeout(() => setSaveError(false), 4000)
+      return
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
@@ -77,9 +87,18 @@ export default function ProfilePage() {
     if (!habitInput.trim()) return
     setHabitSaving(true)
     const supabase = createClient()
-    await supabase.from('profiles').update({ current_habit: habitInput.trim() }).eq('id', userId)
-    setCurrentHabit(habitInput.trim())
+    const { error } = await supabase.from('profiles').update({ current_habit: habitInput.trim() }).eq('id', userId)
     setHabitSaving(false)
+    // Only reflect the new habit locally once it is actually stored — the save
+    // button is disabled while habitInput matches currentHabit, so updating it
+    // optimistically would leave no way to retry.
+    if (error) {
+      console.error('habit save failed:', error.message)
+      setHabitError(true)
+      setTimeout(() => setHabitError(false), 4000)
+      return
+    }
+    setCurrentHabit(habitInput.trim())
     setHabitSaved(true)
     setTimeout(() => setHabitSaved(false), 2500)
   }
@@ -89,15 +108,32 @@ export default function ProfilePage() {
     setGraduating(true)
     const supabase = createClient()
 
-    // Archive to history
-    await supabase.from('habit_history').insert({
+    // Archive to history FIRST and stop if it fails. Clearing current_habit
+    // after a failed insert would destroy the habit with no record of it.
+    const { error: historyError } = await supabase.from('habit_history').insert({
       user_id: userId,
       habit_name: currentHabit,
       graduated_at: new Date().toISOString(),
     })
 
-    // Clear current habit
-    await supabase.from('profiles').update({ current_habit: null }).eq('id', userId)
+    if (historyError) {
+      console.error('habit_history insert failed:', historyError.message)
+      setGraduating(false)
+      setGraduateError(true)
+      setTimeout(() => setGraduateError(false), 5000)
+      return
+    }
+
+    const { error: clearError } = await supabase
+      .from('profiles').update({ current_habit: null }).eq('id', userId)
+
+    if (clearError) {
+      console.error('clearing current_habit failed:', clearError.message)
+      setGraduating(false)
+      setGraduateError(true)
+      setTimeout(() => setGraduateError(false), 5000)
+      return
+    }
 
     // Refresh history
     const { data: history } = await supabase
@@ -112,13 +148,19 @@ export default function ProfilePage() {
   async function saveDirectory() {
     setDirSaving(true)
     const supabase = createClient()
-    await supabase.from('profiles').update({
+    const { error } = await supabase.from('profiles').update({
       directory_opt_in: directoryOptIn,
       bio: bio.trim(),
       linkedin_url: linkedinUrl.trim(),
       contact_email: contactEmail.trim(),
     }).eq('id', userId)
     setDirSaving(false)
+    if (error) {
+      console.error('directory save failed:', error.message)
+      setDirError(true)
+      setTimeout(() => setDirError(false), 4000)
+      return
+    }
     setDirSaved(true)
     setTimeout(() => setDirSaved(false), 2500)
   }
@@ -187,14 +229,19 @@ export default function ProfilePage() {
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />
           <button onClick={saveHabit} disabled={habitSaving || !habitInput.trim() || habitInput.trim() === currentHabit}
-            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-            {habitSaving ? 'Saving...' : habitSaved ? '✓ Saved!' : currentHabit ? 'Update Habit' : 'Set Habit'}
+            className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${habitError ? 'bg-red-600' : 'bg-bt-navy'}`}>
+            {habitSaving ? 'Saving...' : habitError ? "Couldn't save — tap to retry" : habitSaved ? '✓ Saved!' : currentHabit ? 'Update Habit' : 'Set Habit'}
           </button>
           {currentHabit && (
             <button onClick={graduateHabit} disabled={graduating}
               className="w-full bg-green-50 text-green-700 border-2 border-green-200 py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
               {graduating ? 'Graduating...' : '🏅 I\'ve fully installed this habit'}
             </button>
+          )}
+          {graduateError && (
+            <p className="text-red-600 text-xs leading-relaxed">
+              Couldn&apos;t graduate that habit — it&apos;s still here, nothing was lost. Try again.
+            </p>
           )}
         </div>
 
@@ -291,8 +338,8 @@ export default function ProfilePage() {
             </>
           )}
           <button onClick={saveDirectory} disabled={dirSaving}
-            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-            {dirSaving ? 'Saving...' : dirSaved ? '✓ Saved!' : 'Save Directory Settings'}
+            className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${dirError ? 'bg-red-600' : 'bg-bt-navy'}`}>
+            {dirSaving ? 'Saving...' : dirError ? "Couldn't save — tap to retry" : dirSaved ? '✓ Saved!' : 'Save Directory Settings'}
           </button>
         </div>
 
@@ -306,8 +353,8 @@ export default function ProfilePage() {
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />
           <button onClick={saveName} disabled={saving || !name.trim()}
-            className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
-            {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save Name'}
+            className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50 ${saveError ? 'bg-red-600' : 'bg-bt-navy'}`}>
+            {saving ? 'Saving...' : saveError ? "Couldn't save — tap to retry" : saved ? '✓ Saved!' : 'Save Name'}
           </button>
         </div>
 

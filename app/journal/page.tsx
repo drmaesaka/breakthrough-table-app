@@ -10,6 +10,8 @@ export default function JournalPage() {
   const [savedResponses, setSavedResponses] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState<Record<string, boolean>>({})
+  const [saveError, setSaveError] = useState<Record<string, boolean>>({})
+  const [myName, setMyName] = useState('')
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null)
   const [groupResponses, setGroupResponses] = useState<Record<string, any[]>>({})
   const [loading, setLoading] = useState(true)
@@ -27,10 +29,11 @@ export default function JournalPage() {
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('group_id, groups(name)')
+      .select('group_id, full_name, groups(name)')
       .eq('id', user.id)
       .single()
 
+    setMyName(prof?.full_name || 'You')
     if (!prof?.group_id) { setLoading(false); return }
     setGroupName((prof.groups as any)?.name || '')
 
@@ -65,16 +68,36 @@ export default function JournalPage() {
     setSaving(s => ({ ...s, [promptId]: true }))
     const supabase = createClient()
 
-    await supabase.from('journal_responses').upsert({
+    const { error } = await supabase.from('journal_responses').upsert({
       prompt_id: promptId,
       user_id: userId,
       response: text,
     }, { onConflict: 'prompt_id,user_id' })
 
-    setSavedResponses(s => ({ ...s, [promptId]: text }))
     setSaving(s => ({ ...s, [promptId]: false }))
+
+    // Do not mark this as saved on failure: the button's disabled state reads
+    // savedResponses, so an optimistic update here would lock the member out of
+    // retrying their own reflection without editing the text first.
+    if (error) {
+      console.error('journal_responses upsert failed:', error.message, error.code)
+      setSaveError(s => ({ ...s, [promptId]: true }))
+      return
+    }
+
+    setSaveError(s => ({ ...s, [promptId]: false }))
+    setSavedResponses(s => ({ ...s, [promptId]: text }))
     setSaved(s => ({ ...s, [promptId]: true }))
     setTimeout(() => setSaved(s => ({ ...s, [promptId]: false })), 2500)
+
+    // Reflect the member's own answer in the table list straight away — it was
+    // only ever fetched once per page load, so their entry appeared missing.
+    setGroupResponses(r => {
+      const existing = r[promptId]
+      if (!existing) return r
+      const others = existing.filter((x: any) => x.user_id !== userId)
+      return { ...r, [promptId]: [...others, { response: text, user_id: userId, profiles: { full_name: myName } }] }
+    })
   }
 
   async function loadGroupResponses(promptId: string) {
@@ -167,9 +190,14 @@ export default function JournalPage() {
                     <button
                       onClick={() => saveResponse(prompt.id)}
                       disabled={saving[prompt.id] || !responses[prompt.id]?.trim() || responses[prompt.id]?.trim() === savedResponses[prompt.id]}
-                      className="mt-2 w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                      {saving[prompt.id] ? 'Saving...' : saved[prompt.id] ? '✓ Saved!' : isAnswered ? 'Update Response' : 'Save Response'}
+                      className={`mt-2 w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${saveError[prompt.id] ? 'bg-red-600' : 'bg-bt-navy'}`}>
+                      {saving[prompt.id] ? 'Saving...' : saveError[prompt.id] ? "Couldn't save — tap to retry" : saved[prompt.id] ? '✓ Saved!' : isAnswered ? 'Update Response' : 'Save Response'}
                     </button>
+                    {saveError[prompt.id] && (
+                      <p className="text-red-600 text-xs mt-1.5 leading-relaxed">
+                        Your writing is still here — don&apos;t close this page until it saves.
+                      </p>
+                    )}
                   </div>
 
                   {/* Table responses */}

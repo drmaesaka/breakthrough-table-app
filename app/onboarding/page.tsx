@@ -45,8 +45,11 @@ export default function OnboardingPage() {
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
+    if (!user) { setSaving(false); return }
+    // Not worth blocking entry to the app on, but a silent failure means the
+    // member gets shown onboarding again later with no explanation.
+    const { error } = await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
+    if (error) console.error('onboarding flag failed:', error.message)
     router.push('/dashboard')
   }
 

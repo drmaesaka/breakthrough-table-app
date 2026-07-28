@@ -34,6 +34,7 @@ export default function BookingPage() {
   const [booking, setBooking] = useState(false)
   const [userId, setUserId] = useState('')
   const [bookingSuccess, setBookingSuccess] = useState(false)
+  const [bookingError, setBookingError] = useState('')
   const router = useRouter()
 
   const today = localDay()
@@ -95,22 +96,42 @@ export default function BookingPage() {
       notes: notes.trim() || null,
     })
 
-    if (!error) {
-      setBookingSuccess(true)
-      setSelectedRoom(null)
-      setSelectedTime('')
-      setNotes('')
-      await loadAvailability(selectedDate)
-      await loadMyBookings(userId)
-      setTimeout(() => setBookingSuccess(false), 3000)
-    }
     setBooking(false)
+
+    // There was no failure branch at all: a rejected booking left the screen
+    // completely unchanged, so members tapped Book repeatedly with no feedback.
+    if (error) {
+      console.error('room booking failed:', error.message, error.code)
+      // A slot taken between page load and submit is the likeliest cause, so
+      // refresh availability rather than leaving a stale grid on screen.
+      setBookingError(
+        error.code === '23505'
+          ? 'Someone just took that slot. Pick another time.'
+          : "Couldn't book that room. Please try again."
+      )
+      await loadAvailability(selectedDate)
+      return
+    }
+
+    setBookingError('')
+    setBookingSuccess(true)
+    setSelectedRoom(null)
+    setSelectedTime('')
+    setNotes('')
+    await loadAvailability(selectedDate)
+    await loadMyBookings(userId)
+    setTimeout(() => setBookingSuccess(false), 3000)
   }
 
   async function cancelBooking(id: string) {
     if (!confirm('Cancel this booking?')) return
     const supabase = createClient()
-    await supabase.from('room_bookings').delete().eq('id', id).eq('user_id', userId)
+    const { error } = await supabase.from('room_bookings').delete().eq('id', id).eq('user_id', userId)
+    if (error) {
+      console.error('booking cancel failed:', error.message)
+      setBookingError("Couldn't cancel that booking — it's still reserved.")
+      return
+    }
     setMyBookings(b => b.filter(x => x.id !== id))
   }
 
@@ -147,6 +168,12 @@ export default function BookingPage() {
         {bookingSuccess && (
           <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 text-center">
             <p className="text-green-700 font-semibold">✓ Room booked!</p>
+          </div>
+        )}
+
+        {bookingError && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4 text-center">
+            <p className="text-red-700 font-semibold text-sm">{bookingError}</p>
           </div>
         )}
 
