@@ -87,7 +87,7 @@ export default function LibraryPage() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('group_id, groups(name)')
+        .select('group_id, groups(name, last_period_start)')
         .eq('id', user.id)
         .single()
 
@@ -102,9 +102,15 @@ export default function LibraryPage() {
 
       if (!contentData || contentData.length === 0) { setLoading(false); return }
 
-      const newestDate = new Date(contentData[0].created_at)
-      const cutoff = new Date(newestDate)
-      cutoff.setDate(cutoff.getDate() - 7)
+      // "Current" means this period, not "within 7 days of whatever was posted
+      // last". The old cutoff was measured backwards from the newest row, so a
+      // table whose leader posted nothing for three months still showed
+      // three-month-old material as the Current Assignment — it could never go
+      // stale, because it defined its own window.
+      const periodStart = (prof.groups as any)?.last_period_start
+      const cutoff = periodStart
+        ? new Date(periodStart)
+        : new Date(Date.now() - 7 * 86400000) // no period recorded: last 7 days from now
 
       setCurrent(contentData.filter(item => new Date(item.created_at) >= cutoff))
       setPrevious(contentData.filter(item => new Date(item.created_at) < cutoff))

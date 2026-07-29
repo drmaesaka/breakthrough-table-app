@@ -2,6 +2,14 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  async redirects() {
+    return [
+      // /content was a near-duplicate of /library with no inbound link from
+      // anywhere in the app. Redirected rather than deleted so any bookmark or
+      // link already shared with a member still lands somewhere real.
+      { source: '/content', destination: '/library', permanent: true },
+    ]
+  },
   async headers() {
     return [
       {
