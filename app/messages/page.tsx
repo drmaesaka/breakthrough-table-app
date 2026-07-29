@@ -20,6 +20,7 @@ export default function MessagesPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const groupIdRef = useRef<string | null>(null)
   const lastCountRef = useRef<string | number | null>(0)
+  const newestSeenRef = useRef<string | null>(null)
 
   // DM state
   const [conversations, setConversations] = useState<any[]>([])
@@ -29,25 +30,48 @@ export default function MessagesPage() {
   const supabase = createClient()
 
   async function fetchMessages(gid: string) {
-    // Newest 200, then flipped for display. The poll runs every 3 seconds, so an
-    // unbounded fetch re-downloaded the entire history each tick — and PostgREST
-    // would cap it at 1000 rows anyway, which for an ascending query means the
-    // *newest* messages are the ones that vanish.
-    const { data: page, error } = await supabase
+    // First load: the newest 200, flipped for display. Every poll after that
+    // asks only for rows newer than what's on screen — the old full refetch
+    // every 3 seconds re-downloaded the entire history per tick per open tab,
+    // which is the kind of traffic that burns through Supabase's free egress
+    // quota and starts failing reads app-wide.
+    const newestSeen = newestSeenRef.current
+    if (!newestSeen) {
+      const { data: page, error } = await supabase
+        .from('messages')
+        .select('*, profiles(full_name)')
+        .eq('group_id', gid)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      // Keep what is on screen if a poll fails. `setMessages(data || [])` wiped
+      // the whole conversation to the "Say hello to your table!" empty state on
+      // any transient error, three seconds at a time.
+      if (error || !page) {
+        if (error) console.error('messages fetch failed:', error.message)
+        return
+      }
+      const data = [...page].reverse()
+      newestSeenRef.current = data[data.length - 1]?.created_at || null
+      setMessages(data)
+      return
+    }
+
+    const { data: fresh, error } = await supabase
       .from('messages')
       .select('*, profiles(full_name)')
       .eq('group_id', gid)
-      .order('created_at', { ascending: false })
-      .limit(200)
-    const data = page ? [...page].reverse() : null
-    // Keep what is on screen if a poll fails. `setMessages(data || [])` wiped
-    // the whole conversation to the "Say hello to your table!" empty state on
-    // any transient error, three seconds at a time.
-    if (error || !data) {
-      if (error) console.error('messages fetch failed:', error.message)
+      .gt('created_at', newestSeen)
+      .order('created_at', { ascending: true })
+    if (error || !fresh || fresh.length === 0) {
+      if (error) console.error('messages poll failed:', error.message)
       return
     }
-    setMessages(data)
+    newestSeenRef.current = fresh[fresh.length - 1].created_at
+    setMessages(prev => {
+      // Guard against a race double-appending the same rows.
+      const seen = new Set(prev.map(m => m.id))
+      return [...prev, ...fresh.filter(m => !seen.has(m.id))]
+    })
   }
 
   async function fetchDMs(userId: string) {

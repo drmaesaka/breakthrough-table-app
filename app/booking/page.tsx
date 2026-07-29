@@ -35,6 +35,7 @@ export default function BookingPage() {
   const [userId, setUserId] = useState('')
   const [bookingSuccess, setBookingSuccess] = useState(false)
   const [bookingError, setBookingError] = useState('')
+  const [noGroup, setNoGroup] = useState(false)
   const router = useRouter()
 
   const today = localDay()
@@ -50,9 +51,13 @@ export default function BookingPage() {
         supabase.from('profiles').select('group_id').eq('id', user.id).maybeSingle(),
         supabase.from('rooms').select('*').order('suite').order('name'),
       ])
+      // Signup is open and confirmation is off, so an account with no table is
+      // possibly a stranger — rooms are a real-world resource, so booking is
+      // members-only.
+      if (!prof?.group_id) { setNoGroup(true); setLoading(false); return }
       // A room without a group_id is shared across tables; a stamped room only
       // shows for its own table. Works before and after the column exists.
-      setRooms((roomsData || []).filter((r: any) => !r.group_id || r.group_id === prof?.group_id))
+      setRooms((roomsData || []).filter((r: any) => !r.group_id || r.group_id === prof.group_id))
 
       await loadAvailability(selectedDate)
       await loadMyBookings(user.id)
@@ -158,6 +163,23 @@ export default function BookingPage() {
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
       <p className="text-gray-400">Loading...</p>
+    </div>
+  )
+
+  if (noGroup) return (
+    <div className="min-h-screen bg-bt-pale">
+      <div className="bg-bt-navy px-5 pt-16 pb-6">
+        <h1 className="text-white text-2xl font-bold">Book a Room</h1>
+      </div>
+      <div className="text-center py-20 px-8">
+        <p className="text-5xl mb-4">🪑</p>
+        <p className="text-gray-600 font-medium">Room booking is for table members</p>
+        <p className="text-gray-400 text-sm mt-2 leading-relaxed">
+          You&apos;re not part of a table yet. Join with the invite link from your
+          leader, and rooms will open up here.
+        </p>
+      </div>
+      <BottomNav />
     </div>
   )
 

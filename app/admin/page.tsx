@@ -211,7 +211,10 @@ export default function AdminPage() {
     const row: any = {
       title: eventTitle.trim(),
       description: eventDesc.trim() || null,
-      event_date: eventDate,
+      // A raw datetime-local string has no offset, so Postgres treated it as
+      // UTC and every viewer saw the wrong hour. Convert to a real instant in
+      // the leader's timezone at save time.
+      event_date: new Date(eventDate).toISOString(),
       event_type: eventType,
       location: eventType === 'in_person' ? eventLocation.trim() || null : null,
       virtual_link: eventType === 'virtual' ? eventLink.trim() || null : null,
@@ -234,10 +237,15 @@ export default function AdminPage() {
   async function saveEdit() {
     if (!editing) return
     setEditSaving(true)
+    // The event date input holds a local datetime-local string; store it as a
+    // real UTC instant, same as addEvent.
+    const payload = editing.table === 'events' && editing.fields.event_date
+      ? { ...editing, fields: { ...editing.fields, event_date: new Date(editing.fields.event_date).toISOString() } }
+      : editing
     const res = await fetch('/api/admin/edit-item', {
       method: 'PATCH',
       headers: await authHeaders(),
-      body: JSON.stringify(editing),
+      body: JSON.stringify(payload),
     })
     const result = await res.json().catch(() => ({}))
     setEditSaving(false)
@@ -276,6 +284,15 @@ export default function AdminPage() {
     const result = await res.json().catch(() => ({}))
     if (!res.ok) { alert(result.error || 'Could not regenerate the invite link'); return }
     setInviteLinks(p => ({ ...p, [gid]: result }))
+  }
+
+  // A stored instant rendered back into the leader's local wall-clock time for
+  // a datetime-local input (which understands no offsets).
+  function toLocalInput(d: string): string {
+    const date = new Date(d)
+    if (isNaN(date.getTime())) return ''
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
   }
 
   function downloadCSV(filename: string, rows: (string | number | null | undefined)[][]) {
@@ -1087,7 +1104,7 @@ export default function AdminPage() {
                     <textarea value={editing.fields.description || ''} rows={2}
                       onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, description: e.target.value } }))}
                       className={`${inputClass} resize-none`} placeholder="Description" />
-                    <input type="datetime-local" value={(editing.fields.event_date || '').slice(0, 16)}
+                    <input type="datetime-local" value={editing.fields.event_date || ''}
                       onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, event_date: e.target.value } }))}
                       className={inputClass} />
                     <div className="flex gap-2">
@@ -1128,7 +1145,7 @@ export default function AdminPage() {
                     {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
                   </div>
                   <button onClick={() => setEditing({ table: 'events', id: event.id, fields: {
-                    title: event.title, description: event.description || '', event_date: event.event_date,
+                    title: event.title, description: event.description || '', event_date: toLocalInput(event.event_date),
                     event_type: event.event_type, location: event.location || '', virtual_link: event.virtual_link || '',
                   } })} className="text-bt-blue text-xs font-medium flex-shrink-0">Edit</button>
                   <button onClick={() => deleteEvent(event.id)} className="text-red-400 text-xs font-medium flex-shrink-0">Remove</button>

@@ -15,29 +15,51 @@ export default function DMPage() {
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastCountRef = useRef<string | number | null>(0)
+  const newestSeenRef = useRef<string | null>(null)
   const router = useRouter()
   const supabase = createClient()
 
   async function fetchMessages() {
-    // Newest 200, flipped for display — the 3s poll otherwise re-downloads the
-    // whole conversation each tick, and an ascending unbounded query loses the
-    // newest rows first once PostgREST's 1000-row cap kicks in.
-    const { data: page, error } = await supabase
+    // First load: newest 200, flipped. Polls after that fetch only rows newer
+    // than what's on screen — see app/messages for why (free-tier egress).
+    const newestSeen = newestSeenRef.current
+    if (!newestSeen) {
+      const { data: page, error } = await supabase
+        .from('direct_messages')
+        .select('*, profiles(full_name)')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      // Keep the conversation on screen if a poll fails — see app/messages.
+      if (error || !page) {
+        if (error) console.error('dm fetch failed:', error.message)
+        return
+      }
+      const data = [...page].reverse()
+      newestSeenRef.current = data[data.length - 1]?.created_at || null
+      setMessages(data)
+      return
+    }
+
+    const { data: fresh, error } = await supabase
       .from('direct_messages')
       .select('*, profiles(full_name)')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false })
-      .limit(200)
-    const data = page ? [...page].reverse() : null
-    // Keep the conversation on screen if a poll fails — see app/messages.
-    if (error || !data) {
-      if (error) console.error('dm fetch failed:', error.message)
+      .gt('created_at', newestSeen)
+      .order('created_at', { ascending: true })
+    if (error || !fresh || fresh.length === 0) {
+      if (error) console.error('dm poll failed:', error.message)
       return
     }
-    setMessages(data)
+    newestSeenRef.current = fresh[fresh.length - 1].created_at
+    setMessages(prev => {
+      const seen = new Set(prev.map(m => m.id))
+      return [...prev, ...fresh.filter(m => !seen.has(m.id))]
+    })
   }
 
   useEffect(() => {
+    newestSeenRef.current = null // full refetch when switching conversations
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
