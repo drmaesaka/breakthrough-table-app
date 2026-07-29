@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
 
+// Fans out a push per member; the 10s default would cut a real table off.
+export const maxDuration = 60
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.NUDGE_SECRET}`) {
@@ -89,26 +92,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No push subscriptions found', sent: 0 })
   }
 
-  const subMap = Object.fromEntries(subs.map((s: any) => [s.user_id, s]))
+  // Grouped per member so a second device is notified too, rather than the map
+  // silently keeping whichever row came back last.
+  const subsByUser = new Map<string, any[]>()
+  for (const s of subs) {
+    subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
+  }
 
-  const results = await Promise.all(
+  const results = (await Promise.all(
     participants.map(async (p: any) => {
-      const sub = subMap[p.id]
-      if (!sub) return null
       const firstName = p.full_name?.split(' ')[0] || 'there'
-      const result = dryRun ? 'would-send' : await sendPush(sub, {
-        title: 'Breakthrough Table',
-        body: `Hey ${firstName} — time to check in your habit and reading for today! 📋`,
-        url: '/tasks',
-      })
-      if (result === 'expired') {
-        await supabase.from('push_subscriptions').delete().eq('user_id', p.id)
-      }
-      return result
+      return Promise.all(
+        (subsByUser.get(p.id) || []).map(async sub => {
+          const result = dryRun ? 'would-send' : await sendPush(sub, {
+            title: 'Breakthrough Table',
+            body: `Hey ${firstName} — time to check in your habit and reading for today! 📋`,
+            url: '/tasks',
+          })
+          if (result === 'expired') {
+            // By endpoint, not user_id — one stale device used to unsubscribe
+            // the member from every device they own.
+            await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+          }
+          return result
+        })
+      )
     })
-  )
+  )).flat()
 
   const sent = results.filter(r => r === true).length
   const wouldSend = results.filter(r => r === 'would-send').length
-  return NextResponse.json({ dry_run: dryRun, sent, would_send: wouldSend })
+  return NextResponse.json({
+    dry_run: dryRun,
+    sent,
+    would_send: wouldSend,
+    members_considered: participants.length,
+    members_without_push: participants
+      .filter((p: any) => !(subsByUser.get(p.id) || []).length)
+      .map((p: any) => p.full_name || p.id),
+  })
 }

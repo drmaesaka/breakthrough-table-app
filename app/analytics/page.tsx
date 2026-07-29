@@ -22,20 +22,34 @@ export default function AnalyticsPage() {
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
-      // Load ALL groups (leaders can see all tables)
+      // Only this leader's tables — analytics used to show every group in the app.
       const { data: groupsData } = await supabase
         .from('groups')
         .select('id, name, leader_id')
+        .eq('leader_id', user.id)
         .order('name', { ascending: true })
 
-      if (!groupsData) { setLoading(false); return }
+      if (!groupsData || groupsData.length === 0) { setLoading(false); return }
+      const groupIds = groupsData.map(g => g.id)
 
-      // Load all members, habit completions today, and tasks/completions in parallel
-      const [{ data: allMembers }, { data: habitToday }, { data: allTasks }, { data: allTaskCompletions }] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id, current_habit').not('group_id', 'is', null),
-        supabase.from('habit_completions').select('user_id').eq('completed_date', today),
-        supabase.from('tasks').select('id, group_id').eq('archived', false),
-        supabase.from('task_completions').select('user_id, task_id'),
+      // Load members, habit completions today, and tasks/completions in parallel.
+      // Everything is scoped to this leader's groups — beyond correctness, the
+      // unfiltered task_completions scan would be silently truncated by
+      // PostgREST's 1000-row cap once the table grows, corrupting these numbers.
+      const [{ data: allMembers }, { data: allTasks }] = await Promise.all([
+        supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id, current_habit').in('group_id', groupIds),
+        supabase.from('tasks').select('id, group_id').eq('archived', false).in('group_id', groupIds),
+      ])
+
+      const memberIds = (allMembers || []).map((m: any) => m.id)
+      const taskIds = (allTasks || []).map((t: any) => t.id)
+      const [{ data: habitToday }, { data: allTaskCompletions }] = await Promise.all([
+        memberIds.length
+          ? supabase.from('habit_completions').select('user_id').eq('completed_date', today).in('user_id', memberIds)
+          : Promise.resolve({ data: [] as any[] }),
+        taskIds.length && memberIds.length
+          ? supabase.from('task_completions').select('user_id, task_id').in('task_id', taskIds).in('user_id', memberIds)
+          : Promise.resolve({ data: [] as any[] }),
       ])
 
       const habitDoneSet = new Set((habitToday || []).map((h: any) => h.user_id))

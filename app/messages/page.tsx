@@ -19,7 +19,7 @@ export default function MessagesPage() {
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const groupIdRef = useRef<string | null>(null)
-  const lastCountRef = useRef(0)
+  const lastCountRef = useRef<string | number | null>(0)
 
   // DM state
   const [conversations, setConversations] = useState<any[]>([])
@@ -29,11 +29,17 @@ export default function MessagesPage() {
   const supabase = createClient()
 
   async function fetchMessages(gid: string) {
-    const { data, error } = await supabase
+    // Newest 200, then flipped for display. The poll runs every 3 seconds, so an
+    // unbounded fetch re-downloaded the entire history each tick — and PostgREST
+    // would cap it at 1000 rows anyway, which for an ascending query means the
+    // *newest* messages are the ones that vanish.
+    const { data: page, error } = await supabase
       .from('messages')
       .select('*, profiles(full_name)')
       .eq('group_id', gid)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(200)
+    const data = page ? [...page].reverse() : null
     // Keep what is on screen if a poll fails. `setMessages(data || [])` wiped
     // the whole conversation to the "Say hello to your table!" empty state on
     // any transient error, three seconds at a time.
@@ -110,10 +116,13 @@ export default function MessagesPage() {
 
   // Scroll only when a message actually arrives. The 3s poll hands back a new
   // array object every time, so depending on `messages` re-scrolled on a loop
-  // and made it impossible to read back through the conversation.
+  // and made it impossible to read back through the conversation. Keyed by the
+  // newest message id, not the count — once the 200-message window is full the
+  // count never changes again.
   useEffect(() => {
-    if (messages.length === lastCountRef.current) return
-    lastCountRef.current = messages.length
+    const lastId = messages[messages.length - 1]?.id ?? null
+    if (lastId === lastCountRef.current) return
+    lastCountRef.current = lastId
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 

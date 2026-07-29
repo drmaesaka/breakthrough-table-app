@@ -14,16 +14,21 @@ export default function DMPage() {
   const [otherPerson, setOtherPerson] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const lastCountRef = useRef(0)
+  const lastCountRef = useRef<string | number | null>(0)
   const router = useRouter()
   const supabase = createClient()
 
   async function fetchMessages() {
-    const { data, error } = await supabase
+    // Newest 200, flipped for display — the 3s poll otherwise re-downloads the
+    // whole conversation each tick, and an ascending unbounded query loses the
+    // newest rows first once PostgREST's 1000-row cap kicks in.
+    const { data: page, error } = await supabase
       .from('direct_messages')
       .select('*, profiles(full_name)')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(200)
+    const data = page ? [...page].reverse() : null
     // Keep the conversation on screen if a poll fails — see app/messages.
     if (error || !data) {
       if (error) console.error('dm fetch failed:', error.message)
@@ -67,10 +72,13 @@ export default function DMPage() {
     return () => clearInterval(interval)
   }, [conversationId])
 
-  // Only scroll when a message actually arrives, not on every poll.
+  // Only scroll when a message actually arrives, not on every poll. Keyed by
+  // the newest message id — the count stops changing once the 200-message
+  // window is full.
   useEffect(() => {
-    if (messages.length === lastCountRef.current) return
-    lastCountRef.current = messages.length
+    const lastId = messages[messages.length - 1]?.id ?? null
+    if (lastId === lastCountRef.current) return
+    lastCountRef.current = lastId
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 

@@ -42,3 +42,35 @@ export async function requireLeader(req: NextRequest): Promise<AuthResult> {
 
   return { ok: true, userId: user.id, role: prof.role }
 }
+
+/**
+ * The group ids this leader owns. Being a leader is app-wide, not per-table, so
+ * every service-key route that touches group data must narrow to these — without
+ * it any leader can read and write every other table's members.
+ */
+export async function leaderGroupIds(userId: string): Promise<string[]> {
+  const { data } = await adminClient()
+    .from('groups')
+    .select('id')
+    .eq('leader_id', userId)
+  return (data || []).map(g => g.id as string)
+}
+
+/** Confirms `groupId` is one of the caller's own groups. */
+export async function requireGroupOwnership(
+  userId: string,
+  groupId: string
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data: group, error } = await adminClient()
+    .from('groups')
+    .select('id, leader_id')
+    .eq('id', groupId)
+    .maybeSingle()
+
+  if (error) return { ok: false, status: 500, error: 'Could not load group' }
+  if (!group) return { ok: false, status: 404, error: 'Group not found' }
+  if (group.leader_id !== userId) {
+    return { ok: false, status: 403, error: 'Not the leader of this group' }
+  }
+  return { ok: true }
+}

@@ -12,21 +12,26 @@ function JoinForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [groupName, setGroupName] = useState('')
-  const [groupId, setGroupId] = useState('')
+  const [inviteExpired, setInviteExpired] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // ?invite=<code> is the revocable format; ?group=<id> is the legacy one that
+  // the server only honors until the invite migration runs.
+  const invite = searchParams.get('invite')
+  const legacyGroup = searchParams.get('group')
+
   useEffect(() => {
-    const gid = searchParams.get('group')
-    if (!gid) return
-    setGroupId(gid)
+    if (!invite && !legacyGroup) return
     async function fetchGroup() {
-      const supabase = createClient()
-      const { data } = await supabase.from('groups').select('name').eq('id', gid).maybeSingle()
-      if (data) setGroupName(data.name)
+      const params = invite ? `invite=${invite}` : `group=${legacyGroup}`
+      const res = await fetch(`/api/join?${params}`)
+      if (!res.ok) { setInviteExpired(true); return }
+      const data = await res.json()
+      if (data.group_name) setGroupName(data.group_name)
     }
     fetchGroup()
-  }, [searchParams])
+  }, [invite, legacyGroup])
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault()
@@ -46,12 +51,26 @@ function JoinForm() {
       return
     }
 
-    // Assign to group if invite link had a group ID
-    if (groupId && data.user) {
-      await supabase
-        .from('profiles')
-        .update({ group_id: groupId })
-        .eq('id', data.user.id)
+    // Seat the member at their table. The server validates the invite and
+    // writes group_id with the service key — the browser cannot write it
+    // directly, which is what used to let anyone join any table by id.
+    if ((invite || legacyGroup) && data.session) {
+      const res = await fetch('/api/join', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${data.session.access_token}`,
+        },
+        body: JSON.stringify({ invite, group: legacyGroup }),
+      })
+      if (!res.ok) {
+        const { error: joinError } = await res.json().catch(() => ({ error: null }))
+        // The account exists — let them continue, but say the seat didn't take
+        // so they know to ask their leader instead of assuming they're in.
+        alert(joinError
+          ? `Your account was created, but joining the table failed: ${joinError}`
+          : 'Your account was created, but joining the table failed. Ask your leader to add you from the Admin panel.')
+      }
     }
 
     router.push('/onboarding')
@@ -65,6 +84,12 @@ function JoinForm() {
           <div className="mt-5 bg-white/15 rounded-xl px-4 py-2 text-center">
             <p className="text-bt-light/70 text-xs">You're joining</p>
             <p className="text-white font-bold text-base mt-0.5">{groupName}</p>
+          </div>
+        )}
+        {inviteExpired && (
+          <div className="mt-5 bg-red-500/20 rounded-xl px-4 py-2 text-center">
+            <p className="text-white text-sm font-medium">This invite link is no longer valid</p>
+            <p className="text-bt-light/70 text-xs mt-0.5">Ask your leader for a fresh one</p>
           </div>
         )}
       </div>

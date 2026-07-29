@@ -21,37 +21,46 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!
   )
-  const { data: sub, error } = await admin
+  // All of the caller's devices — a member can have more than one subscription.
+  const { data: subs, error } = await admin
     .from('push_subscriptions')
     .select('*')
     .eq('user_id', user.id)
-    .maybeSingle()
 
   if (error) {
     return NextResponse.json({ error: 'Could not look up subscription' }, { status: 500 })
   }
-  if (!sub) {
+  if (!subs || subs.length === 0) {
     return NextResponse.json(
       { error: 'No push subscription on file — enable notifications on this device first' },
       { status: 404 }
     )
   }
 
-  const result = await sendPush(sub, {
-    title: 'Breakthrough Table',
-    body: 'Test notification — push is working on this device 🎉',
-    url: '/preferences',
-  })
+  const results = await Promise.all(
+    subs.map(async sub => {
+      const result = await sendPush(sub, {
+        title: 'Breakthrough Table',
+        body: 'Test notification — push is working on this device 🎉',
+        url: '/preferences',
+      })
+      if (result === 'expired') {
+        // Only the stale device is dropped; the member's other devices survive.
+        await admin.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+      }
+      return result
+    })
+  )
 
-  if (result === 'expired') {
-    await admin.from('push_subscriptions').delete().eq('user_id', user.id)
+  const delivered = results.filter(r => r === true).length
+  if (delivered === 0 && results.every(r => r === 'expired')) {
     return NextResponse.json(
       { error: 'Subscription expired — tap Allow Notifications again to re-enable' },
       { status: 410 }
     )
   }
-  if (result !== true) {
+  if (delivered === 0) {
     return NextResponse.json({ error: 'Push service rejected the send' }, { status: 502 })
   }
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, devices: subs.length, delivered })
 }

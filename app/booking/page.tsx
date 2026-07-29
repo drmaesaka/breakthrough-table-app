@@ -46,8 +46,13 @@ export default function BookingPage() {
       if (!user) { router.push('/login'); return }
       setUserId(user.id)
 
-      const { data: roomsData } = await supabase.from('rooms').select('*').order('suite').order('name')
-      setRooms(roomsData || [])
+      const [{ data: prof }, { data: roomsData }] = await Promise.all([
+        supabase.from('profiles').select('group_id').eq('id', user.id).maybeSingle(),
+        supabase.from('rooms').select('*').order('suite').order('name'),
+      ])
+      // A room without a group_id is shared across tables; a stamped room only
+      // shows for its own table. Works before and after the column exists.
+      setRooms((roomsData || []).filter((r: any) => !r.group_id || r.group_id === prof?.group_id))
 
       await loadAvailability(selectedDate)
       await loadMyBookings(user.id)

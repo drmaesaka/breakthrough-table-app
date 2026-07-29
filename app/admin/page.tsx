@@ -33,6 +33,16 @@ export default function AdminPage() {
   const [promptText, setPromptText] = useState('')
   const [promptSaving, setPromptSaving] = useState(false)
 
+  // Inline editing (tasks, content, events, prompts) — one item at a time
+  const [editing, setEditing] = useState<{ table: string; id: string; fields: any } | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+
+  // Member responses to reflection prompts, keyed by prompt id
+  const [journalResponses, setJournalResponses] = useState<Record<string, any[]> | null>(null)
+
+  // Invite links come from the server — codes are unreadable from the browser
+  const [inviteLinks, setInviteLinks] = useState<Record<string, { url: string; revocable: boolean }>>({})
+
   // Notification settings state
   const [notifSettings, setNotifSettings] = useState<any>(null)
   const [checkinEnabled, setCheckinEnabled] = useState(true)
@@ -90,7 +100,14 @@ export default function AdminPage() {
       const membersReq = await fetch('/api/admin/members', { headers: await authHeaders() })
       const membersRes = await membersReq.json()
 
-      const groupsRes = await supabase.from('groups').select('*, last_period_start')
+      // Only the tables this leader actually runs, in a stable order. This used
+      // to take groups[0] from an unordered, unfiltered list, so with a second
+      // table the panel could silently open on someone else's group.
+      const groupsRes = await supabase
+        .from('groups')
+        .select('*, last_period_start')
+        .eq('leader_id', user.id)
+        .order('name', { ascending: true })
       const grps = groupsRes.data || []
       setGroups(grps)
       setUsers(membersRes.members || [])
@@ -177,10 +194,13 @@ export default function AdminPage() {
     alert(`Broadcast sent to ${result.sent} member${result.sent !== 1 ? 's' : ''}!`)
   }
 
-  async function loadEvents() {
+  async function loadEvents(gid: string = selectedGroup) {
     const supabase = createClient()
     const { data } = await supabase.from('events').select('*').order('event_date', { ascending: true })
-    setEvents(data || [])
+    // Client-side group filter so this works before AND after the group_id
+    // migration: a row without the column (or with NULL) is a legacy shared
+    // event and stays visible; stamped rows only show on their own table.
+    setEvents((data || []).filter((e: any) => !e.group_id || e.group_id === gid))
   }
 
   async function addEvent() {
@@ -188,7 +208,7 @@ export default function AdminPage() {
     setEventSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('events').insert({
+    const row: any = {
       title: eventTitle.trim(),
       description: eventDesc.trim() || null,
       event_date: eventDate,
@@ -196,10 +216,79 @@ export default function AdminPage() {
       location: eventType === 'in_person' ? eventLocation.trim() || null : null,
       virtual_link: eventType === 'virtual' ? eventLink.trim() || null : null,
       created_by: user!.id,
-    })
-    setEventTitle(''); setEventDesc(''); setEventDate(''); setEventLocation(''); setEventLink('')
+      group_id: selectedGroup || null,
+    }
+    let { error } = await supabase.from('events').insert(row)
+    // Before the migration the column doesn't exist; retry without it rather
+    // than failing the whole add.
+    if (error && /group_id/.test(error.message)) {
+      delete row.group_id
+      ;({ error } = await supabase.from('events').insert(row))
+    }
     setEventSaving(false)
+    if (error) { alert(`Could not add the event: ${error.message}`); return }
+    setEventTitle(''); setEventDesc(''); setEventDate(''); setEventLocation(''); setEventLink('')
     loadEvents()
+  }
+
+  async function saveEdit() {
+    if (!editing) return
+    setEditSaving(true)
+    const res = await fetch('/api/admin/edit-item', {
+      method: 'PATCH',
+      headers: await authHeaders(),
+      body: JSON.stringify(editing),
+    })
+    const result = await res.json().catch(() => ({}))
+    setEditSaving(false)
+    if (!res.ok) { alert(`Could not save: ${result.error || res.status}`); return }
+    const item = result.item
+    if (editing.table === 'tasks') setTasks(p => p.map(x => x.id === item.id ? item : x))
+    if (editing.table === 'content') setContent(p => p.map(x => x.id === item.id ? item : x))
+    if (editing.table === 'events') setEvents(p => p.map(x => x.id === item.id ? item : x))
+    if (editing.table === 'journal_prompts') setPrompts(p => p.map(x => x.id === item.id ? item : x))
+    setEditing(null)
+  }
+
+  async function loadJournalResponses(gid: string) {
+    const res = await fetch(`/api/admin/journal?group_id=${gid}`, { headers: await authHeaders() })
+    if (!res.ok) { setJournalResponses({}); return }
+    const data = await res.json()
+    const map: Record<string, any[]> = {}
+    for (const p of data.prompts || []) map[p.id] = p.responses
+    setJournalResponses(map)
+  }
+
+  async function loadInviteLink(gid: string) {
+    const res = await fetch(`/api/admin/invite?group_id=${gid}`, { headers: await authHeaders() })
+    if (!res.ok) return
+    const link = await res.json()
+    setInviteLinks(p => ({ ...p, [gid]: link }))
+  }
+
+  async function regenerateInvite(gid: string) {
+    if (!confirm('Generate a new invite link? The current link stops working immediately.')) return
+    const res = await fetch('/api/admin/invite', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ group_id: gid }),
+    })
+    const result = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(result.error || 'Could not regenerate the invite link'); return }
+    setInviteLinks(p => ({ ...p, [gid]: result }))
+  }
+
+  function downloadCSV(filename: string, rows: (string | number | null | undefined)[][]) {
+    const csv = rows
+      .map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   async function deleteEvent(id: string) {
@@ -218,7 +307,9 @@ export default function AdminPage() {
         .gte('booking_date', localDay())
         .order('booking_date', { ascending: true }),
     ])
-    setRooms(r || [])
+    // A room with no group_id (or from before the column existed) is shared
+    // across tables; a stamped room belongs to one table only.
+    setRooms((r || []).filter((room: any) => !room.group_id || room.group_id === selectedGroup))
     setAllBookings(b || [])
   }
 
@@ -359,14 +450,27 @@ export default function AdminPage() {
         <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
         {groups.length > 0 && (
           <select value={selectedGroup}
-            onChange={e => { setSelectedGroup(e.target.value); loadGroupData(e.target.value) }}
+            onChange={e => {
+              const gid = e.target.value
+              setSelectedGroup(gid)
+              loadGroupData(gid)
+              setJournalResponses(null)
+              if (tab === 'events') loadEvents(gid)
+            }}
             className="mt-3 w-full bg-white/15 text-white text-sm rounded-xl px-3 py-2 border border-white/25 focus:outline-none">
             {groups.map(g => <option key={g.id} value={g.id} className="text-gray-900">{g.name}</option>)}
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
           {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings'] as Tab[]).map(t => (
-            <button key={t} onClick={() => { setTab(t); if (t === 'events') loadEvents(); if (t === 'rooms') loadRooms(); if (t === 'meetings') setSelectedMeeting(null); }}
+            <button key={t} onClick={() => {
+              setTab(t)
+              if (t === 'events') loadEvents()
+              if (t === 'rooms') loadRooms()
+              if (t === 'meetings') setSelectedMeeting(null)
+              if (t === 'prompts' && selectedGroup) loadJournalResponses(selectedGroup)
+              if (t === 'groups') groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
+            }}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
               }`}>
@@ -409,13 +513,33 @@ export default function AdminPage() {
                 <p className="text-center text-gray-400 text-sm py-4">No active tasks. Add one above.</p>
               )}
               {tasks.map(task => (
+                editing?.table === 'tasks' && editing.id === task.id ? (
+                  <div key={task.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
+                    <input value={editing.fields.title}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, title: e.target.value } }))}
+                      className={inputClass} placeholder="Task title" />
+                    <input value={editing.fields.description || ''}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, description: e.target.value } }))}
+                      className={inputClass} placeholder="Description" />
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit} disabled={editSaving || !editing.fields.title.trim()}
+                        className="flex-1 bg-bt-navy text-white py-2 rounded-lg text-xs font-semibold disabled:opacity-40">
+                        {editSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditing(null)} className="flex-1 border border-gray-200 text-gray-500 py-2 rounded-lg text-xs font-semibold">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
                 <div key={task.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 text-sm">{task.title}</p>
                     {task.description && <p className="text-gray-400 text-xs mt-0.5">{task.description}</p>}
                   </div>
+                  <button onClick={() => setEditing({ table: 'tasks', id: task.id, fields: { title: task.title, description: task.description || '' } })}
+                    className="text-bt-blue text-sm font-medium px-2 py-1">Edit</button>
                   <button onClick={() => deleteTask(task.id)} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
                 </div>
+                )
               ))}
             </div>
           </>
@@ -442,11 +566,41 @@ export default function AdminPage() {
             </div>
             <div className="space-y-2">
               {content.map(item => (
+                editing?.table === 'content' && editing.id === item.id ? (
+                  <div key={item.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
+                    <input value={editing.fields.title}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, title: e.target.value } }))}
+                      className={inputClass} placeholder="Title" />
+                    <input value={editing.fields.url}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, url: e.target.value } }))}
+                      className={inputClass} placeholder="URL" />
+                    <input value={editing.fields.description || ''}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, description: e.target.value } }))}
+                      className={inputClass} placeholder="Description" />
+                    <select value={editing.fields.type}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, type: e.target.value } }))}
+                      className={inputClass}>
+                      <option value="video">🎥 Video</option>
+                      <option value="pdf">📄 PDF</option>
+                      <option value="article">📰 Article</option>
+                      <option value="link">🔗 Link</option>
+                    </select>
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit} disabled={editSaving || !editing.fields.title.trim() || !editing.fields.url.trim()}
+                        className="flex-1 bg-bt-navy text-white py-2 rounded-lg text-xs font-semibold disabled:opacity-40">
+                        {editSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditing(null)} className="flex-1 border border-gray-200 text-gray-500 py-2 rounded-lg text-xs font-semibold">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
                 <div key={item.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 text-sm">{item.title}</p>
                     <p className="text-gray-400 text-xs mt-0.5 capitalize">{item.type}</p>
                   </div>
+                  <button onClick={() => setEditing({ table: 'content', id: item.id, fields: { title: item.title, url: item.url, type: item.type, description: item.description || '' } })}
+                    className="text-bt-blue text-sm font-medium px-2 py-1">Edit</button>
                   <button onClick={async () => {
                     if (!confirm(`Remove "${item.title}"?`)) return
                     const supabase = createClient()
@@ -454,6 +608,7 @@ export default function AdminPage() {
                     setContent(p => p.filter(c => c.id !== item.id))
                   }} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
                 </div>
+                )
               ))}
             </div>
           </>
@@ -488,24 +643,72 @@ export default function AdminPage() {
                 {promptSaving ? 'Posting...' : 'Post Prompt'}
               </button>
             </div>
+            {prompts.length > 0 && journalResponses && (
+              <button onClick={() => {
+                const rows: (string | null)[][] = [['Prompt', 'Posted', 'Member', 'Response']]
+                for (const p of prompts) {
+                  const responses = journalResponses[p.id] || []
+                  if (responses.length === 0) rows.push([p.prompt, p.created_at, '', ''])
+                  for (const r of responses) rows.push([p.prompt, p.created_at, r.name, r.response])
+                }
+                downloadCSV(`reflections-${new Date().toISOString().split('T')[0]}.csv`, rows)
+              }}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold border-2 border-gray-200 text-gray-500">
+                ⬇ Export responses (CSV)
+              </button>
+            )}
             <div className="space-y-2">
               {prompts.length === 0 && (
                 <p className="text-center text-gray-400 text-sm py-4">No prompts yet. Post one above.</p>
               )}
-              {prompts.map((p: any) => (
-                <div key={p.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-start gap-3">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900 leading-snug">{p.prompt}</p>
-                    <p className="text-gray-400 text-xs mt-1">{new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+              {prompts.map((p: any) => {
+                const responses = journalResponses?.[p.id]
+                return editing?.table === 'journal_prompts' && editing.id === p.id ? (
+                  <div key={p.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
+                    <textarea value={editing.fields.prompt} rows={3}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, prompt: e.target.value } }))}
+                      className={`${inputClass} resize-none leading-relaxed`} />
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit} disabled={editSaving || !editing.fields.prompt.trim()}
+                        className="flex-1 bg-bt-navy text-white py-2 rounded-lg text-xs font-semibold disabled:opacity-40">
+                        {editSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditing(null)} className="flex-1 border border-gray-200 text-gray-500 py-2 rounded-lg text-xs font-semibold">Cancel</button>
+                    </div>
                   </div>
-                  <button onClick={async () => {
-                    if (!confirm('Delete this prompt?')) return
-                    const supabase = createClient()
-                    await supabase.from('journal_prompts').delete().eq('id', p.id)
-                    setPrompts(prev => prev.filter(x => x.id !== p.id))
-                  }} className="text-red-400 text-sm font-medium px-2 py-1 flex-shrink-0">Remove</button>
+                ) : (
+                <div key={p.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900 leading-snug">{p.prompt}</p>
+                      <p className="text-gray-400 text-xs mt-1">{new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                    </div>
+                    <button onClick={() => setEditing({ table: 'journal_prompts', id: p.id, fields: { prompt: p.prompt } })}
+                      className="text-bt-blue text-sm font-medium px-2 py-1 flex-shrink-0">Edit</button>
+                    <button onClick={async () => {
+                      if (!confirm('Delete this prompt?')) return
+                      const supabase = createClient()
+                      await supabase.from('journal_prompts').delete().eq('id', p.id)
+                      setPrompts(prev => prev.filter(x => x.id !== p.id))
+                    }} className="text-red-400 text-sm font-medium px-2 py-1 flex-shrink-0">Remove</button>
+                  </div>
+                  {/* Member responses — the leader-facing view that didn't exist:
+                      /journal only ever showed the caller's own group page. */}
+                  <div className="mt-2 pt-2 border-t border-gray-50">
+                    {!responses && <p className="text-gray-300 text-xs">Loading responses…</p>}
+                    {responses && responses.length === 0 && (
+                      <p className="text-gray-400 text-xs">No responses yet</p>
+                    )}
+                    {responses && responses.map((r: any, i: number) => (
+                      <div key={i} className="py-1.5">
+                        <p className="text-xs font-semibold text-bt-navy">{r.name}</p>
+                        <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{r.response}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </>
         )}
@@ -519,7 +722,10 @@ export default function AdminPage() {
             </div>
             <div className="space-y-3">
               {groups.map(g => {
-                const inviteLink = `${process.env.NEXT_PUBLIC_APP_URL}/join?group=${g.id}`
+                // Server-issued link (revocable invite code once the migration
+                // has run); the legacy ?group= link only until then.
+                const link = inviteLinks[g.id]
+                const inviteLink = link?.url || `${process.env.NEXT_PUBLIC_APP_URL}/join?group=${g.id}`
                 const copied = copiedGroupId === g.id
                 return (
                   <div key={g.id} className="bg-white rounded-2xl px-4 py-4 shadow-sm space-y-3">
@@ -540,15 +746,25 @@ export default function AdminPage() {
                       <p className="text-xs text-gray-400 mb-1.5 font-medium">Invite Link</p>
                       <p className="text-xs text-gray-600 break-all font-mono leading-relaxed">{inviteLink}</p>
                     </div>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(inviteLink)
-                        setCopiedGroupId(g.id)
-                        setTimeout(() => setCopiedGroupId(''), 2500)
-                      }}
-                      className="w-full py-2.5 rounded-xl text-sm font-semibold border-2 border-bt-blue text-bt-blue transition-colors">
-                      {copied ? '✓ Copied!' : 'Copy Invite Link'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(inviteLink)
+                          setCopiedGroupId(g.id)
+                          setTimeout(() => setCopiedGroupId(''), 2500)
+                        }}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 border-bt-blue text-bt-blue transition-colors">
+                        {copied ? '✓ Copied!' : 'Copy Invite Link'}
+                      </button>
+                      {link?.revocable && (
+                        <button
+                          onClick={() => regenerateInvite(g.id)}
+                          title="Invalidate the current link and create a new one"
+                          className="px-4 py-2.5 rounded-xl text-sm font-semibold border-2 border-gray-200 text-gray-500 transition-colors">
+                          ↻ New Link
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -653,6 +869,23 @@ export default function AdminPage() {
 
         {tab === 'scores' && (
           <div className="space-y-4">
+            <button onClick={() => {
+              const rows: (string | number | null)[][] = [['Name', 'Table', 'Role', 'Adherence %', 'Period streak', 'Push enabled']]
+              for (const u of users) {
+                rows.push([
+                  u.full_name,
+                  groups.find(g => g.id === u.group_id)?.name || 'Unassigned',
+                  u.role,
+                  u.adherence_percent ?? 0,
+                  u.streak ?? 0,
+                  u.push_enabled ? 'yes' : 'no',
+                ])
+              }
+              downloadCSV(`members-${new Date().toISOString().split('T')[0]}.csv`, rows)
+            }}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold border-2 border-gray-200 text-gray-500">
+              ⬇ Export members & scores (CSV)
+            </button>
             {groups.map(g => {
               const members = users.filter(u => u.group_id === g.id).sort((a,b) => (b.adherence_percent||0)-(a.adherence_percent||0))
               const avg = members.length > 0 ? Math.round(members.reduce((s,m) => s+(m.adherence_percent||0),0)/members.length) : 0
@@ -846,6 +1079,44 @@ export default function AdminPage() {
             <div className="space-y-2">
               {events.length === 0 && <p className="text-center text-gray-400 py-6">No events yet</p>}
               {events.map(event => (
+                editing?.table === 'events' && editing.id === event.id ? (
+                  <div key={event.id} className="bg-white rounded-2xl p-4 shadow-sm space-y-2">
+                    <input value={editing.fields.title}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, title: e.target.value } }))}
+                      className={inputClass} placeholder="Event title" />
+                    <textarea value={editing.fields.description || ''} rows={2}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, description: e.target.value } }))}
+                      className={`${inputClass} resize-none`} placeholder="Description" />
+                    <input type="datetime-local" value={(editing.fields.event_date || '').slice(0, 16)}
+                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, event_date: e.target.value } }))}
+                      className={inputClass} />
+                    <div className="flex gap-2">
+                      {['in_person', 'virtual'].map(t => (
+                        <button key={t} onClick={() => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, event_type: t } }))}
+                          className={`flex-1 py-2 rounded-xl text-xs font-semibold border-2 ${editing.fields.event_type === t ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
+                          {t === 'in_person' ? '📍 In Person' : '💻 Virtual'}
+                        </button>
+                      ))}
+                    </div>
+                    {editing.fields.event_type === 'in_person' && (
+                      <input value={editing.fields.location || ''}
+                        onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, location: e.target.value } }))}
+                        className={inputClass} placeholder="Location / address" />
+                    )}
+                    {editing.fields.event_type === 'virtual' && (
+                      <input value={editing.fields.virtual_link || ''}
+                        onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, virtual_link: e.target.value } }))}
+                        className={inputClass} placeholder="Zoom / meeting link" />
+                    )}
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit} disabled={editSaving || !editing.fields.title.trim() || !editing.fields.event_date}
+                        className="flex-1 bg-bt-navy text-white py-2 rounded-lg text-xs font-semibold disabled:opacity-40">
+                        {editSaving ? 'Saving...' : 'Save'}
+                      </button>
+                      <button onClick={() => setEditing(null)} className="flex-1 border border-gray-200 text-gray-500 py-2 rounded-lg text-xs font-semibold">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
                 <div key={event.id} className="bg-white rounded-2xl p-4 shadow-sm flex items-start justify-between gap-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -856,8 +1127,13 @@ export default function AdminPage() {
                     {event.location && <p className="text-xs text-gray-400 mt-0.5">📍 {event.location}</p>}
                     {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
                   </div>
+                  <button onClick={() => setEditing({ table: 'events', id: event.id, fields: {
+                    title: event.title, description: event.description || '', event_date: event.event_date,
+                    event_type: event.event_type, location: event.location || '', virtual_link: event.virtual_link || '',
+                  } })} className="text-bt-blue text-xs font-medium flex-shrink-0">Edit</button>
                   <button onClick={() => deleteEvent(event.id)} className="text-red-400 text-xs font-medium flex-shrink-0">Remove</button>
                 </div>
+                )
               ))}
             </div>
           </div>
@@ -926,8 +1202,19 @@ export default function AdminPage() {
                                       <span className="text-gray-400">{b.profiles?.full_name}</span>
                                       <button onClick={async () => {
                                         if (!confirm('Cancel this booking?')) return
-                                        const supabase = createClient()
-                                        await supabase.from('room_bookings').delete().eq('id', b.id)
+                                        // Server-side: deleting another member's
+                                        // booking from the browser was filtered
+                                        // by RLS to zero rows and "succeeded".
+                                        const res = await fetch('/api/admin/bookings', {
+                                          method: 'DELETE',
+                                          headers: await authHeaders(),
+                                          body: JSON.stringify({ id: b.id }),
+                                        })
+                                        if (!res.ok) {
+                                          const { error } = await res.json().catch(() => ({ error: null }))
+                                          alert(error || 'Could not cancel the booking')
+                                          return
+                                        }
                                         setAllBookings((prev:any) => prev.filter((x:any) => x.id !== b.id))
                                       }} className="text-red-400 font-medium">Cancel</button>
                                     </div>
@@ -968,17 +1255,27 @@ export default function AdminPage() {
                   disabled={!adminBookUserId || !adminBookRoomId || !adminBookDate || !adminBookTime || adminBooking}
                   onClick={async () => {
                     setAdminBooking(true)
-                    const supabase = createClient()
                     const [h] = adminBookTime.split(':').map(Number)
-                    await supabase.from('room_bookings').insert({
-                      room_id: adminBookRoomId,
-                      user_id: adminBookUserId,
-                      booking_date: adminBookDate,
-                      start_time: adminBookTime,
-                      end_time: `${String(h+1).padStart(2,'0')}:00`,
+                    // Server-side: inserting a row for another member from the
+                    // browser is blocked by RLS while the UI reported success.
+                    const res = await fetch('/api/admin/bookings', {
+                      method: 'POST',
+                      headers: await authHeaders(),
+                      body: JSON.stringify({
+                        room_id: adminBookRoomId,
+                        user_id: adminBookUserId,
+                        booking_date: adminBookDate,
+                        start_time: adminBookTime,
+                        end_time: `${String(h+1).padStart(2,'0')}:00`,
+                      }),
                     })
-                    setAdminBookUserId(''); setAdminBookRoomId(''); setAdminBookTime('')
                     setAdminBooking(false)
+                    if (!res.ok) {
+                      const { error } = await res.json().catch(() => ({ error: null }))
+                      alert(error || 'Could not add the booking')
+                      return
+                    }
+                    setAdminBookUserId(''); setAdminBookRoomId(''); setAdminBookTime('')
                     loadRooms()
                     alert('Booking added!')
                   }}

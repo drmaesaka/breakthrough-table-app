@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
 import { dayInTimezone } from '@/lib/dates'
+import { fetchAllRows } from '@/lib/fetch-all'
+
+// This route fans out a push per member and rewrites every adherence figure.
+// Vercel's default cap is 10s, which a table of any size will exceed.
+export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -93,7 +98,16 @@ export async function POST(req: NextRequest) {
     .from('push_subscriptions')
     .select('*')
     .in('user_id', participantIds)
-  const subMap: Record<string, any> = Object.fromEntries((allSubs || []).map((s: any) => [s.user_id, s]))
+
+  // Grouped, not keyed by member: a member may have the app installed on more
+  // than one device, and keeping only the last row seen would nudge one of them
+  // at random. Today the table holds at most one row per member, so this changes
+  // nothing until the unique constraint is widened.
+  const subsByUser = new Map<string, any[]>()
+  for (const s of allSubs || []) {
+    subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
+  }
+  const subsFor = (userId: string): any[] => subsByUser.get(userId) || []
 
   // "Today" is each member's own calendar day, so a single UTC date would check
   // the wrong day for anyone whose timezone has already rolled over. Fetch a
@@ -101,10 +115,14 @@ export async function POST(req: NextRequest) {
   const dayWindow = [-1, 0, 1].map(offset =>
     new Date(now.getTime() + offset * 86400000).toISOString().split('T')[0]
   )
-  const { data: habitRows } = await supabase
-    .from('habit_completions')
-    .select('user_id, completed_date')
-    .in('completed_date', dayWindow)
+  const { data: habitRows } = await fetchAllRows<{ user_id: string; completed_date: string }>(
+    (from, to) => supabase
+      .from('habit_completions')
+      .select('user_id, completed_date')
+      .in('completed_date', dayWindow)
+      .in('user_id', participantIds)
+      .range(from, to)
+  )
 
   const habitDaysByUser = new Map<string, Set<string>>()
   for (const row of habitRows || []) {
@@ -117,14 +135,30 @@ export async function POST(req: NextRequest) {
 
   // Get reading completions for current period (tasks not archived)
   // We check if user has completed ALL current tasks for their group
-  const { data: allTasks } = await supabase
-    .from('tasks')
-    .select('id, group_id')
-    .eq('archived', false)
+  const { data: allTasks } = await fetchAllRows<{ id: string; group_id: string }>(
+    (from, to) => supabase
+      .from('tasks')
+      .select('id, group_id')
+      .eq('archived', false)
+      .range(from, to)
+  )
 
-  const { data: allCompletions } = await supabase
-    .from('task_completions')
-    .select('user_id, task_id')
+  // This used to read the whole of `task_completions`, every run, forever — an
+  // unbounded scan of a table that is never pruned, silently truncated at 1000
+  // rows by PostgREST. Adherence is computed from the result, so truncation
+  // would not error, it would just start marking finished work as undone.
+  // Narrowed to the completions that can actually affect this run, and paged.
+  const currentTaskIds = allTasks.map(t => t.id)
+  const { data: allCompletions } = currentTaskIds.length
+    ? await fetchAllRows<{ user_id: string; task_id: string }>(
+        (from, to) => supabase
+          .from('task_completions')
+          .select('user_id, task_id')
+          .in('task_id', currentTaskIds)
+          .in('user_id', participantIds)
+          .range(from, to)
+      )
+    : { data: [] as { user_id: string; task_id: string }[] }
 
   // Build: which users have finished all reading for their group, and what each
   // member's adherence actually is right now.
@@ -153,22 +187,26 @@ export async function POST(req: NextRequest) {
   // /tasks, so the leaderboard drifted: a leader adding a task left everyone's
   // number wrong, and stale 100%s survived the daily habit reset. Recomputing
   // on every cron run bounds the staleness to one run.
-  const adherenceUpdates: string[] = []
-  for (const p of participants) {
-    const next = freshAdherence.get(p.id)
-    if (next === undefined || next === (p.adherence_percent ?? null)) continue
-    if (!dryRun) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ adherence_percent: next })
-        .eq('id', p.id)
-      if (error) {
-        console.error('adherence update failed:', p.id, error.message)
-        continue
+  // Written in parallel — one round trip per member in series put the whole run
+  // on a clock that a 40-50 member table would blow through.
+  const adherenceResults = await Promise.all(
+    participants.map(async p => {
+      const next = freshAdherence.get(p.id)
+      if (next === undefined || next === (p.adherence_percent ?? null)) return null
+      if (!dryRun) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ adherence_percent: next })
+          .eq('id', p.id)
+        if (error) {
+          console.error('adherence update failed:', p.id, error.message)
+          return null
+        }
       }
-    }
-    adherenceUpdates.push(`${p.full_name || p.id}: ${p.adherence_percent ?? '—'}→${next}`)
-  }
+      return `${p.full_name || p.id}: ${p.adherence_percent ?? '—'}→${next}`
+    })
+  )
+  const adherenceUpdates = adherenceResults.filter((u): u is string => u !== null)
 
   // Why each member was passed over. A nudge that never arrives is otherwise
   // indistinguishable from one that was never due, which makes "why didn't I
@@ -253,8 +291,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const sub = subMap[participant.id]
-        if (!sub) {
+        const subs = subsFor(participant.id)
+        if (subs.length === 0) {
           skipped.push({
             name: participant.full_name || participant.id,
             reason: 'due for a nudge, but no push subscription saved for this account',
@@ -262,11 +300,30 @@ export async function POST(req: NextRequest) {
           })
           return null
         }
-        const result = dryRun
-          ? 'would-send'
-          : await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/tasks' })
-        if (result === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', participant.id)
-        return { id: participant.id, name: participant.full_name, message, result }
+
+        const deviceResults = await Promise.all(
+          subs.map(async sub => {
+            const res = dryRun
+              ? 'would-send'
+              : await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/tasks' })
+            if (res === 'expired') {
+              // Drop the one dead device. Deleting by user_id unsubscribed the
+              // member entirely because one of their devices went stale.
+              await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+            }
+            return res
+          })
+        )
+
+        // One member, one outcome: delivered if any device took it.
+        const result = deviceResults.includes(true)
+          ? true
+          : deviceResults.includes('would-send')
+            ? 'would-send'
+            : deviceResults.every(r => r === 'expired')
+              ? 'expired'
+              : false
+        return { id: participant.id, name: participant.full_name, message, result, devices: subs.length }
       })
   )
 
@@ -277,35 +334,52 @@ export async function POST(req: NextRequest) {
     .eq('reminder_enabled', true)
     .not('reminder_message', 'is', null)
 
-  const reminderResults: any[] = []
+  // Sends fan out in parallel. This was a sequential nested loop — every group,
+  // then every member inside it, one awaited push at a time — which is the one
+  // path in this route that would time out first as a table grows.
+  const dueReminders = (reminderSettings || []).filter(setting =>
+    timeWindow.includes(
+      localTimeToUTC(setting.reminder_time, setting.checkin_timezone || 'America/Chicago')
+    )
+  )
 
-  if (reminderSettings && reminderSettings.length > 0) {
-    for (const setting of reminderSettings) {
-      const utcTime = localTimeToUTC(setting.reminder_time, setting.checkin_timezone || 'America/Chicago')
-      if (!timeWindow.includes(utcTime)) continue
-
+  const reminderResults = (await Promise.all(
+    dueReminders.map(async setting => {
       const { data: groupParticipants } = await supabase
         .from('profiles')
         .select('id, full_name')
         .eq('group_id', setting.group_id)
 
-      if (!groupParticipants) continue
+      if (!groupParticipants || groupParticipants.length === 0) return []
 
       const gpIds = groupParticipants.map((p: any) => p.id)
-      const { data: gpSubs } = await supabase.from('push_subscriptions').select('*').in('user_id', gpIds)
-      const subMap = Object.fromEntries((gpSubs || []).map((s: any) => [s.user_id, s]))
+      const { data: gpSubs } = await supabase
+        .from('push_subscriptions')
+        .select('*')
+        .in('user_id', gpIds)
 
-      for (const p of groupParticipants) {
-        const sub = subMap[p.id]
-        if (!sub) continue
-        const res = dryRun
-          ? 'would-send'
-          : await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
-        if (res === 'expired') await supabase.from('push_subscriptions').delete().eq('user_id', p.id)
-        reminderResults.push({ id: p.id, name: p.full_name, result: res })
+      // A member can have more than one device, so group the subscriptions
+      // rather than keeping only the last one seen for each member.
+      const subsByUser = new Map<string, any[]>()
+      for (const s of gpSubs || []) {
+        subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
       }
-    }
-  }
+
+      return Promise.all(
+        groupParticipants.flatMap((p: any) =>
+          (subsByUser.get(p.id) || []).map(async sub => {
+            const res = dryRun
+              ? 'would-send'
+              : await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
+            if (res === 'expired') {
+              await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+            }
+            return { id: p.id, name: p.full_name, result: res }
+          })
+        )
+      )
+    })
+  )).flat()
 
   // `results` holds a null for every matched member without a subscription, so
   // its length was never the number of notifications that actually went out.
@@ -337,8 +411,8 @@ export async function POST(req: NextRequest) {
         streak: p.streak,
       })),
     } : {}),
-    push_ready: participants.filter(p => subMap[p.id]).length,
-    members_without_push: participants.filter(p => !subMap[p.id]).map(p => p.full_name || p.id),
+    push_ready: participants.filter(p => subsFor(p.id).length > 0).length,
+    members_without_push: participants.filter(p => subsFor(p.id).length === 0).map(p => p.full_name || p.id),
     skipped,
     results,
     reminderResults,

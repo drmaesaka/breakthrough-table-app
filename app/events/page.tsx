@@ -20,7 +20,8 @@ export default function EventsPage() {
       if (!user) { router.push('/login'); return }
       setUserId(user.id)
 
-      const [{ data: eventsData }, { data: rsvpData }] = await Promise.all([
+      const [{ data: prof }, { data: eventsData }, { data: rsvpData }] = await Promise.all([
+        supabase.from('profiles').select('group_id').eq('id', user.id).maybeSingle(),
         supabase.from('events')
           .select('*, profiles(full_name)')
           .gte('event_date', new Date().toISOString())
@@ -28,7 +29,10 @@ export default function EventsPage() {
         supabase.from('event_rsvps').select('event_id').eq('user_id', user.id),
       ])
 
-      setEvents(eventsData || [])
+      // Only this member's table. Filtered client-side so it works before and
+      // after the group_id migration: an event without the column (or NULL) is
+      // a legacy shared event and stays visible for everyone.
+      setEvents((eventsData || []).filter((e: any) => !e.group_id || e.group_id === prof?.group_id))
       setRsvps(new Set((rsvpData || []).map((r: any) => r.event_id)))
       setLoading(false)
     }
