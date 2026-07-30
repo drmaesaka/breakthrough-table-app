@@ -10,7 +10,8 @@ import { adminClient, requireLeader, leaderGroupIds } from '@/lib/api-auth'
 const EDITABLE: Record<string, string[]> = {
   tasks: ['title', 'description'],
   content: ['title', 'url', 'type', 'description'],
-  events: ['title', 'description', 'event_date', 'event_type', 'location', 'virtual_link'],
+  events: ['title', 'description', 'event_date', 'event_type', 'location', 'virtual_link',
+           'notifications_enabled', 'followup_message'],
   journal_prompts: ['prompt'],
 }
 

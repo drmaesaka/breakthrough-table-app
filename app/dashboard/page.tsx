@@ -88,6 +88,17 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Sign-ups sit outside the has-a-table gate on purpose: alumni keep
+            their account with no group_id, and the alumni table is for them. */}
+        {profile && !profile.group_id && (
+          <Link href="/sessions"
+            className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
+            <div className="text-3xl mb-2">🪑</div>
+            <p className="font-semibold text-bt-navy text-sm">Table Sign-Ups</p>
+            <p className="text-gray-400 text-xs mt-0.5">Alumni & monthly drop-in tables</p>
+          </Link>
+        )}
+
         {/* Adherence card - only show if in a group */}
         {profile?.group_id && (
           <>
@@ -116,6 +127,8 @@ export default function DashboardPage() {
                 // were only reachable by typing the URL.
                 { href: '/journal', emoji: '📓', title: 'Reflections', sub: "Your table's prompts" },
                 { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
+                { href: '/meetings', emoji: '🗒️', title: 'Meetings', sub: "This meeting's outline" },
+                { href: '/sessions', emoji: '🪑', title: 'Sign-Ups', sub: 'Alumni & drop-in tables' },
                 { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
                 { href: '/booking', emoji: '🏢', title: 'Book a Room', sub: 'Reserve your space' },
                 { href: '/directory', emoji: '👥', title: 'Directory', sub: 'Find BT members' },

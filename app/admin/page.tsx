@@ -3,10 +3,14 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
-import { MEETING_PLANS, type MeetingPlan } from '@/lib/meeting-plans'
+import {
+  MEETING_SECTIONS,
+  resolveMeetingPlans,
+  type StoredMeetingPlan,
+} from '@/lib/meeting-plans'
 import { localDay } from '@/lib/dates'
 
-type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings'
+type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
@@ -67,8 +71,29 @@ export default function AdminPage() {
   const [eventLink, setEventLink] = useState('')
   const [eventSaving, setEventSaving] = useState(false)
 
-  // Meetings state
-  const [selectedMeeting, setSelectedMeeting] = useState<MeetingPlan | null>(null)
+  // Meetings state. Defaults and this table's overrides are held separately so
+  // the editor can always say which of the two you are about to change.
+  const [meetingDefaults, setMeetingDefaults] = useState<StoredMeetingPlan[]>([])
+  const [meetingOverrides, setMeetingOverrides] = useState<StoredMeetingPlan[]>([])
+  const [selectedMeetingNumber, setSelectedMeetingNumber] = useState<number | null>(null)
+  const [meetingScope, setMeetingScope] = useState<'default' | 'table'>('table')
+  const [meetingDraft, setMeetingDraft] = useState<Record<string, string> | null>(null)
+  const [meetingSaving, setMeetingSaving] = useState(false)
+  const [meetingError, setMeetingError] = useState('')
+  const [meetingsLoading, setMeetingsLoading] = useState(false)
+
+  // Alumni / drop-in sign-ups. Not group-scoped — see the sessions page.
+  const [sessions, setSessions] = useState<any[]>([])
+  const [registrations, setRegistrations] = useState<any[]>([])
+  const [sessionKind, setSessionKind] = useState<'alumni' | 'dropin'>('dropin')
+  const [sessionTitle, setSessionTitle] = useState('')
+  const [sessionDate, setSessionDate] = useState('')
+  const [sessionLocation, setSessionLocation] = useState('')
+  const [sessionDesc, setSessionDesc] = useState('')
+  const [sessionCapacity, setSessionCapacity] = useState('')
+  const [sessionSaving, setSessionSaving] = useState(false)
+  const [sessionError, setSessionError] = useState('')
+  const [openRoster, setOpenRoster] = useState<string | null>(null)
 
   // Rooms state
   const [rooms, setRooms] = useState<any[]>([])
@@ -192,6 +217,203 @@ export default function AdminPage() {
     setBroadcastMessage('')
     setTimeout(() => setBroadcastSent(false), 3000)
     alert(`Broadcast sent to ${result.sent} member${result.sent !== 1 ? 's' : ''}!`)
+  }
+
+  // --- Meeting plans -------------------------------------------------------
+
+  async function loadMeetingPlans(gid: string = selectedGroup) {
+    setMeetingsLoading(true)
+    setMeetingError('')
+    const qs = gid ? `?group_id=${encodeURIComponent(gid)}` : ''
+    const res = await fetch(`/api/admin/meeting-plans${qs}`, { headers: await authHeaders() })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setMeetingError(json.error || `Could not load meeting plans (${res.status})`)
+      setMeetingsLoading(false)
+      return
+    }
+
+    // First run after the migration: the table is empty, so publish the
+    // curriculum that has been living in the repo, then read it back.
+    if ((json.defaults || []).length === 0) {
+      const seed = await fetch('/api/admin/meeting-plans', {
+        method: 'POST',
+        headers: await authHeaders(),
+      })
+      if (seed.ok) {
+        const again = await fetch(`/api/admin/meeting-plans${qs}`, { headers: await authHeaders() })
+        const seeded = await again.json().catch(() => ({}))
+        if (again.ok) {
+          setMeetingDefaults(seeded.defaults || [])
+          setMeetingOverrides(seeded.overrides || [])
+          setMeetingsLoading(false)
+          return
+        }
+      }
+    }
+
+    setMeetingDefaults(json.defaults || [])
+    setMeetingOverrides(json.overrides || [])
+    setMeetingsLoading(false)
+  }
+
+  /** What this table actually runs: its override if it has one, else the default. */
+  function resolvedMeetings(): StoredMeetingPlan[] {
+    return resolveMeetingPlans([...meetingDefaults, ...meetingOverrides])
+  }
+
+  function meetingFor(number: number, scope: 'default' | 'table'): StoredMeetingPlan | null {
+    const pool = scope === 'default' ? meetingDefaults : meetingOverrides
+    return pool.find(p => p.number === number) || null
+  }
+
+  /**
+   * Opens the editor. Editing "for this table" with no override yet starts from
+   * a copy of the default — the copy-on-write step that keeps one TC's rewrite
+   * off every other table's outline.
+   */
+  function openMeetingEditor(number: number, scope: 'default' | 'table') {
+    const source = meetingFor(number, scope) || meetingFor(number, 'default')
+    if (!source) return
+    setMeetingScope(scope)
+    setSelectedMeetingNumber(number)
+    setMeetingError('')
+    setMeetingDraft({
+      title: source.title,
+      ...Object.fromEntries(
+        MEETING_SECTIONS.map(s => [s.key, (source[s.key] || []).join('\n')])
+      ),
+    })
+  }
+
+  async function saveMeetingPlan() {
+    if (selectedMeetingNumber === null || !meetingDraft) return
+    if (!meetingDraft.title.trim()) { setMeetingError('Title is required'); return }
+    if (meetingScope === 'table' && !selectedGroup) {
+      setMeetingError('Pick a table first')
+      return
+    }
+    setMeetingSaving(true)
+    setMeetingError('')
+
+    const res = await fetch('/api/admin/meeting-plans', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify({
+        group_id: meetingScope === 'table' ? selectedGroup : null,
+        number: selectedMeetingNumber,
+        title: meetingDraft.title,
+        // One bullet per line — reordering is moving a line, which beats
+        // building drag handles for a list edited a few times a year.
+        ...Object.fromEntries(
+          MEETING_SECTIONS.map(s => [s.key, (meetingDraft[s.key] || '').split('\n')])
+        ),
+      }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setMeetingSaving(false)
+    if (!res.ok) {
+      setMeetingError(json.detail || json.error || `Save failed (${res.status})`)
+      return
+    }
+    setMeetingDraft(null)
+    await loadMeetingPlans()
+  }
+
+  async function resetMeetingOverride(number: number) {
+    if (!selectedGroup) return
+    if (!confirm(`Reset meeting #${number} for this table back to the BT default? Your table's edits to it will be lost.`)) return
+    const res = await fetch(
+      `/api/admin/meeting-plans?group_id=${encodeURIComponent(selectedGroup)}&number=${number}`,
+      { method: 'DELETE', headers: await authHeaders() }
+    )
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) { setMeetingError(json.error || `Reset failed (${res.status})`); return }
+    setMeetingDraft(null)
+    await loadMeetingPlans()
+  }
+
+  async function setCurrentMeeting(number: number | null) {
+    if (!selectedGroup) return
+    const res = await fetch('/api/admin/meeting-plans', {
+      method: 'PATCH',
+      headers: await authHeaders(),
+      body: JSON.stringify({ group_id: selectedGroup, current_meeting_number: number }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) { setMeetingError(json.error || `Could not update (${res.status})`); return }
+    setGroups(g => g.map(x => x.id === selectedGroup ? { ...x, current_meeting_number: number } : x))
+  }
+
+  // --- Alumni / drop-in sessions ------------------------------------------
+
+  async function loadSessions() {
+    const supabase = createClient()
+    const [s, r] = await Promise.all([
+      supabase.from('signup_sessions').select('*').order('session_date', { ascending: true }),
+      supabase.from('signup_registrations').select('*, profiles(full_name, contact_email)'),
+    ])
+    if (s.error) { setSessionError(s.error.message); return }
+    if (r.error) console.error('registrations fetch failed:', r.error.message)
+    setSessions(s.data || [])
+    setRegistrations(r.data || [])
+  }
+
+  async function addSession() {
+    if (!sessionTitle.trim() || !sessionDate) return
+    setSessionSaving(true)
+    setSessionError('')
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const capacity = sessionCapacity.trim() === '' ? null : Number(sessionCapacity)
+    if (capacity !== null && (!Number.isInteger(capacity) || capacity < 1)) {
+      setSessionSaving(false)
+      setSessionError('Capacity must be a whole number, or blank for no limit')
+      return
+    }
+
+    const { error } = await supabase.from('signup_sessions').insert({
+      kind: sessionKind,
+      title: sessionTitle.trim(),
+      // datetime-local carries no offset, so Postgres would read it as UTC and
+      // show everyone the wrong hour — the same bug events had.
+      session_date: new Date(sessionDate).toISOString(),
+      location: sessionLocation.trim() || null,
+      description: sessionDesc.trim() || null,
+      capacity,
+      created_by: user!.id,
+    })
+    setSessionSaving(false)
+    if (error) { setSessionError(error.message); return }
+    setSessionTitle(''); setSessionDate(''); setSessionLocation(''); setSessionDesc(''); setSessionCapacity('')
+    loadSessions()
+  }
+
+  async function toggleSessionOpen(session: any) {
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('signup_sessions')
+      .update({ open: !session.open })
+      .eq('id', session.id)
+    if (error) { setSessionError(error.message); return }
+    setSessions(p => p.map(s => s.id === session.id ? { ...s, open: !session.open } : s))
+  }
+
+  async function deleteSession(id: string) {
+    if (!confirm('Delete this session? Everyone signed up for it will be removed too.')) return
+    const supabase = createClient()
+    const { error } = await supabase.from('signup_sessions').delete().eq('id', id)
+    if (error) { setSessionError(error.message); return }
+    setSessions(p => p.filter(s => s.id !== id))
+    setRegistrations(p => p.filter(r => r.session_id !== id))
+  }
+
+  async function removeRegistration(id: string) {
+    const supabase = createClient()
+    const { error } = await supabase.from('signup_registrations').delete().eq('id', id)
+    if (error) { setSessionError(error.message); return }
+    setRegistrations(p => p.filter(r => r.id !== id))
   }
 
   async function loadEvents(gid: string = selectedGroup) {
@@ -473,18 +695,20 @@ export default function AdminPage() {
               loadGroupData(gid)
               setJournalResponses(null)
               if (tab === 'events') loadEvents(gid)
+              if (tab === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans(gid) }
             }}
             className="mt-3 w-full bg-white/15 text-white text-sm rounded-xl px-3 py-2 border border-white/25 focus:outline-none">
             {groups.map(g => <option key={g.id} value={g.id} className="text-gray-900">{g.name}</option>)}
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings'] as Tab[]).map(t => (
+          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings', 'sessions'] as Tab[]).map(t => (
             <button key={t} onClick={() => {
               setTab(t)
               if (t === 'events') loadEvents()
               if (t === 'rooms') loadRooms()
-              if (t === 'meetings') setSelectedMeeting(null)
+              if (t === 'sessions') loadSessions()
+              if (t === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans() }
               if (t === 'prompts' && selectedGroup) loadJournalResponses(selectedGroup)
               if (t === 'groups') groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
             }}
@@ -1125,6 +1349,20 @@ export default function AdminPage() {
                         onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, virtual_link: e.target.value } }))}
                         className={inputClass} placeholder="Zoom / meeting link" />
                     )}
+                    <div className="pt-2 border-t border-gray-100 space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                        <input type="checkbox" checked={editing.fields.notifications_enabled !== false}
+                          onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, notifications_enabled: e.target.checked } }))} />
+                        Send notifications for this event
+                      </label>
+                      <p className="text-[11px] text-gray-400 leading-relaxed">
+                        Announced once when added, a reminder the day before and an hour ahead to
+                        anyone who RSVPed, then a follow-up two hours after it starts.
+                      </p>
+                      <textarea value={editing.fields.followup_message || ''} rows={2}
+                        onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, followup_message: e.target.value } }))}
+                        className={`${inputClass} resize-none`} placeholder="Follow-up message (optional)" />
+                    </div>
                     <div className="flex gap-2">
                       <button onClick={saveEdit} disabled={editSaving || !editing.fields.title.trim() || !editing.fields.event_date}
                         className="flex-1 bg-bt-navy text-white py-2 rounded-lg text-xs font-semibold disabled:opacity-40">
@@ -1143,10 +1381,26 @@ export default function AdminPage() {
                     <p className="text-xs text-gray-400">{new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
                     {event.location && <p className="text-xs text-gray-400 mt-0.5">📍 {event.location}</p>}
                     {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
+                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                      {event.notifications_enabled === false ? (
+                        <span className="text-[10px] font-semibold uppercase tracking-wider bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                          Notifications off
+                        </span>
+                      ) : (
+                        <>
+                          {event.announced_at && <NoticeChip label="Announced" />}
+                          {event.reminder_24h_sent_at && <NoticeChip label="Day-before sent" />}
+                          {event.reminder_1h_sent_at && <NoticeChip label="1h sent" />}
+                          {event.followup_sent_at && <NoticeChip label="Followed up" />}
+                        </>
+                      )}
+                    </div>
                   </div>
                   <button onClick={() => setEditing({ table: 'events', id: event.id, fields: {
                     title: event.title, description: event.description || '', event_date: toLocalInput(event.event_date),
                     event_type: event.event_type, location: event.location || '', virtual_link: event.virtual_link || '',
+                    notifications_enabled: event.notifications_enabled !== false,
+                    followup_message: event.followup_message || '',
                   } })} className="text-bt-blue text-xs font-medium flex-shrink-0">Edit</button>
                   <button onClick={() => deleteEvent(event.id)} className="text-red-400 text-xs font-medium flex-shrink-0">Remove</button>
                 </div>
@@ -1305,20 +1559,189 @@ export default function AdminPage() {
           )
         })()}
 
-        {/* MEETINGS TAB */}
-        {tab === 'meetings' && (
+        {/* SESSIONS TAB — alumni + monthly drop-in sign-ups */}
+        {tab === 'sessions' && (
           <div className="space-y-4">
-            {!selectedMeeting ? (
-              <>
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+              <h3 className="font-bold text-bt-navy">Open a Session</h3>
+              <p className="text-xs text-gray-400">
+                Alumni and drop-in tables are BT-wide, not tied to one table, so
+                members without a table can still sign up.
+              </p>
+              <div className="flex gap-2">
+                {(['dropin', 'alumni'] as const).map(k => (
+                  <button key={k} onClick={() => setSessionKind(k)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 ${
+                      sessionKind === k ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'
+                    }`}>
+                    {k === 'dropin' ? '🔄 Drop-In' : '🎓 Alumni'}
+                  </button>
+                ))}
+              </div>
+              <input value={sessionTitle} onChange={e => setSessionTitle(e.target.value)}
+                placeholder="Session title" className={inputClass} />
+              <input type="datetime-local" value={sessionDate} onChange={e => setSessionDate(e.target.value)}
+                className={inputClass} />
+              <input value={sessionLocation} onChange={e => setSessionLocation(e.target.value)}
+                placeholder="Location (optional)" className={inputClass} />
+              <textarea value={sessionDesc} onChange={e => setSessionDesc(e.target.value)} rows={2}
+                placeholder="Description (optional)" className={`${inputClass} resize-none`} />
+              <input value={sessionCapacity} onChange={e => setSessionCapacity(e.target.value)}
+                inputMode="numeric" placeholder="Seats (blank = no limit)" className={inputClass} />
+              {sessionError && <p className="text-red-600 text-xs">{sessionError}</p>}
+              <button onClick={addSession} disabled={sessionSaving || !sessionTitle.trim() || !sessionDate}
+                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                {sessionSaving ? 'Saving...' : 'Open Sign-Ups'}
+              </button>
+            </div>
+
+            {sessions.length === 0 && (
+              <p className="text-center text-gray-400 py-6">No sessions yet</p>
+            )}
+
+            {sessions.map(session => {
+              const roster = registrations.filter(r => r.session_id === session.id)
+              const seatsLeft = session.capacity === null ? null : session.capacity - roster.length
+              const showing = openRoster === session.id
+
+              return (
+                <div key={session.id} className="bg-white rounded-2xl p-5 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold uppercase tracking-wider bg-bt-pale text-bt-navy px-2 py-0.5 rounded-full">
+                          {session.kind === 'alumni' ? '🎓 Alumni' : '🔄 Drop-In'}
+                        </span>
+                        {!session.open && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                            Closed
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-semibold text-gray-900 text-sm mt-1.5">{session.title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(session.session_date).toLocaleString('en-US', {
+                          weekday: 'short', month: 'short', day: 'numeric',
+                          hour: 'numeric', minute: '2-digit',
+                        })}
+                      </p>
+                      {session.location && <p className="text-xs text-gray-400 mt-0.5">📍 {session.location}</p>}
+                      <p className="text-xs font-semibold text-bt-blue mt-1.5">
+                        {roster.length} signed up
+                        {seatsLeft !== null && ` · ${Math.max(0, seatsLeft)} of ${session.capacity} seats left`}
+                      </p>
+                    </div>
+                    <button onClick={() => deleteSession(session.id)}
+                      className="text-red-400 text-xs font-medium flex-shrink-0">
+                      Delete
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    <button onClick={() => setOpenRoster(showing ? null : session.id)}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-bt-pale text-bt-navy">
+                      {showing ? 'Hide roster' : `View roster (${roster.length})`}
+                    </button>
+                    <button onClick={() => toggleSessionOpen(session)}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-white text-bt-navy border border-gray-200">
+                      {session.open ? 'Close sign-ups' : 'Reopen sign-ups'}
+                    </button>
+                    {roster.length > 0 && (
+                      <button onClick={() => downloadCSV(
+                        `${session.kind}-${session.session_date.split('T')[0]}.csv`,
+                        [
+                          ['Name', 'Email', 'Signed up'],
+                          ...roster.map(r => [
+                            r.profiles?.full_name || '',
+                            r.profiles?.contact_email || '',
+                            new Date(r.created_at).toLocaleString('en-US'),
+                          ]),
+                        ]
+                      )}
+                        className="px-3 py-2 rounded-xl text-xs font-semibold bg-white text-bt-navy border border-gray-200">
+                        ⬇ CSV
+                      </button>
+                    )}
+                  </div>
+
+                  {showing && (
+                    <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                      {roster.length === 0 && (
+                        <p className="text-xs text-gray-400">Nobody has signed up yet.</p>
+                      )}
+                      {roster.map(r => (
+                        <div key={r.id} className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm text-gray-900 truncate">
+                              {r.profiles?.full_name || 'Member'}
+                            </p>
+                            {r.profiles?.contact_email && (
+                              <p className="text-xs text-gray-400 truncate">{r.profiles.contact_email}</p>
+                            )}
+                          </div>
+                          <button onClick={() => removeRegistration(r.id)}
+                            className="text-red-400 text-xs font-medium flex-shrink-0">
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {/* MEETINGS TAB */}
+        {tab === 'meetings' && (() => {
+          const plans = resolvedMeetings()
+          const group = groups.find(g => g.id === selectedGroup)
+          const currentNumber = group?.current_meeting_number ?? null
+          const selected = selectedMeetingNumber !== null
+            ? plans.find(p => p.number === selectedMeetingNumber) || null
+            : null
+          const hasOverride = selectedMeetingNumber !== null
+            && meetingOverrides.some(p => p.number === selectedMeetingNumber)
+
+          return (
+            <div className="space-y-4">
+              {meetingError && (
+                <div className="bg-red-50 border border-red-100 text-red-700 rounded-xl px-4 py-3 text-sm">
+                  {meetingError}
+                </div>
+              )}
+
+              {meetingsLoading ? (
+                <div className="bg-white rounded-2xl p-5 shadow-sm">
+                  <p className="text-gray-400 text-sm">Loading meeting plans...</p>
+                </div>
+              ) : selected === null ? (
                 <div className="bg-white rounded-2xl p-5 shadow-sm">
                   <h3 className="font-bold text-bt-navy mb-1">Meeting Plans</h3>
-                  <p className="text-xs text-gray-400 mb-4">Full curriculum for each BT table meeting.</p>
+                  <p className="text-xs text-gray-400 mb-4">
+                    The outline for each BT table meeting. Edit the BT default to change it
+                    everywhere, or make a version just for {group?.name || 'this table'}.
+                  </p>
                   <div className="space-y-2">
-                    {MEETING_PLANS.map(m => (
-                      <button key={m.number} onClick={() => setSelectedMeeting(m)}
+                    {plans.map(m => (
+                      <button key={m.number} onClick={() => setSelectedMeetingNumber(m.number)}
                         className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl bg-bt-pale hover:bg-bt-light/30 transition-colors text-left">
                         <div>
-                          <span className="text-xs font-bold text-bt-blue uppercase tracking-wider">Meeting #{m.number}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-bt-blue uppercase tracking-wider">
+                              Meeting #{m.number}
+                            </span>
+                            {m.number === currentNumber && (
+                              <span className="text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                                Current
+                              </span>
+                            )}
+                            {m.group_id && (
+                              <span className="text-[10px] font-bold uppercase tracking-wider bg-bt-light/40 text-bt-navy px-2 py-0.5 rounded-full">
+                                Customized
+                              </span>
+                            )}
+                          </div>
                           <p className="font-semibold text-gray-900 text-sm mt-0.5">{m.title}</p>
                         </div>
                         <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1326,116 +1749,163 @@ export default function AdminPage() {
                         </svg>
                       </button>
                     ))}
+                    {plans.length === 0 && (
+                      <p className="text-sm text-gray-400 py-4">
+                        No meeting plans yet. Run the 2026-07-30 migration, then reopen this tab.
+                      </p>
+                    )}
                   </div>
                 </div>
-              </>
-            ) : (
-              <>
-                <button onClick={() => setSelectedMeeting(null)}
-                  className="flex items-center gap-2 text-sm font-medium text-bt-blue">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                  </svg>
-                  All Meetings
-                </button>
+              ) : (
+                <>
+                  <button onClick={() => { setSelectedMeetingNumber(null); setMeetingDraft(null) }}
+                    className="flex items-center gap-2 text-sm font-medium text-bt-blue">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    All Meetings
+                  </button>
 
-                <div className="bg-white rounded-2xl p-5 shadow-sm">
-                  <p className="text-xs font-bold text-bt-blue uppercase tracking-wider">Meeting #{selectedMeeting.number}</p>
-                  <h2 className="text-xl font-bold text-bt-navy mt-1">{selectedMeeting.title}</h2>
-                </div>
-
-                {selectedMeeting.resources.length > 0 && (
                   <div className="bg-white rounded-2xl p-5 shadow-sm">
-                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
-                      <span className="text-lg">📎</span> Resources & Handouts
-                    </h4>
-                    <ul className="space-y-2">
-                      {selectedMeeting.resources.map((r, i) => (
-                        <li key={i} className="text-sm text-gray-600 flex gap-2">
-                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
-                          <span>{r.includes('https://') ? (
-                            <>
-                              {r.split('https://')[0].replace(/:\s*$/, '')}
-                              {' '}
-                              <a href={'https://' + r.split('https://')[1]} target="_blank" rel="noopener noreferrer"
-                                className="text-bt-blue underline break-all">link</a>
-                            </>
-                          ) : r}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-xs font-bold text-bt-blue uppercase tracking-wider">
+                        Meeting #{selected.number}
+                      </p>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-bt-pale text-bt-navy px-2 py-0.5 rounded-full">
+                        {hasOverride ? `${group?.name || 'This table'} only` : 'BT default'}
+                      </span>
+                    </div>
+                    <h2 className="text-xl font-bold text-bt-navy mt-1">{selected.title}</h2>
 
-                {selectedMeeting.foundations.length > 0 && (
-                  <div className="bg-white rounded-2xl p-5 shadow-sm">
-                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
-                      <span className="text-lg">🔁</span> Recap & BT Foundations
-                    </h4>
-                    <ul className="space-y-2">
-                      {selectedMeeting.foundations.map((f, i) => (
-                        <li key={i} className="text-sm text-gray-600 flex gap-2">
-                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
-                          <span>{f}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="flex gap-2 mt-4 flex-wrap">
+                      <button onClick={() => setCurrentMeeting(
+                        currentNumber === selected.number ? null : selected.number
+                      )}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold ${
+                          currentNumber === selected.number
+                            ? 'bg-green-600 text-white'
+                            : 'bg-bt-pale text-bt-navy border border-bt-navy/15'
+                        }`}>
+                        {currentNumber === selected.number ? '✓ Current meeting' : 'Mark as current'}
+                      </button>
+                      <button onClick={() => openMeetingEditor(selected.number, 'table')}
+                        className="px-3 py-2 rounded-xl text-xs font-semibold bg-bt-navy text-white">
+                        Edit for this table
+                      </button>
+                      <button onClick={() => openMeetingEditor(selected.number, 'default')}
+                        className="px-3 py-2 rounded-xl text-xs font-semibold bg-white text-bt-navy border border-gray-200">
+                        Edit BT default
+                      </button>
+                      {hasOverride && (
+                        <button onClick={() => resetMeetingOverride(selected.number)}
+                          className="px-3 py-2 rounded-xl text-xs font-semibold text-red-600 border border-red-100">
+                          Reset to default
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                {selectedMeeting.curriculum.length > 0 && (
-                  <div className="bg-white rounded-2xl p-5 shadow-sm">
-                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
-                      <span className="text-lg">📋</span> Curriculum
-                    </h4>
-                    <ul className="space-y-2">
-                      {selectedMeeting.curriculum.map((c, i) => (
-                        <li key={i} className="text-sm text-gray-600 flex gap-2">
-                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
-                          <span>{c}</span>
-                        </li>
+                  {meetingDraft ? (
+                    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+                      <div className={`rounded-xl px-4 py-3 text-xs ${
+                        meetingScope === 'default'
+                          ? 'bg-amber-50 text-amber-800 border border-amber-100'
+                          : 'bg-bt-pale text-bt-navy'
+                      }`}>
+                        {meetingScope === 'default'
+                          ? 'Editing the BT default — this changes meeting #' + selected.number + ' for every table that has not customized it.'
+                          : `Editing for ${group?.name || 'this table'} only. Other tables keep the BT default.`}
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Title</label>
+                        <input value={meetingDraft.title}
+                          onChange={e => setMeetingDraft(d => ({ ...d!, title: e.target.value }))}
+                          className={inputClass + ' mt-1.5'} />
+                      </div>
+
+                      {MEETING_SECTIONS.map(section => (
+                        <div key={section.key}>
+                          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <span>{section.icon}</span> {section.label}
+                          </label>
+                          <p className="text-[11px] text-gray-400 mt-0.5 mb-1.5">One bullet per line.</p>
+                          <textarea rows={6} value={meetingDraft[section.key] || ''}
+                            onChange={e => setMeetingDraft(d => ({ ...d!, [section.key]: e.target.value }))}
+                            className={inputClass + ' font-mono text-xs leading-relaxed'} />
+                        </div>
                       ))}
-                    </ul>
-                  </div>
-                )}
 
-                {selectedMeeting.challenges.length > 0 && (
-                  <div className="bg-white rounded-2xl p-5 shadow-sm">
-                    <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
-                      <span className="text-lg">🎯</span> Challenges
-                    </h4>
-                    <ul className="space-y-2">
-                      {selectedMeeting.challenges.map((ch, i) => (
-                        <li key={i} className="text-sm text-gray-600 flex gap-2">
-                          <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
-                          <span>{ch}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      <div className="flex gap-3">
+                        <button onClick={() => setMeetingDraft(null)}
+                          className="flex-1 bg-white border border-gray-200 text-bt-navy py-3 rounded-xl font-semibold text-sm">
+                          Cancel
+                        </button>
+                        <button onClick={saveMeetingPlan} disabled={meetingSaving}
+                          className="flex-1 bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
+                          {meetingSaving ? 'Saving...' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {MEETING_SECTIONS.map(section => {
+                        const items = selected[section.key] || []
+                        if (items.length === 0) return null
+                        return (
+                          <div key={section.key} className="bg-white rounded-2xl p-5 shadow-sm">
+                            <h4 className="font-bold text-gray-700 text-sm mb-3 flex items-center gap-2">
+                              <span className="text-lg">{section.icon}</span> {section.label}
+                            </h4>
+                            <ul className="space-y-2">
+                              {items.map((item, i) => (
+                                <li key={i} className="text-sm text-gray-600 flex gap-2">
+                                  <span className="text-gray-300 flex-shrink-0 mt-0.5">•</span>
+                                  <span>{item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )
+                      })}
 
-                <div className="flex gap-3">
-                  {selectedMeeting.number > 0 && (
-                    <button onClick={() => setSelectedMeeting(MEETING_PLANS[selectedMeeting.number - 1])}
-                      className="flex-1 bg-white border border-gray-200 text-bt-navy py-3 rounded-xl font-semibold text-sm">
-                      ← Meeting #{selectedMeeting.number - 1}
-                    </button>
+                      <div className="flex gap-3">
+                        {plans.findIndex(p => p.number === selected.number) > 0 && (
+                          <button onClick={() => setSelectedMeetingNumber(
+                            plans[plans.findIndex(p => p.number === selected.number) - 1].number
+                          )}
+                            className="flex-1 bg-white border border-gray-200 text-bt-navy py-3 rounded-xl font-semibold text-sm">
+                            ← Previous
+                          </button>
+                        )}
+                        {plans.findIndex(p => p.number === selected.number) < plans.length - 1 && (
+                          <button onClick={() => setSelectedMeetingNumber(
+                            plans[plans.findIndex(p => p.number === selected.number) + 1].number
+                          )}
+                            className="flex-1 bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">
+                            Next →
+                          </button>
+                        )}
+                      </div>
+                    </>
                   )}
-                  {selectedMeeting.number < MEETING_PLANS.length - 1 && (
-                    <button onClick={() => setSelectedMeeting(MEETING_PLANS[selectedMeeting.number + 1])}
-                      className="flex-1 bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">
-                      Meeting #{selectedMeeting.number + 1} →
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+                </>
+              )}
+            </div>
+          )
+        })()}
 
       </div>
       <BottomNav />
     </div>
+  )
+}
+
+/** A stage of the event notification sequence that has already gone out. */
+function NoticeChip({ label }: { label: string }) {
+  return (
+    <span className="text-[10px] font-semibold uppercase tracking-wider bg-green-50 text-green-700 px-1.5 py-0.5 rounded">
+      ✓ {label}
+    </span>
   )
 }
