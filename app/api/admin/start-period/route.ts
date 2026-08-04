@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireLeader, adminClient } from '@/lib/api-auth'
+import { requireLeader, requireGroupOwnership, adminClient } from '@/lib/api-auth'
 
 // Rolling a period over touches every member's row, which the browser client
 // cannot do: the profiles UPDATE policy is scoped to `id = auth.uid()`, so the
@@ -17,21 +17,11 @@ export async function POST(req: NextRequest) {
 
   const supabase = adminClient()
 
-  const { data: group, error: groupError } = await supabase
-    .from('groups')
-    .select('id, leader_id')
-    .eq('id', group_id)
-    .maybeSingle()
-
-  if (groupError) {
-    return NextResponse.json({ error: 'Could not load group' }, { status: 500 })
-  }
-  if (!group) {
-    return NextResponse.json({ error: 'Group not found' }, { status: 404 })
-  }
-  if (group.leader_id !== auth.userId) {
-    return NextResponse.json({ error: 'Not the leader of this group' }, { status: 403 })
-  }
+  // Via the shared helper so co-leaders can roll a period over. Rolling the
+  // period is the single most time-sensitive thing a TC does, and it was
+  // reachable only by the one person named in groups.leader_id.
+  const owns = await requireGroupOwnership(auth.userId, group_id)
+  if (!owns.ok) return NextResponse.json({ error: owns.error }, { status: owns.status })
 
   // Whether the period being closed actually had tasks. With no tasks,
   // adherence reduces to "did you do your habit today", so everyone who did

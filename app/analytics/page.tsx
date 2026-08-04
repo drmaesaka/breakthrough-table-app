@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { localDay } from '@/lib/dates'
+import { ledGroups } from '@/lib/leader-groups'
 
 export default function AnalyticsPage() {
   const [groups, setGroups] = useState<any[]>([])
@@ -23,13 +24,10 @@ export default function AnalyticsPage() {
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
       // Only this leader's tables — analytics used to show every group in the app.
-      const { data: groupsData } = await supabase
-        .from('groups')
-        .select('id, name, leader_id')
-        .eq('leader_id', user.id)
-        .order('name', { ascending: true })
+      // Includes tables they co-lead, not just ones they are named on.
+      const groupsData = await ledGroups(supabase, user.id)
 
-      if (!groupsData || groupsData.length === 0) { setLoading(false); return }
+      if (groupsData.length === 0) { setLoading(false); return }
       const groupIds = groupsData.map(g => g.id)
 
       // Load members, habit completions today, and tasks/completions in parallel.

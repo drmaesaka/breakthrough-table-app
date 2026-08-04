@@ -24,6 +24,8 @@ import {
   type VenueSettings,
 } from '@/lib/venue'
 
+import { ledGroups } from '@/lib/leader-groups'
+
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
@@ -121,6 +123,14 @@ export default function AdminPage() {
   const [adminBookDuration, setAdminBookDuration] = useState(0)
   const [adminBooking, setAdminBooking] = useState(false)
 
+  // Co-leaders. groups.leader_id is a single uuid, so before 2026-08-03 a TC
+  // who was away froze their whole table — nobody else could roll the period,
+  // edit the outline or broadcast.
+  const [groupLeaders, setGroupLeaders] = useState<Record<string, any[]>>({})
+  const [leaderPick, setLeaderPick] = useState<Record<string, string>>({})
+  const [leaderBusy, setLeaderBusy] = useState('')
+  const [leaderError, setLeaderError] = useState('')
+
   // Venue hours, booking rules and room management. All of this used to be
   // hardcoded in this file and app/booking/page.tsx; it moved into the database
   // when the app took over from Skedda as the venue's real schedule.
@@ -159,13 +169,9 @@ export default function AdminPage() {
 
       // Only the tables this leader actually runs, in a stable order. This used
       // to take groups[0] from an unordered, unfiltered list, so with a second
-      // table the panel could silently open on someone else's group.
-      const groupsRes = await supabase
-        .from('groups')
-        .select('*, last_period_start')
-        .eq('leader_id', user.id)
-        .order('name', { ascending: true })
-      const grps = groupsRes.data || []
+      // table the panel could silently open on someone else's group. Includes
+      // tables they co-lead, not only ones they are named on.
+      const grps = await ledGroups(supabase, user.id, '*, last_period_start')
       setGroups(grps)
       setUsers(membersRes.members || [])
       if (grps[0]) { setSelectedGroup(grps[0].id); loadGroupData(grps[0].id) }
@@ -569,6 +575,41 @@ export default function AdminPage() {
     setEvents(e => e.filter(x => x.id !== id))
   }
 
+  /** Leaders for every table shown, so each card can list its own. */
+  async function loadGroupLeaders(groupIds: string[]) {
+    const headers = await authHeaders()
+    const entries = await Promise.all(groupIds.map(async gid => {
+      const res = await fetch(`/api/admin/group-leaders?group_id=${gid}`, { headers })
+      if (!res.ok) return [gid, []] as const
+      const { leaders } = await res.json().catch(() => ({ leaders: [] }))
+      return [gid, leaders || []] as const
+    }))
+    setGroupLeaders(Object.fromEntries(entries))
+  }
+
+  async function changeLeaders(
+    method: 'POST' | 'PATCH' | 'DELETE',
+    groupId: string,
+    userId: string
+  ) {
+    setLeaderBusy(`${groupId}:${userId}`)
+    setLeaderError('')
+    const res = await fetch('/api/admin/group-leaders', {
+      method,
+      headers: await authHeaders(),
+      body: JSON.stringify({ group_id: groupId, user_id: userId }),
+    })
+    setLeaderBusy('')
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      setLeaderError(error || 'Could not update the table leaders')
+      return
+    }
+    const { leaders } = await res.json()
+    setGroupLeaders(prev => ({ ...prev, [groupId]: leaders || [] }))
+    setLeaderPick(prev => ({ ...prev, [groupId]: '' }))
+  }
+
   async function loadRooms() {
     const supabase = createClient()
     const headers = await authHeaders()
@@ -844,7 +885,10 @@ export default function AdminPage() {
               if (t === 'sessions') loadSessions()
               if (t === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans() }
               if (t === 'prompts' && selectedGroup) loadJournalResponses(selectedGroup)
-              if (t === 'groups') groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
+              if (t === 'groups') {
+                groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
+                loadGroupLeaders(groups.map(g => g.id))
+              }
             }}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
@@ -1117,6 +1161,63 @@ export default function AdminPage() {
                         })()}
                       </div>
                     </div>
+                    {/* Table leaders. Co-leaders have identical powers; "Main TC"
+                        is a label for attribution, not a permission level. */}
+                    <div className="bg-bt-pale rounded-xl p-3 space-y-2">
+                      <p className="text-xs text-gray-400 font-medium">Table Leaders</p>
+                      {(groupLeaders[g.id] || []).map((l: any) => (
+                        <div key={l.user_id} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-700 font-medium flex-1 truncate">
+                            {l.profiles?.full_name || 'Unnamed'}
+                          </span>
+                          {l.is_primary ? (
+                            <span className="text-[10px] font-bold text-bt-blue uppercase tracking-wide flex-shrink-0">Main TC</span>
+                          ) : (
+                            <>
+                              <button
+                                disabled={leaderBusy === `${g.id}:${l.user_id}`}
+                                onClick={() => changeLeaders('PATCH', g.id, l.user_id)}
+                                className="text-[11px] text-bt-blue font-medium flex-shrink-0 disabled:opacity-40">
+                                Make main
+                              </button>
+                              <button
+                                disabled={leaderBusy === `${g.id}:${l.user_id}`}
+                                onClick={() => changeLeaders('DELETE', g.id, l.user_id)}
+                                className="text-[11px] text-red-400 font-medium flex-shrink-0 disabled:opacity-40">
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+
+                      {(groupLeaders[g.id] || []).length === 1 && (
+                        <p className="text-[11px] text-amber-600 leading-relaxed">
+                          Only one leader. If they&apos;re away, nobody can run this table.
+                        </p>
+                      )}
+
+                      <div className="flex gap-2 pt-1">
+                        <select
+                          value={leaderPick[g.id] || ''}
+                          onChange={e => setLeaderPick(prev => ({ ...prev, [g.id]: e.target.value }))}
+                          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white">
+                          <option value="">Add a co-leader...</option>
+                          {users
+                            .filter((u: any) => u.group_id === g.id)
+                            .filter((u: any) => !(groupLeaders[g.id] || []).some((l: any) => l.user_id === u.id))
+                            .map((u: any) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                        </select>
+                        <button
+                          disabled={!leaderPick[g.id] || leaderBusy.startsWith(`${g.id}:`)}
+                          onClick={() => changeLeaders('POST', g.id, leaderPick[g.id])}
+                          className="px-3 py-1.5 rounded-lg bg-bt-navy text-white text-xs font-semibold disabled:opacity-40 flex-shrink-0">
+                          Add
+                        </button>
+                      </div>
+                      {leaderError && <p className="text-[11px] text-red-600 font-medium">{leaderError}</p>}
+                    </div>
+
                     <div className="bg-bt-pale rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1.5 font-medium">Invite Link</p>
                       <p className="text-xs text-gray-600 break-all font-mono leading-relaxed">{inviteLink}</p>

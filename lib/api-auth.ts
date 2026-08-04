@@ -79,24 +79,41 @@ export async function requireUser(req: NextRequest): Promise<AuthResult> {
 }
 
 /**
- * The group ids this leader owns. Being a leader is app-wide, not per-table, so
+ * The group ids this leader leads. Being a leader is app-wide, not per-table, so
  * every service-key route that touches group data must narrow to these — without
  * it any leader can read and write every other table's members.
+ *
+ * Resolved as a UNION of the group_leaders join table (2026-08-03) and the
+ * legacy groups.leader_id column. A table used to have exactly one leader, so
+ * a TC who was away froze their whole table; co-leaders fixed that. The legacy
+ * column is still consulted because RLS policies written in the Supabase
+ * console reference it and cannot be audited from the repo — a union can only
+ * grant access that already existed, so this change cannot lock a TC out of
+ * their own table.
+ *
+ * Tolerates group_leaders not existing yet, so the app behaves exactly as
+ * before if the code deploys ahead of the migration.
  */
 export async function leaderGroupIds(userId: string): Promise<string[]> {
-  const { data } = await adminClient()
-    .from('groups')
-    .select('id')
-    .eq('leader_id', userId)
-  return (data || []).map(g => g.id as string)
+  const supabase = adminClient()
+  const [{ data: legacy }, { data: joined }] = await Promise.all([
+    supabase.from('groups').select('id').eq('leader_id', userId),
+    supabase.from('group_leaders').select('group_id').eq('user_id', userId),
+  ])
+
+  const ids = new Set<string>()
+  for (const g of legacy || []) ids.add(g.id as string)
+  for (const gl of joined || []) ids.add(gl.group_id as string)
+  return [...ids]
 }
 
-/** Confirms `groupId` is one of the caller's own groups. */
+/** Confirms `groupId` is one of the caller's own tables, as primary or co-leader. */
 export async function requireGroupOwnership(
   userId: string,
   groupId: string
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  const { data: group, error } = await adminClient()
+  const supabase = adminClient()
+  const { data: group, error } = await supabase
     .from('groups')
     .select('id, leader_id')
     .eq('id', groupId)
@@ -104,8 +121,17 @@ export async function requireGroupOwnership(
 
   if (error) return { ok: false, status: 500, error: 'Could not load group' }
   if (!group) return { ok: false, status: 404, error: 'Group not found' }
-  if (group.leader_id !== userId) {
-    return { ok: false, status: 403, error: 'Not the leader of this group' }
+  if (group.leader_id === userId) return { ok: true }
+
+  const { data: coLeader } = await supabase
+    .from('group_leaders')
+    .select('id')
+    .eq('group_id', groupId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (!coLeader) {
+    return { ok: false, status: 403, error: 'Not a leader of this group' }
   }
   return { ok: true }
 }
