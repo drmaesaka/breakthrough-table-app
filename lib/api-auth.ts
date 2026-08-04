@@ -44,6 +44,41 @@ export async function requireLeader(req: NextRequest): Promise<AuthResult> {
 }
 
 /**
+ * Resolves the caller from their bearer token without requiring the leader role.
+ *
+ * For routes a member calls on their own behalf. Those routes still run with the
+ * service key — not because the member lacks permission to write their own row,
+ * but because the rules being enforced (opening hours, booking limits) live on
+ * tables the member cannot see enough of to check.
+ *
+ * The returned userId is the ONLY safe source of identity: a user_id in the
+ * request body is whatever the caller typed.
+ */
+export async function requireUser(req: NextRequest): Promise<AuthResult> {
+  const authHeader = req.headers.get('authorization')
+  if (!authHeader?.startsWith('Bearer ')) {
+    return { ok: false, status: 401, error: 'Unauthorized' }
+  }
+
+  const token = authHeader.slice('Bearer '.length)
+  const userClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
+  const { data: { user }, error } = await userClient.auth.getUser(token)
+  if (error || !user) return { ok: false, status: 401, error: 'Unauthorized' }
+
+  const { data: prof } = await adminClient()
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  return { ok: true, userId: user.id, role: prof?.role || 'member' }
+}
+
+/**
  * The group ids this leader owns. Being a leader is app-wide, not per-table, so
  * every service-key route that touches group data must narrow to these — without
  * it any leader can read and write every other table's members.

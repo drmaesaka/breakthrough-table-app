@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, leaderGroupIds } from '@/lib/api-auth'
+import { isFree, parseTime, toIntervals } from '@/lib/venue'
 
 // Booking on behalf of a member and cancelling a member's booking both write
 // another user's rows, which the browser client cannot do: room_bookings RLS is
@@ -36,15 +37,23 @@ export async function POST(req: NextRequest) {
 
   // The member booking page refuses a taken slot; without the same check here a
   // leader would double-book it with the service key.
-  const { data: clash } = await supabase
+  //
+  // Matching on start_time alone was enough while every booking was a fixed
+  // hour. Once lengths vary, 09:00-11:00 and 10:00-10:30 have different start
+  // times and still collide, so the whole day has to be compared as intervals.
+  const { data: sameDay } = await supabase
     .from('room_bookings')
-    .select('id')
+    .select('start_time, end_time')
     .eq('room_id', room_id)
     .eq('booking_date', booking_date)
-    .eq('start_time', start_time)
-    .maybeSingle()
-  if (clash) {
-    return NextResponse.json({ error: 'That slot is already booked' }, { status: 409 })
+
+  const start = parseTime(start_time)
+  const end = parseTime(end_time)
+  if (end <= start) {
+    return NextResponse.json({ error: 'The booking has to end after it starts' }, { status: 400 })
+  }
+  if (!isFree(start, end, toIntervals(sameDay || []))) {
+    return NextResponse.json({ error: 'That overlaps a booking already on the calendar' }, { status: 409 })
   }
 
   const { data, error } = await supabase
@@ -53,7 +62,14 @@ export async function POST(req: NextRequest) {
     .select('*, rooms(name, suite), profiles(full_name)')
     .single()
 
-  if (error) return NextResponse.json({ error: 'Booking failed', detail: error.message }, { status: 500 })
+  if (error) {
+    // 23P01 is the exclusion constraint added 2026-08-03. The check above races
+    // with any concurrent write, so the database gets the final word.
+    if (error.code === '23P01') {
+      return NextResponse.json({ error: 'Someone just booked part of that time' }, { status: 409 })
+    }
+    return NextResponse.json({ error: 'Booking failed', detail: error.message }, { status: 500 })
+  }
   return NextResponse.json({ booking: data })
 }
 

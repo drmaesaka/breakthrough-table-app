@@ -9,6 +9,22 @@ import {
   type StoredMeetingPlan,
 } from '@/lib/meeting-plans'
 import { localDay } from '@/lib/dates'
+import {
+  DEFAULT_SETTINGS,
+  durationOptions,
+  formatDuration,
+  formatTime,
+  hoursForDate,
+  maxDurationAt,
+  parseTime,
+  slotsForDate,
+  toIntervals,
+  toTimeString,
+  type VenueHours,
+  type VenueSettings,
+} from '@/lib/venue'
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
 
@@ -102,7 +118,23 @@ export default function AdminPage() {
   const [adminBookUserId, setAdminBookUserId] = useState('')
   const [adminBookRoomId, setAdminBookRoomId] = useState('')
   const [adminBookTime, setAdminBookTime] = useState('')
+  const [adminBookDuration, setAdminBookDuration] = useState(0)
   const [adminBooking, setAdminBooking] = useState(false)
+
+  // Venue hours, booking rules and room management. All of this used to be
+  // hardcoded in this file and app/booking/page.tsx; it moved into the database
+  // when the app took over from Skedda as the venue's real schedule.
+  const [venueHours, setVenueHours] = useState<VenueHours[]>([])
+  const [venueSettings, setVenueSettings] = useState<VenueSettings>(DEFAULT_SETTINGS)
+  const [venueSaving, setVenueSaving] = useState(false)
+  const [venueError, setVenueError] = useState('')
+  const [venueSaved, setVenueSaved] = useState(false)
+  const [roomError, setRoomError] = useState('')
+  const [editingRoom, setEditingRoom] = useState<any>(null)
+  const [showArchived, setShowArchived] = useState(false)
+  const [roomSaving, setRoomSaving] = useState(false)
+  const emptyRoom = { name: '', suite: '', room_type: 'conference_room', capacity: '', description: '' }
+  const [newRoom, setNewRoom] = useState<any>(emptyRoom)
 
   const router = useRouter()
 
@@ -539,17 +571,119 @@ export default function AdminPage() {
 
   async function loadRooms() {
     const supabase = createClient()
-    const [{ data: r }, { data: b }] = await Promise.all([
-      supabase.from('rooms').select('*').order('name'),
+    const headers = await authHeaders()
+    const [{ data: b }, roomsRes, venueRes] = await Promise.all([
       supabase.from('room_bookings')
         .select('*, rooms(name), profiles(full_name)')
         .gte('booking_date', localDay())
         .order('booking_date', { ascending: true }),
+      // Read through the API rather than the browser client so archived rooms
+      // come back too — a room you cannot see is a room you cannot un-archive.
+      fetch('/api/admin/rooms', { headers }),
+      fetch('/api/admin/venue', { headers }),
     ])
+
+    const roomsJson = await roomsRes.json().catch(() => ({ rooms: [] }))
     // A room with no group_id (or from before the column existed) is shared
     // across tables; a stamped room belongs to one table only.
-    setRooms((r || []).filter((room: any) => !room.group_id || room.group_id === selectedGroup))
+    setRooms((roomsJson.rooms || []).filter((room: any) => !room.group_id || room.group_id === selectedGroup))
     setAllBookings(b || [])
+
+    const venueJson = await venueRes.json().catch(() => ({}))
+    if (venueJson.hours) setVenueHours(venueJson.hours)
+    if (venueJson.settings) setVenueSettings(venueJson.settings)
+  }
+
+  async function saveVenue(patch: { hours?: VenueHours[]; settings?: Partial<VenueSettings> }) {
+    setVenueSaving(true)
+    setVenueError('')
+    const res = await fetch('/api/admin/venue', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify(patch),
+    })
+    setVenueSaving(false)
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      setVenueError(error || 'Could not save venue settings')
+      return false
+    }
+    const json = await res.json()
+    // Re-read from the response rather than trusting local state: the server
+    // normalises times and rejects combinations the form would happily submit.
+    if (json.hours) setVenueHours(json.hours)
+    if (json.settings) setVenueSettings(json.settings)
+    setVenueSaved(true)
+    setTimeout(() => setVenueSaved(false), 2500)
+    return true
+  }
+
+  async function saveRoom(room: any, isNew: boolean) {
+    setRoomSaving(true)
+    setRoomError('')
+    const payload: any = {
+      name: room.name,
+      suite: room.suite,
+      room_type: room.room_type,
+      capacity: room.capacity === '' ? null : Number(room.capacity),
+      description: room.description || null,
+    }
+    if (!isNew) payload.id = room.id
+
+    const res = await fetch('/api/admin/rooms', {
+      method: isNew ? 'POST' : 'PATCH',
+      headers: await authHeaders(),
+      body: JSON.stringify(payload),
+    })
+    setRoomSaving(false)
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      setRoomError(error || 'Could not save the room')
+      return
+    }
+    if (isNew) setNewRoom(emptyRoom)
+    setEditingRoom(null)
+    loadRooms()
+  }
+
+  async function setRoomActive(room: any, active: boolean) {
+    setRoomError('')
+    if (active) {
+      const res = await fetch('/api/admin/rooms', {
+        method: 'PATCH',
+        headers: await authHeaders(),
+        body: JSON.stringify({ id: room.id, is_active: true }),
+      })
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: null }))
+        setRoomError(error || 'Could not restore the room')
+        return
+      }
+      loadRooms()
+      return
+    }
+
+    if (!confirm(`Archive ${room.name}? It disappears from booking but keeps its history.`)) return
+    const res = await fetch('/api/admin/rooms', {
+      method: 'DELETE',
+      headers: await authHeaders(),
+      body: JSON.stringify({ id: room.id }),
+    })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      setRoomError(error || 'Could not archive the room')
+      return
+    }
+    // Upcoming bookings are not cancelled automatically — someone is expecting
+    // that room, and the leader is the one who should tell them.
+    const { upcoming_bookings } = await res.json().catch(() => ({ upcoming_bookings: 0 }))
+    if (upcoming_bookings > 0) {
+      alert(
+        `${room.name} is archived, but it still has ${upcoming_bookings} upcoming booking` +
+        `${upcoming_bookings === 1 ? '' : 's'}. Those members have not been told — cancel them from the dashboard above if the room is really gone.`
+      )
+    }
+    loadRooms()
   }
 
   async function startNewPeriod() {
@@ -1411,28 +1545,47 @@ export default function AdminPage() {
         )}
 
         {tab === 'rooms' && (() => {
-          const TIME_SLOTS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00']
-          function fmtSlot(t: string) { const [h,m] = t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}` }
-          function fmtDate(d: string) { return new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) }
           const todayStr = localDay()
           const dayBookings = allBookings.filter((b:any) => b.booking_date === adminBookDate)
           // Derived from the rooms themselves rather than hardcoded. This read
           // ['Suite 1','Suite 2'] while the member booking page uses
           // ['Suite 145','Suite 120'], so every suite group matched nothing and
           // the whole dashboard rendered blank.
-          const suites = Array.from(new Set(rooms.map((r: any) => r.suite).filter(Boolean)))
+          const activeRooms = rooms.filter((r:any) => r.is_active !== false)
+          const archivedRooms = rooms.filter((r:any) => r.is_active === false)
+          const suites = Array.from(new Set(activeRooms.map((r: any) => r.suite).filter(Boolean)))
+          const daySlots = slotsForDate(venueHours, venueSettings, adminBookDate)
+          const dayHours = hoursForDate(venueHours, adminBookDate)
+          const closed = !dayHours || dayHours.is_closed
+          const bookRoom = rooms.find((r:any) => r.id === adminBookRoomId)
+          const bookTaken = adminBookRoomId
+            ? toIntervals(dayBookings.filter((b:any) => b.room_id === adminBookRoomId))
+            : []
+          const bookLongest = adminBookTime
+            ? maxDurationAt(parseTime(adminBookTime), bookTaken, venueHours, venueSettings, adminBookDate)
+            : 0
+          const bookDurations = durationOptions(venueSettings).filter(d => d <= bookLongest)
+          const bookChosen = adminBookDuration && adminBookDuration <= bookLongest ? adminBookDuration : bookDurations[0]
 
           return (
             <div className="space-y-5">
+
+              {roomError && (
+                <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4">
+                  <p className="text-red-700 font-semibold text-sm text-center">{roomError}</p>
+                </div>
+              )}
 
               {/* Dashboard — pick a date, see all rooms */}
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-bt-navy">Room Dashboard</h3>
+                  {closed && <span className="text-xs font-semibold text-amber-600">Venue closed</span>}
                 </div>
                 <input type="date" value={adminBookDate} min={todayStr}
                   onChange={async e => {
                     setAdminBookDate(e.target.value)
+                    setAdminBookTime('')
                     const supabase = createClient()
                     const { data } = await supabase.from('room_bookings')
                       .select('*, rooms(name,suite), profiles(full_name)')
@@ -1443,7 +1596,7 @@ export default function AdminPage() {
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
 
                 {suites.map(suite => {
-                  const suiteRooms = rooms.filter(r => r.suite === suite)
+                  const suiteRooms = activeRooms.filter(r => r.suite === suite)
                   if (!suiteRooms.length) return null
                   return (
                     <div key={suite}>
@@ -1451,8 +1604,12 @@ export default function AdminPage() {
                       <div className="space-y-2">
                         {suiteRooms.map(room => {
                           const roomBookings = dayBookings.filter((b:any) => b.room_id === room.id)
-                          const bookedSlots = new Set(roomBookings.map((b:any) => b.start_time))
-                          const available = TIME_SLOTS.some(s => !bookedSlots.has(s))
+                          const taken = toIntervals(roomBookings)
+                          // "Open" now means a bookable gap exists, not merely
+                          // that no booking starts at a given hour — with
+                          // variable lengths those are different questions.
+                          const openStarts = daySlots.filter(s => maxDurationAt(s, taken, venueHours, venueSettings, adminBookDate) > 0)
+                          const available = !closed && openStarts.length > 0
                           return (
                             <div key={room.id} className="rounded-xl border border-gray-100 overflow-hidden">
                               <div className="flex items-center gap-3 px-4 py-3 bg-bt-pale">
@@ -1462,14 +1619,16 @@ export default function AdminPage() {
                                   <p className="text-xs text-gray-400">{room.room_type === 'private_office' ? 'Private Office' : 'Conference Room'}</p>
                                 </div>
                                 <span className={`text-xs font-semibold ${available ? 'text-green-600' : 'text-red-500'}`}>
-                                  {available ? 'Available' : 'Full'}
+                                  {closed ? 'Closed' : available ? `${openStarts.length} open` : 'Full'}
                                 </span>
                               </div>
                               {roomBookings.length > 0 && (
                                 <div className="px-4 py-2 space-y-1">
                                   {roomBookings.map((b:any) => (
                                     <div key={b.id} className="flex items-center justify-between text-xs py-1">
-                                      <span className="text-gray-600 font-medium">{fmtSlot(b.start_time)}</span>
+                                      <span className="text-gray-600 font-medium">
+                                        {formatTime(parseTime(b.start_time))} – {formatTime(parseTime(b.end_time))}
+                                      </span>
                                       <span className="text-gray-400">{b.profiles?.full_name}</span>
                                       <button onClick={async () => {
                                         if (!confirm('Cancel this booking?')) return
@@ -1499,6 +1658,12 @@ export default function AdminPage() {
                     </div>
                   )
                 })}
+
+                {!activeRooms.length && (
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    No rooms yet. Add the venue&apos;s real rooms below.
+                  </p>
+                )}
               </div>
 
               {/* Book on behalf of member */}
@@ -1509,24 +1674,33 @@ export default function AdminPage() {
                   <option value="">Select member...</option>
                   {users.map((u:any) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
                 </select>
-                <select value={adminBookRoomId} onChange={e => setAdminBookRoomId(e.target.value)}
+                <select value={adminBookRoomId} onChange={e => { setAdminBookRoomId(e.target.value); setAdminBookTime('') }}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue">
                   <option value="">Select room...</option>
-                  {rooms.map((r:any) => <option key={r.id} value={r.id}>{r.name} · {r.suite}</option>)}
+                  {activeRooms.map((r:any) => <option key={r.id} value={r.id}>{r.name} · {r.suite}</option>)}
                 </select>
                 <input type="date" value={adminBookDate} min={todayStr}
-                  onChange={e => setAdminBookDate(e.target.value)}
+                  onChange={e => { setAdminBookDate(e.target.value); setAdminBookTime('') }}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
                 <select value={adminBookTime} onChange={e => setAdminBookTime(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue">
-                  <option value="">Select time...</option>
-                  {TIME_SLOTS.map(t => <option key={t} value={t}>{fmtSlot(t)}</option>)}
+                  disabled={!adminBookRoomId || closed}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue disabled:bg-gray-50 disabled:text-gray-400">
+                  <option value="">{closed ? 'Venue closed that day' : !adminBookRoomId ? 'Pick a room first' : 'Select time...'}</option>
+                  {daySlots
+                    .filter(s => maxDurationAt(s, bookTaken, venueHours, venueSettings, adminBookDate) > 0)
+                    .map(s => <option key={s} value={toTimeString(s)}>{formatTime(s)}</option>)}
                 </select>
+                {adminBookTime && bookDurations.length > 0 && (
+                  <select value={String(bookChosen)} onChange={e => setAdminBookDuration(Number(e.target.value))}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-bt-blue">
+                    {bookDurations.map(d => <option key={d} value={d}>{formatDuration(d)}</option>)}
+                  </select>
+                )}
                 <button
-                  disabled={!adminBookUserId || !adminBookRoomId || !adminBookDate || !adminBookTime || adminBooking}
+                  disabled={!adminBookUserId || !adminBookRoomId || !adminBookDate || !adminBookTime || !bookChosen || adminBooking}
                   onClick={async () => {
                     setAdminBooking(true)
-                    const [h] = adminBookTime.split(':').map(Number)
+                    const start = parseTime(adminBookTime)
                     // Server-side: inserting a row for another member from the
                     // browser is blocked by RLS while the UI reported success.
                     const res = await fetch('/api/admin/bookings', {
@@ -1536,8 +1710,8 @@ export default function AdminPage() {
                         room_id: adminBookRoomId,
                         user_id: adminBookUserId,
                         booking_date: adminBookDate,
-                        start_time: adminBookTime,
-                        end_time: `${String(h+1).padStart(2,'0')}:00`,
+                        start_time: toTimeString(start),
+                        end_time: toTimeString(start + bookChosen),
                       }),
                     })
                     setAdminBooking(false)
@@ -1546,12 +1720,231 @@ export default function AdminPage() {
                       alert(error || 'Could not add the booking')
                       return
                     }
-                    setAdminBookUserId(''); setAdminBookRoomId(''); setAdminBookTime('')
+                    setAdminBookUserId(''); setAdminBookRoomId(''); setAdminBookTime(''); setAdminBookDuration(0)
                     loadRooms()
                     alert('Booking added!')
                   }}
                   className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                  {adminBooking ? 'Booking...' : 'Add Booking'}
+                  {adminBooking ? 'Booking...' : bookRoom && adminBookTime && bookChosen
+                    ? `Book ${bookRoom.name} · ${formatTime(parseTime(adminBookTime))} – ${formatTime(parseTime(adminBookTime) + bookChosen)}`
+                    : 'Add Booking'}
+                </button>
+              </div>
+
+              {/* Manage rooms */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+                <h3 className="font-bold text-bt-navy">Rooms</h3>
+                <p className="text-xs text-gray-400 -mt-2">
+                  These are the real, bookable rooms. This app is the venue&apos;s schedule now,
+                  so what is listed here is what exists.
+                </p>
+
+                <div className="space-y-2">
+                  {activeRooms.map((room:any) => (
+                    <div key={room.id} className="rounded-xl border border-gray-100 overflow-hidden">
+                      {editingRoom?.id === room.id ? (
+                        <div className="p-4 space-y-2 bg-bt-pale">
+                          <input value={editingRoom.name} onChange={e => setEditingRoom({...editingRoom, name: e.target.value})}
+                            placeholder="Room name"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                          <input value={editingRoom.suite} onChange={e => setEditingRoom({...editingRoom, suite: e.target.value})}
+                            placeholder="Suite (e.g. Suite 145)"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                          <select value={editingRoom.room_type} onChange={e => setEditingRoom({...editingRoom, room_type: e.target.value})}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white">
+                            <option value="conference_room">Conference Room</option>
+                            <option value="private_office">Private Office</option>
+                          </select>
+                          <input type="number" min="1" value={editingRoom.capacity ?? ''}
+                            onChange={e => setEditingRoom({...editingRoom, capacity: e.target.value})}
+                            placeholder="Capacity (optional)"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                          <input value={editingRoom.description ?? ''} onChange={e => setEditingRoom({...editingRoom, description: e.target.value})}
+                            placeholder="Description (optional)"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                          <div className="flex gap-2 pt-1">
+                            <button onClick={() => saveRoom(editingRoom, false)} disabled={roomSaving}
+                              className="flex-1 bg-bt-navy text-white py-2 rounded-lg font-semibold text-xs disabled:opacity-40">
+                              {roomSaving ? 'Saving...' : 'Save'}
+                            </button>
+                            <button onClick={() => { setEditingRoom(null); setRoomError('') }}
+                              className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-lg font-semibold text-xs">Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3 px-4 py-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm text-gray-900 truncate">{room.name}</p>
+                            <p className="text-xs text-gray-400 truncate">
+                              {room.suite} · {room.room_type === 'private_office' ? 'Private Office' : 'Conference Room'}
+                              {room.capacity ? ` · Up to ${room.capacity}` : ''}
+                            </p>
+                          </div>
+                          <button onClick={() => { setEditingRoom({...room}); setRoomError('') }}
+                            className="text-xs text-bt-blue font-medium flex-shrink-0">Edit</button>
+                          <button onClick={() => setRoomActive(room, false)}
+                            className="text-xs text-red-400 font-medium flex-shrink-0">Archive</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add a room */}
+                <div className="rounded-xl border-2 border-dashed border-gray-200 p-4 space-y-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Add a room</p>
+                  <input value={newRoom.name} onChange={e => setNewRoom({...newRoom, name: e.target.value})}
+                    placeholder="Room name"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  <input value={newRoom.suite} onChange={e => setNewRoom({...newRoom, suite: e.target.value})}
+                    placeholder="Suite (e.g. Suite 145)"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  <select value={newRoom.room_type} onChange={e => setNewRoom({...newRoom, room_type: e.target.value})}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white">
+                    <option value="conference_room">Conference Room</option>
+                    <option value="private_office">Private Office</option>
+                  </select>
+                  <input type="number" min="1" value={newRoom.capacity}
+                    onChange={e => setNewRoom({...newRoom, capacity: e.target.value})}
+                    placeholder="Capacity (optional)"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  <button onClick={() => saveRoom(newRoom, true)}
+                    disabled={roomSaving || !newRoom.name.trim() || !newRoom.suite.trim()}
+                    className="w-full bg-bt-navy text-white py-2.5 rounded-lg font-semibold text-xs disabled:opacity-40">
+                    {roomSaving ? 'Adding...' : 'Add Room'}
+                  </button>
+                </div>
+
+                {archivedRooms.length > 0 && (
+                  <div>
+                    <button onClick={() => setShowArchived(s => !s)}
+                      className="text-xs text-gray-400 font-medium">
+                      {showArchived ? 'Hide' : 'Show'} archived ({archivedRooms.length})
+                    </button>
+                    {showArchived && (
+                      <div className="space-y-2 mt-2">
+                        {archivedRooms.map((room:any) => (
+                          <div key={room.id} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-50">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-sm text-gray-400 truncate line-through">{room.name}</p>
+                              <p className="text-xs text-gray-300 truncate">{room.suite}</p>
+                            </div>
+                            <button onClick={() => setRoomActive(room, true)}
+                              className="text-xs text-bt-blue font-medium flex-shrink-0">Restore</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Opening hours */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-bt-navy">Opening Hours</h3>
+                  {venueSaved && <span className="text-xs text-green-600 font-semibold">✓ Saved</span>}
+                </div>
+                <p className="text-xs text-gray-400 -mt-2">
+                  The closing time is the latest a booking may <em>end</em>, not the last start time.
+                </p>
+
+                {venueError && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                    <p className="text-red-700 text-xs font-semibold text-center">{venueError}</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {venueHours.map((h:VenueHours) => (
+                    <div key={h.day_of_week} className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-600 w-20 flex-shrink-0">{DAY_NAMES[h.day_of_week]}</span>
+                      {h.is_closed ? (
+                        <span className="flex-1 text-xs text-gray-300 italic">Closed</span>
+                      ) : (
+                        <>
+                          <input type="time" value={h.open_time.slice(0,5)}
+                            onChange={e => setVenueHours(prev => prev.map(x => x.day_of_week === h.day_of_week ? {...x, open_time: e.target.value} : x))}
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-xs" />
+                          <span className="text-xs text-gray-300">to</span>
+                          <input type="time" value={h.close_time.slice(0,5)}
+                            onChange={e => setVenueHours(prev => prev.map(x => x.day_of_week === h.day_of_week ? {...x, close_time: e.target.value} : x))}
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-xs" />
+                        </>
+                      )}
+                      <button
+                        onClick={() => setVenueHours(prev => prev.map(x => x.day_of_week === h.day_of_week ? {...x, is_closed: !x.is_closed} : x))}
+                        className={`text-xs font-medium flex-shrink-0 w-12 text-right ${h.is_closed ? 'text-bt-blue' : 'text-gray-400'}`}>
+                        {h.is_closed ? 'Open' : 'Close'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={() => saveVenue({ hours: venueHours })} disabled={venueSaving}
+                  className="w-full bg-bt-navy text-white py-2.5 rounded-lg font-semibold text-xs disabled:opacity-40">
+                  {venueSaving ? 'Saving...' : 'Save Hours'}
+                </button>
+              </div>
+
+              {/* Booking rules */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+                <h3 className="font-bold text-bt-navy">Booking Rules</h3>
+
+                <label className="block">
+                  <span className="text-xs font-semibold text-gray-500">Slot length (minutes)</span>
+                  <input type="number" min="5" max="240" value={venueSettings.slot_minutes}
+                    onChange={e => setVenueSettings({...venueSettings, slot_minutes: Number(e.target.value)})}
+                    className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  <span className="text-[11px] text-gray-400">How far apart start times sit on the grid.</span>
+                </label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-gray-500">Shortest booking</span>
+                    <input type="number" min="5" value={venueSettings.min_duration_minutes}
+                      onChange={e => setVenueSettings({...venueSettings, min_duration_minutes: Number(e.target.value)})}
+                      className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-gray-500">Longest booking</span>
+                    <input type="number" min="5" value={venueSettings.max_duration_minutes}
+                      onChange={e => setVenueSettings({...venueSettings, max_duration_minutes: Number(e.target.value)})}
+                      className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="text-xs font-semibold text-gray-500">Book up to (days ahead)</span>
+                  <input type="number" min="1" max="730" value={venueSettings.booking_horizon_days}
+                    onChange={e => setVenueSettings({...venueSettings, booking_horizon_days: Number(e.target.value)})}
+                    className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                </label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-gray-500">Max upcoming per member</span>
+                    <input type="number" min="1" value={venueSettings.max_active_bookings_per_member ?? ''}
+                      onChange={e => setVenueSettings({...venueSettings, max_active_bookings_per_member: e.target.value === '' ? null : Number(e.target.value)})}
+                      placeholder="No limit"
+                      className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-gray-500">Max minutes/day each</span>
+                    <input type="number" min="5" value={venueSettings.max_minutes_per_member_per_day ?? ''}
+                      onChange={e => setVenueSettings({...venueSettings, max_minutes_per_member_per_day: e.target.value === '' ? null : Number(e.target.value)})}
+                      placeholder="No limit"
+                      className="w-full mt-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                  </label>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  Leave the two limits blank for no cap. They exist because one member holding a
+                  room all week is the failure mode a shared calendar invites.
+                </p>
+
+                <button onClick={() => saveVenue({ settings: venueSettings })} disabled={venueSaving}
+                  className="w-full bg-bt-navy text-white py-2.5 rounded-lg font-semibold text-xs disabled:opacity-40">
+                  {venueSaving ? 'Saving...' : 'Save Rules'}
                 </button>
               </div>
 

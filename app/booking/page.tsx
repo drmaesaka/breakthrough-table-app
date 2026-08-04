@@ -4,31 +4,42 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { localDay } from '@/lib/dates'
+import {
+  DEFAULT_SETTINGS,
+  addDays,
+  durationOptions,
+  formatDuration,
+  formatTime,
+  hoursForDate,
+  maxDurationAt,
+  nowMinutes,
+  parseTime,
+  slotsForDate,
+  toIntervals,
+  toTimeString,
+  type Interval,
+  type VenueHours,
+  type VenueSettings,
+} from '@/lib/venue'
 
-const TIME_SLOTS = [
-  '08:00','09:00','10:00','11:00','12:00',
-  '13:00','14:00','15:00','16:00','17:00','18:00','19:00',
-]
-
-function formatSlot(t: string) {
-  const [h, m] = t.split(':').map(Number)
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${ampm}`
-}
-
-function endSlot(t: string) {
-  const [h] = t.split(':').map(Number)
-  const end = h + 1
-  return `${end % 12 || 12}:00 ${end >= 12 ? 'PM' : 'AM'}`
-}
+// The room schedule. As of 2026-08-03 this app is the venue's system of record
+// for the physical suites — Skedda has been retired — so what this page shows is
+// the real availability, not a second opinion.
+//
+// Nothing about the grid is hardcoded any more. Opening hours come from
+// venue_hours and the rules from venue_settings, both editable in Admin → Rooms,
+// because the venue's hours changing should not require a deploy.
 
 export default function BookingPage() {
   const [rooms, setRooms] = useState<any[]>([])
+  const [hours, setHours] = useState<VenueHours[]>([])
+  const [settings, setSettings] = useState<VenueSettings>(DEFAULT_SETTINGS)
   const [selectedDate, setSelectedDate] = useState(localDay())
   const [bookings, setBookings] = useState<any[]>([])
   const [myBookings, setMyBookings] = useState<any[]>([])
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
-  const [selectedTime, setSelectedTime] = useState('')
+  const [selectedStart, setSelectedStart] = useState<number | null>(null)
+  const [duration, setDuration] = useState<number>(0)
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(true)
   const [booking, setBooking] = useState(false)
@@ -40,6 +51,14 @@ export default function BookingPage() {
 
   const today = localDay()
 
+  async function authHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await createClient().auth.getSession()
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session?.access_token ?? ''}`,
+    }
+  }
+
   useEffect(() => {
     async function load() {
       const supabase = createClient()
@@ -47,17 +66,27 @@ export default function BookingPage() {
       if (!user) { router.push('/login'); return }
       setUserId(user.id)
 
-      const [{ data: prof }, { data: roomsData }] = await Promise.all([
-        supabase.from('profiles').select('group_id').eq('id', user.id).maybeSingle(),
-        supabase.from('rooms').select('*').order('suite').order('name'),
-      ])
+      const [{ data: prof }, { data: roomsData }, { data: hoursData }, { data: settingsData }] =
+        await Promise.all([
+          supabase.from('profiles').select('group_id').eq('id', user.id).maybeSingle(),
+          supabase.from('rooms').select('*').order('sort_order').order('suite').order('name'),
+          supabase.from('venue_hours').select('*').order('day_of_week'),
+          supabase.from('venue_settings').select('*').eq('id', 1).maybeSingle(),
+        ])
+
       // Signup is open and confirmation is off, so an account with no table is
       // possibly a stranger — rooms are a real-world resource, so booking is
       // members-only.
       if (!prof?.group_id) { setNoGroup(true); setLoading(false); return }
+
       // A room without a group_id is shared across tables; a stamped room only
-      // shows for its own table. Works before and after the column exists.
-      setRooms((roomsData || []).filter((r: any) => !r.group_id || r.group_id === prof.group_id))
+      // shows for its own table. Archived rooms keep their booking history but
+      // leave the grid.
+      setRooms((roomsData || []).filter((r: any) =>
+        r.is_active !== false && (!r.group_id || r.group_id === prof.group_id)
+      ))
+      setHours((hoursData || []) as VenueHours[])
+      if (settingsData) setSettings(settingsData as VenueSettings)
 
       await loadAvailability(selectedDate)
       await loadMyBookings(user.id)
@@ -70,7 +99,7 @@ export default function BookingPage() {
     const supabase = createClient()
     const { data } = await supabase
       .from('room_bookings')
-      .select('room_id, start_time, user_id, profiles(full_name)')
+      .select('room_id, start_time, end_time, user_id, profiles(full_name)')
       .eq('booking_date', date)
     setBookings(data || [])
   }
@@ -83,42 +112,50 @@ export default function BookingPage() {
       .eq('user_id', uid)
       .gte('booking_date', today)
       .order('booking_date', { ascending: true })
+      .order('start_time', { ascending: true })
     setMyBookings(data || [])
   }
 
   async function handleDateChange(date: string) {
     setSelectedDate(date)
     setSelectedRoom(null)
-    setSelectedTime('')
+    setSelectedStart(null)
+    setBookingError('')
     await loadAvailability(date)
   }
 
-  async function book() {
-    if (!selectedRoom || !selectedDate || !selectedTime) return
+  function takenFor(roomId: string): Interval[] {
+    return toIntervals(bookings.filter((b: any) => b.room_id === roomId))
+  }
+
+  // The length is passed in rather than read from state: the button resolves it
+  // at render time, and a setDuration() immediately before the call would not
+  // have applied yet.
+  async function book(minutes: number) {
+    if (!selectedRoom || selectedStart === null || !minutes) return
     setBooking(true)
-    const supabase = createClient()
-    const { error } = await supabase.from('room_bookings').insert({
-      room_id: selectedRoom.id,
-      user_id: userId,
-      booking_date: selectedDate,
-      start_time: selectedTime,
-      end_time: `${String(parseInt(selectedTime) + 1).padStart(2,'0')}:00`,
-      notes: notes.trim() || null,
+
+    // Every rule is re-checked server-side against the same lib/venue.ts this
+    // page uses, and the database has the final word on overlap.
+    const res = await fetch('/api/bookings', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({
+        room_id: selectedRoom.id,
+        booking_date: selectedDate,
+        start_time: toTimeString(selectedStart),
+        duration_minutes: minutes,
+        notes: notes.trim() || null,
+      }),
     })
 
     setBooking(false)
 
-    // There was no failure branch at all: a rejected booking left the screen
-    // completely unchanged, so members tapped Book repeatedly with no feedback.
-    if (error) {
-      console.error('room booking failed:', error.message, error.code)
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
       // A slot taken between page load and submit is the likeliest cause, so
       // refresh availability rather than leaving a stale grid on screen.
-      setBookingError(
-        error.code === '23505'
-          ? 'Someone just took that slot. Pick another time.'
-          : "Couldn't book that room. Please try again."
-      )
+      setBookingError(error || "Couldn't book that room. Please try again.")
       await loadAvailability(selectedDate)
       return
     }
@@ -126,7 +163,7 @@ export default function BookingPage() {
     setBookingError('')
     setBookingSuccess(true)
     setSelectedRoom(null)
-    setSelectedTime('')
+    setSelectedStart(null)
     setNotes('')
     await loadAvailability(selectedDate)
     await loadMyBookings(userId)
@@ -135,30 +172,34 @@ export default function BookingPage() {
 
   async function cancelBooking(id: string) {
     if (!confirm('Cancel this booking?')) return
-    const supabase = createClient()
-    const { error } = await supabase.from('room_bookings').delete().eq('id', id).eq('user_id', userId)
-    if (error) {
-      console.error('booking cancel failed:', error.message)
-      setBookingError("Couldn't cancel that booking — it's still reserved.")
+    const res = await fetch('/api/bookings', {
+      method: 'DELETE',
+      headers: await authHeaders(),
+      body: JSON.stringify({ id }),
+    })
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: null }))
+      setBookingError(error || "Couldn't cancel that booking — it's still reserved.")
       return
     }
     setMyBookings(b => b.filter(x => x.id !== id))
-  }
-
-  function getBookedSlotsForRoom(roomId: string) {
-    return new Set(bookings.filter((b: any) => b.room_id === roomId).map((b: any) => b.start_time))
-  }
-
-  function isRoomAvailable(roomId: string) {
-    const booked = getBookedSlotsForRoom(roomId)
-    return TIME_SLOTS.some(s => !booked.has(s))
+    if (myBookings.find(b => b.id === id)?.booking_date === selectedDate) {
+      await loadAvailability(selectedDate)
+    }
   }
 
   function formatDate(d: string) {
     return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
   }
 
-  const suites = ['Suite 145', 'Suite 120']
+  // Suites are derived from the rooms themselves. Hardcoding them meant that
+  // adding a suite in the database left its rooms invisible on this page.
+  const suites = Array.from(new Set(rooms.map(r => r.suite).filter(Boolean)))
+
+  const daySlots = slotsForDate(hours, settings, selectedDate)
+  const dayHours = hoursForDate(hours, selectedDate)
+  const isClosed = !dayHours || dayHours.is_closed
+  const nowMins = selectedDate === today ? nowMinutes() : null
 
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
@@ -211,9 +252,15 @@ export default function BookingPage() {
             type="date"
             value={selectedDate}
             min={today}
+            max={addDays(today, settings.booking_horizon_days)}
             onChange={e => handleDateChange(e.target.value)}
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />
+          {!isClosed && dayHours && (
+            <p className="text-xs text-gray-400 mt-2">
+              Open {formatTime(parseTime(dayHours.open_time))} – {formatTime(parseTime(dayHours.close_time))}
+            </p>
+          )}
         </div>
 
         {/* My upcoming bookings */}
@@ -225,7 +272,9 @@ export default function BookingPage() {
                 <div key={b.id} className="flex items-center justify-between bg-bt-pale rounded-xl px-4 py-3">
                   <div>
                     <p className="font-semibold text-sm text-gray-900">{b.rooms?.name} <span className="text-gray-400 font-normal">· {b.rooms?.suite}</span></p>
-                    <p className="text-xs text-gray-400">{formatDate(b.booking_date)} · {formatSlot(b.start_time)} – {endSlot(b.start_time)}</p>
+                    <p className="text-xs text-gray-400">
+                      {formatDate(b.booking_date)} · {formatTime(parseTime(b.start_time))} – {formatTime(parseTime(b.end_time))}
+                    </p>
                     {b.notes && <p className="text-xs text-gray-400 mt-0.5">{b.notes}</p>}
                   </div>
                   <button onClick={() => cancelBooking(b.id)} className="text-xs text-red-400 font-medium ml-3 flex-shrink-0">Cancel</button>
@@ -235,8 +284,24 @@ export default function BookingPage() {
           </div>
         )}
 
+        {isClosed && (
+          <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
+            <p className="text-4xl mb-3">🌙</p>
+            <p className="text-gray-600 font-medium">The venue is closed that day</p>
+            <p className="text-gray-400 text-sm mt-1">Pick another date to see open rooms.</p>
+          </div>
+        )}
+
+        {!isClosed && rooms.length === 0 && (
+          <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
+            <p className="text-4xl mb-3">🪑</p>
+            <p className="text-gray-600 font-medium">No rooms yet</p>
+            <p className="text-gray-400 text-sm mt-1">Your leader can add them in the admin area.</p>
+          </div>
+        )}
+
         {/* Room availability by suite */}
-        {suites.map(suite => {
+        {!isClosed && suites.map(suite => {
           const suiteRooms = rooms.filter(r => r.suite === suite)
           if (suiteRooms.length === 0) return null
           return (
@@ -244,20 +309,27 @@ export default function BookingPage() {
               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">{suite}</p>
               <div className="space-y-2">
                 {suiteRooms.map(room => {
-                  const available = isRoomAvailable(room.id)
+                  const taken = takenFor(room.id)
                   const isSelected = selectedRoom?.id === room.id
-                  const bookedSlots = getBookedSlotsForRoom(room.id)
-                  const availableCount = TIME_SLOTS.filter(s => !bookedSlots.has(s)).length
+
+                  // A slot is bookable only if the shortest allowed booking fits
+                  // in it, which is not the same as "nothing starts here" once
+                  // bookings can run long.
+                  const openStarts = daySlots.filter(s =>
+                    (nowMins === null || s >= nowMins) &&
+                    maxDurationAt(s, taken, hours, settings, selectedDate) > 0
+                  )
+                  const available = openStarts.length > 0
 
                   return (
-                    <div key={room.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden transition-all`}>
+                    <div key={room.id} className="bg-white rounded-2xl shadow-sm overflow-hidden transition-all">
                       <button
                         onClick={() => {
                           setSelectedRoom(isSelected ? null : room)
-                          setSelectedTime('')
+                          setSelectedStart(null)
+                          setBookingError('')
                         }}
                         className="w-full px-5 py-4 flex items-center gap-4 text-left">
-                        {/* Availability dot */}
                         <div className={`w-3 h-3 rounded-full flex-shrink-0 ${available ? 'bg-green-400' : 'bg-red-400'}`} />
                         <div className="flex-1">
                           <p className="font-bold text-gray-900">{room.name}</p>
@@ -266,7 +338,7 @@ export default function BookingPage() {
                             {room.capacity ? ` · Up to ${room.capacity}` : ''}
                             {' · '}
                             <span className={available ? 'text-green-600' : 'text-red-400'}>
-                              {available ? `${availableCount} slot${availableCount !== 1 ? 's' : ''} open` : 'Fully booked'}
+                              {available ? `${openStarts.length} slot${openStarts.length !== 1 ? 's' : ''} open` : 'Fully booked'}
                             </span>
                           </p>
                         </div>
@@ -279,40 +351,71 @@ export default function BookingPage() {
                       {isSelected && (
                         <div className="px-5 pb-5 border-t border-gray-50 pt-4 space-y-4">
                           <div>
-                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Pick a time slot</p>
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Pick a start time</p>
                             <div className="grid grid-cols-3 gap-2">
-                              {TIME_SLOTS.map(slot => {
-                                const isBooked = bookedSlots.has(slot)
-                                const isPicked = selectedTime === slot
+                              {daySlots.map(slot => {
+                                const longest = maxDurationAt(slot, taken, hours, settings, selectedDate)
+                                const past = nowMins !== null && slot < nowMins
+                                const disabled = past || longest === 0
+                                const isPicked = selectedStart === slot
                                 return (
-                                  <button key={slot} disabled={isBooked}
-                                    onClick={() => setSelectedTime(slot)}
+                                  <button key={slot} disabled={disabled}
+                                    onClick={() => {
+                                      setSelectedStart(slot)
+                                      // Keep the current choice when it still
+                                      // fits, so changing your mind about the
+                                      // time does not silently reset the length.
+                                      setDuration(d => (d && d <= longest ? d : Math.min(settings.min_duration_minutes, longest)))
+                                    }}
                                     className={`py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                                      isBooked ? 'bg-gray-100 text-gray-300 cursor-not-allowed line-through' :
+                                      disabled ? 'bg-gray-100 text-gray-300 cursor-not-allowed line-through' :
                                       isPicked ? 'bg-bt-navy text-white' :
                                       'bg-bt-pale text-bt-navy'
                                     }`}>
-                                    {formatSlot(slot)}
+                                    {formatTime(slot)}
                                   </button>
                                 )
                               })}
                             </div>
                           </div>
 
-                          {selectedTime && (
-                            <div className="space-y-3">
-                              <input
-                                value={notes}
-                                onChange={e => setNotes(e.target.value)}
-                                placeholder="Notes (optional)"
-                                className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue"
-                              />
-                              <button onClick={book} disabled={booking}
-                                className="w-full bg-bt-navy text-white py-3.5 rounded-xl font-semibold text-sm disabled:opacity-50">
-                                {booking ? 'Booking...' : `Book ${room.name} · ${formatSlot(selectedTime)} – ${endSlot(selectedTime)}`}
-                              </button>
-                            </div>
-                          )}
+                          {selectedStart !== null && (() => {
+                            const longest = maxDurationAt(selectedStart, taken, hours, settings, selectedDate)
+                            const options = durationOptions(settings).filter(d => d <= longest)
+                            const chosen = duration && duration <= longest ? duration : options[0]
+                            return (
+                              <div className="space-y-4">
+                                <div>
+                                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">How long</p>
+                                  <div className="grid grid-cols-4 gap-2">
+                                    {options.map(d => (
+                                      <button key={d} onClick={() => setDuration(d)}
+                                        className={`py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                                          chosen === d ? 'bg-bt-navy text-white' : 'bg-bt-pale text-bt-navy'
+                                        }`}>
+                                        {formatDuration(d)}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <input
+                                  value={notes}
+                                  onChange={e => setNotes(e.target.value)}
+                                  placeholder="Notes (optional)"
+                                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue"
+                                />
+                                <button
+                                  onClick={() => book(chosen)}
+                                  disabled={booking || !chosen}
+                                  className="w-full bg-bt-navy text-white py-3.5 rounded-xl font-semibold text-sm disabled:opacity-50">
+                                  {booking
+                                    ? 'Booking...'
+                                    : `Book ${room.name} · ${formatTime(selectedStart)} – ${formatTime(selectedStart + chosen)}`}
+                                </button>
+                              </div>
+                            )
+                          })()}
                         </div>
                       )}
                     </div>
