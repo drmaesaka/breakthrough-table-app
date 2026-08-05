@@ -5,8 +5,10 @@ import {
   fetchCounts,
   fetchMembers,
   fetchPayments,
+  revenueByBusiness,
   revenueByMonth,
   spendByMember,
+  summarizeLines,
 } from '@/lib/cause-machine'
 
 // Read-only window onto Cause Machine's membership and payment records.
@@ -55,6 +57,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       counts,
       months,
+      // Split by business, plus the line-by-line breakdown the split is derived
+      // from. Both are sent so the dashboard can show its own workings — the
+      // classification is an unconfirmed guess (see lib/business-lines.ts) and a
+      // figure nobody can audit is worse than no figure.
+      businesses: revenueByBusiness(payments),
+      lines: summarizeLines(payments),
       totals: {
         // Netted, so refunds reduce it. A "total revenue" that ignores refunds
         // is the kind of number that gets repeated in a meeting and is wrong.

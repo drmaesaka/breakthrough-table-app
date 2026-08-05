@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import {
@@ -861,7 +862,16 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-4">
-        <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
+          {/* A separate route rather than a twelfth tab: it reads from Cause
+              Machine, not from our own tables, and it is slow enough (eight paged
+              API calls) that it should not load behind a tab click. */}
+          <Link href="/admin/finances"
+            className="text-bt-light/80 text-sm font-medium bg-white/15 border border-white/25 rounded-xl px-3 py-1.5 whitespace-nowrap">
+            Finances →
+          </Link>
+        </div>
         {groups.length > 0 && (
           <select value={selectedGroup}
             onChange={e => {

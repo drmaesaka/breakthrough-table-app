@@ -20,6 +20,8 @@
 // either would ship credentials for the whole membership database to every
 // browser that loads the app.
 
+import { classify, lineKey, type Business } from './business-lines'
+
 const BASE = 'https://api.causemachine.com'
 
 /** The API caps a page at 200 regardless of what pageSize you ask for. */
@@ -229,6 +231,114 @@ export function revenueByMonth(payments: CauseMachinePayment[]): RevenueMonth[] 
   }
 
   return [...months.values()].sort((a, b) => a.month.localeCompare(b.month))
+}
+
+export type BusinessMonth = {
+  month: string
+  /** Net per business, refunds already subtracted. */
+  net: Record<Business, number>
+  /** Distinct people who paid into each business that month. */
+  payers: Record<Business, number>
+  total: number
+}
+
+const EMPTY_BUSINESS_NET = (): Record<Business, number> =>
+  ({ bt: 0, sunrise: 0, other: 0, unclassified: 0 })
+
+/**
+ * Revenue by month, split by business.
+ *
+ * The payer counts matter as much as the money. A line can fall because prices
+ * dropped or because people left, and those are completely different problems —
+ * net alone cannot tell them apart, and the first version of this analysis got
+ * that wrong. Counting distinct UserIds per month makes it visible.
+ *
+ * Months are cut in UTC, matching revenueByMonth, because DateCompleted is a UTC
+ * instant. See that function for the caveat.
+ */
+export function revenueByBusiness(payments: CauseMachinePayment[]): BusinessMonth[] {
+  const months = new Map<string, { month: string; net: Record<Business, number>; sets: Record<Business, Set<number>> }>()
+
+  for (const p of payments) {
+    if (p.Status !== 'Completed') continue
+    if (!p.DateCompleted) continue
+
+    const month = p.DateCompleted.slice(0, 7)
+    const business = classify(p.Description)
+
+    const row = months.get(month) || {
+      month,
+      net: EMPTY_BUSINESS_NET(),
+      sets: { bt: new Set<number>(), sunrise: new Set<number>(), other: new Set<number>(), unclassified: new Set<number>() },
+    }
+    row.net[business] += p.Amount
+    // A refund on its own should not make someone count as a payer for the month.
+    if (p.Amount > 0) row.sets[business].add(p.UserId)
+    months.set(month, row)
+  }
+
+  return [...months.values()]
+    .map(r => ({
+      month: r.month,
+      net: r.net,
+      payers: {
+        bt: r.sets.bt.size,
+        sunrise: r.sets.sunrise.size,
+        other: r.sets.other.size,
+        unclassified: r.sets.unclassified.size,
+      },
+      total: r.net.bt + r.net.sunrise + r.net.other + r.net.unclassified,
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month))
+}
+
+export type LineSummary = {
+  line: string
+  business: Business
+  net: number
+  payments: number
+  people: number
+  firstPayment: string | null
+  lastPayment: string | null
+}
+
+/**
+ * Every distinct payment line with its totals, biggest first. This is the view
+ * that answers "what are we actually selling" — and the one to re-read whenever
+ * the classification in lib/business-lines.ts is being corrected, since anything
+ * still marked unclassified shows up here by name.
+ */
+export function summarizeLines(payments: CauseMachinePayment[]): LineSummary[] {
+  const lines = new Map<string, LineSummary & { users: Set<number> }>()
+
+  for (const p of payments) {
+    if (p.Status !== 'Completed') continue
+
+    const key = lineKey(p.Description)
+    const row = lines.get(key) || {
+      line: key,
+      business: classify(p.Description),
+      net: 0,
+      payments: 0,
+      people: 0,
+      firstPayment: null,
+      lastPayment: null,
+      users: new Set<number>(),
+    }
+
+    row.net += p.Amount
+    row.payments++
+    row.users.add(p.UserId)
+    if (p.DateCompleted) {
+      if (!row.firstPayment || p.DateCompleted < row.firstPayment) row.firstPayment = p.DateCompleted
+      if (!row.lastPayment || p.DateCompleted > row.lastPayment) row.lastPayment = p.DateCompleted
+    }
+    lines.set(key, row)
+  }
+
+  return [...lines.values()]
+    .map(({ users, ...rest }) => ({ ...rest, people: users.size }))
+    .sort((a, b) => b.net - a.net)
 }
 
 export type MemberSpend = {
