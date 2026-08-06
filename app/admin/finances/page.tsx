@@ -45,19 +45,17 @@ type Summary = {
   }
 }
 
-const ORDER: Business[] = ['bt', 'sunrise', 'other', 'unclassified']
+const ORDER: Business[] = ['bt', 'sunrise', 'unclassified']
 
 const BADGE: Record<Business, string> = {
   bt: 'bg-bt-pale text-bt-blue',
   sunrise: 'bg-amber-50 text-amber-700',
-  other: 'bg-gray-100 text-gray-600',
   unclassified: 'bg-red-50 text-red-700',
 }
 
 const BAR: Record<Business, string> = {
   bt: 'bg-bt-blue',
   sunrise: 'bg-amber-400',
-  other: 'bg-gray-300',
   unclassified: 'bg-red-400',
 }
 
@@ -135,6 +133,13 @@ export default function FinancesPage() {
   const unclassified = data?.lines.filter(l => l.business === 'unclassified') ?? []
   const unclassifiedNet = unclassified.reduce((s, l) => s + l.net, 0)
 
+  // Ticket revenue sitting in BT only because the event name gave no signal
+  // either way. Computed rather than hardcoded so the banner stays true as
+  // events are added — the "Event: " prefix is set by lineKey().
+  const ambiguousTicketNet = (data?.lines ?? [])
+    .filter(l => l.line.startsWith('Event: ') && l.business === 'bt')
+    .reduce((s, l) => s + l.net, 0)
+
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
@@ -157,16 +162,20 @@ export default function FinancesPage() {
 
         {data && (
           <>
-            {/* The classification is a guess. Say so at the top, every time, until
-                it is not. */}
+            {/* Subscriptions are settled. Event tickets are not entirely, and the
+                banner names the exact amount still resting on a judgement call
+                rather than implying the whole split is shaky. */}
             <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200">
               <p className="text-amber-900 text-sm font-semibold">
-                The Breakthrough Table / Sunrise split is unconfirmed
+                Memberships confirmed · {money(ambiguousTicketNet)} of event tickets is a judgement call
               </p>
               <p className="text-amber-800/80 text-xs mt-1 leading-relaxed">
-                Cause Machine does not record which business a payment belongs to, so the
-                split below is our best guess from the payment descriptions. It was sent to
-                Mo on 5 Aug 2026 and is not yet confirmed. Treat the totals as indicative.
+                Mo confirmed on 6 Aug 2026 that the Sunrise Network Subscription is the only
+                Sunrise membership and every other membership line is Breakthrough Table.
+                Event tickets carry no product name, so they are attributed by event: anything
+                named for Sunrise counts as Sunrise, and the rest default to Breakthrough
+                Table. That default covers {money(ambiguousTicketNet)} across events whose names
+                say nothing either way — they are listed individually below.
               </p>
             </div>
 

@@ -112,6 +112,22 @@ export type CauseMachinePayment = {
   Order: { OrderId?: number; OrderNumber?: string; Status?: string; OrderTotal?: number } | null
 }
 
+/**
+ * Only the fields that matter for attributing ticket revenue. The full record
+ * also carries venue, address and image URLs.
+ *
+ * OrganizationName is deliberately NOT used to split the businesses: every one
+ * of the 80 events reports "Sunrise Network", because that is the organisation
+ * the Cause Machine account itself belongs to. The Name is the real signal.
+ */
+export type CauseMachineEvent = {
+  EventId: number
+  Name: string | null
+  OrganizationName: string | null
+  StartDate: string | null
+  Status: string | null
+}
+
 type Envelope<T> = { PageInfo: PageInfo; Results: T[] }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +198,24 @@ export async function fetchRecurringDonations(): Promise<unknown[]> {
   return getAll<unknown>('v1/recurringdonations')
 }
 
+/**
+ * Events, needed to attribute ticket revenue. Every one-off order carries an
+ * EventId but no product name, so without this the largest non-subscription line
+ * in the business is an opaque "$13,339 of orders".
+ */
+export async function fetchEvents(): Promise<CauseMachineEvent[]> {
+  return getAll<CauseMachineEvent>('v1/events')
+}
+
+/** EventId → event name, for classifying ticket payments. */
+export function eventNameMap(events: CauseMachineEvent[]): Map<number, string> {
+  const m = new Map<number, string>()
+  for (const e of events) {
+    if (e.EventId != null && e.Name) m.set(e.EventId, e.Name)
+  }
+  return m
+}
+
 /** Just the totals, one request each — for a connectivity check. */
 export async function fetchCounts(): Promise<{ members: number; payments: number; recurring: number }> {
   const [m, p, r] = await Promise.all([
@@ -243,7 +277,7 @@ export type BusinessMonth = {
 }
 
 const EMPTY_BUSINESS_NET = (): Record<Business, number> =>
-  ({ bt: 0, sunrise: 0, other: 0, unclassified: 0 })
+  ({ bt: 0, sunrise: 0, unclassified: 0 })
 
 /**
  * Revenue by month, split by business.
@@ -256,7 +290,10 @@ const EMPTY_BUSINESS_NET = (): Record<Business, number> =>
  * Months are cut in UTC, matching revenueByMonth, because DateCompleted is a UTC
  * instant. See that function for the caveat.
  */
-export function revenueByBusiness(payments: CauseMachinePayment[]): BusinessMonth[] {
+export function revenueByBusiness(
+  payments: CauseMachinePayment[],
+  events: Map<number, string> = new Map()
+): BusinessMonth[] {
   const months = new Map<string, { month: string; net: Record<Business, number>; sets: Record<Business, Set<number>> }>()
 
   for (const p of payments) {
@@ -264,12 +301,12 @@ export function revenueByBusiness(payments: CauseMachinePayment[]): BusinessMont
     if (!p.DateCompleted) continue
 
     const month = p.DateCompleted.slice(0, 7)
-    const business = classify(p.Description)
+    const business = classify(p.Description, p.EventId ? events.get(p.EventId) ?? null : null)
 
     const row = months.get(month) || {
       month,
       net: EMPTY_BUSINESS_NET(),
-      sets: { bt: new Set<number>(), sunrise: new Set<number>(), other: new Set<number>(), unclassified: new Set<number>() },
+      sets: { bt: new Set<number>(), sunrise: new Set<number>(), unclassified: new Set<number>() },
     }
     row.net[business] += p.Amount
     // A refund on its own should not make someone count as a payer for the month.
@@ -284,10 +321,9 @@ export function revenueByBusiness(payments: CauseMachinePayment[]): BusinessMont
       payers: {
         bt: r.sets.bt.size,
         sunrise: r.sets.sunrise.size,
-        other: r.sets.other.size,
         unclassified: r.sets.unclassified.size,
       },
-      total: r.net.bt + r.net.sunrise + r.net.other + r.net.unclassified,
+      total: r.net.bt + r.net.sunrise + r.net.unclassified,
     }))
     .sort((a, b) => a.month.localeCompare(b.month))
 }
@@ -308,16 +344,20 @@ export type LineSummary = {
  * the classification in lib/business-lines.ts is being corrected, since anything
  * still marked unclassified shows up here by name.
  */
-export function summarizeLines(payments: CauseMachinePayment[]): LineSummary[] {
+export function summarizeLines(
+  payments: CauseMachinePayment[],
+  events: Map<number, string> = new Map()
+): LineSummary[] {
   const lines = new Map<string, LineSummary & { users: Set<number> }>()
 
   for (const p of payments) {
     if (p.Status !== 'Completed') continue
 
-    const key = lineKey(p.Description)
+    const eventName = p.EventId ? events.get(p.EventId) ?? null : null
+    const key = lineKey(p.Description, eventName)
     const row = lines.get(key) || {
       line: key,
-      business: classify(p.Description),
+      business: classify(p.Description, eventName),
       net: 0,
       payments: 0,
       people: 0,

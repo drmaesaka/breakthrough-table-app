@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireLeader } from '@/lib/api-auth'
 import {
   causeMachineConfigured,
+  eventNameMap,
   fetchCounts,
+  fetchEvents,
   fetchMembers,
   fetchPayments,
   revenueByBusiness,
@@ -50,7 +52,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ members: spendByMember(members, payments) })
     }
 
-    const [counts, payments] = await Promise.all([fetchCounts(), fetchPayments()])
+    // Events are needed to attribute ticket revenue: a one-off order names no
+    // product, only an EventId. Without them the biggest non-subscription line
+    // is an opaque lump and $10.8k of Sunrise money reads as Breakthrough Table.
+    const [counts, payments, events] = await Promise.all([
+      fetchCounts(),
+      fetchPayments(),
+      fetchEvents(),
+    ])
+    const eventNames = eventNameMap(events)
     const months = revenueByMonth(payments)
     const completed = payments.filter(p => p.Status === 'Completed')
 
@@ -58,11 +68,10 @@ export async function GET(req: NextRequest) {
       counts,
       months,
       // Split by business, plus the line-by-line breakdown the split is derived
-      // from. Both are sent so the dashboard can show its own workings — the
-      // classification is an unconfirmed guess (see lib/business-lines.ts) and a
+      // from. Both are sent so the dashboard can show its own workings — a
       // figure nobody can audit is worse than no figure.
-      businesses: revenueByBusiness(payments),
-      lines: summarizeLines(payments),
+      businesses: revenueByBusiness(payments, eventNames),
+      lines: summarizeLines(payments, eventNames),
       totals: {
         // Netted, so refunds reduce it. A "total revenue" that ignores refunds
         // is the kind of number that gets repeated in a meeting and is wrong.
