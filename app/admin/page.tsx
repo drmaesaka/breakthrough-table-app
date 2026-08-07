@@ -862,16 +862,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-4">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
-          {/* A separate route rather than a twelfth tab: it reads from Cause
-              Machine, not from our own tables, and it is slow enough (eight paged
-              API calls) that it should not load behind a tab click. */}
-          <Link href="/admin/finances"
-            className="text-bt-light/80 text-sm font-medium bg-white/15 border border-white/25 rounded-xl px-3 py-1.5 whitespace-nowrap">
-            Finances →
-          </Link>
-        </div>
+        <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
         {groups.length > 0 && (
           <select value={selectedGroup}
             onChange={e => {
@@ -906,6 +897,15 @@ export default function AdminPage() {
               {t}
             </button>
           ))}
+          {/* Sits in the same rail as the tabs so there is one place to look for
+              a section, but it stays a separate route rather than a twelfth tab:
+              it reads from Cause Machine instead of our own tables, and eight
+              paged API calls is too slow to sit behind a tab click. It is never
+              the active tab, so it always renders in the inactive style. */}
+          <Link href="/admin/finances"
+            className="flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors text-white/60">
+            finances
+          </Link>
         </div>
       </div>
 
