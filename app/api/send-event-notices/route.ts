@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
+import { sendEmail, notificationEmail } from '@/lib/send-email'
+import { fetchMemberEmails } from '@/lib/member-emails'
 
 // Event announcements, reminders and follow-ups.
 //
@@ -76,8 +78,16 @@ export async function POST(req: NextRequest) {
     subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
   }
 
+  // Names for the email greeting. Fetched once for everyone rather than per
+  // audience, because a member can appear in several events in one sweep and
+  // audienceFor/rsvpsFor both return bare ids.
+  const { data: allProfiles } = await supabase.from('profiles').select('id, full_name')
+  const namesByUser = new Map<string, string>(
+    (allProfiles || []).map((p: any) => [p.id as string, (p.full_name || '') as string])
+  )
+
   const skipped: Array<{ event: string; stage: string; reason: string }> = []
-  const sentLog: Array<{ event: string; stage: string; recipients: number; delivered: number }> = []
+  const sentLog: Array<{ event: string; stage: string; recipients: number; delivered: number; by_email: number }> = []
   const stamps: Array<{ id: string; column: string; suppressed: boolean }> = []
 
   /** Members of the event's table. A NULL group_id is a legacy BT-wide event. */
@@ -105,9 +115,25 @@ export async function POST(req: NextRequest) {
     return (data || []).map(r => r.user_id as string)
   }
 
+  /**
+   * Delivers to every member in `userIds`, by push where possible and by email
+   * where not — never both, because the same event notice arriving twice is how
+   * an announcement becomes a reason to mute the app.
+   *
+   * Push-only was the original behaviour, which meant an event announcement
+   * reached only the members who had installed the PWA. On iOS push does not
+   * work in Safari at all, so that was most of the table.
+   */
   async function push(userIds: string[], title: string, body: string, url: string) {
-    const results = await Promise.all(
-      userIds.flatMap(id =>
+    const withPush = userIds.filter(id => (subsByUser.get(id) || []).length > 0)
+    const withoutPush = userIds.filter(id => (subsByUser.get(id) || []).length === 0)
+
+    const emails = withoutPush.length
+      ? await fetchMemberEmails(supabase, withoutPush)
+      : new Map<string, string>()
+
+    const pushResults = await Promise.all(
+      withPush.flatMap(id =>
         (subsByUser.get(id) || []).map(async sub => {
           const res = dryRun ? 'would-send' : await sendPush(sub, { title, body, url })
           if (res === 'expired') {
@@ -118,9 +144,31 @@ export async function POST(req: NextRequest) {
         })
       )
     )
+
+    const emailResults = await Promise.all(
+      withoutPush.map(async id => {
+        const to = emails.get(id)
+        if (!to) return 'unreachable' as const
+        const msg = notificationEmail({
+          memberName: namesByUser.get(id)?.split(' ')[0] || 'there',
+          subject: title,
+          body,
+          ctaLabel: 'See the details',
+          ctaPath: url,
+        })
+        if (dryRun) return 'would-send' as const
+        const res = await sendEmail({ to, ...msg })
+        return res.sent
+      })
+    )
+
     return {
-      attempted: results.length,
-      delivered: results.filter(r => r === true || r === 'would-send').length,
+      attempted: pushResults.length + emailResults.filter(r => r !== 'unreachable').length,
+      delivered:
+        pushResults.filter(r => r === true || r === 'would-send').length +
+        emailResults.filter(r => r === true || r === 'would-send').length,
+      by_email: emailResults.filter(r => r === true || r === 'would-send').length,
+      unreachable: emailResults.filter(r => r === 'unreachable').length,
     }
   }
 
@@ -161,14 +209,14 @@ export async function POST(req: NextRequest) {
         skipped.push({ event: event.title, stage: 'announce', reason: 'event already started' })
       } else {
         const audience = await audienceFor(event)
-        const { attempted, delivered } = await push(
+        const { attempted, delivered, by_email } = await push(
           audience,
           'New Breakthrough Table event',
           `${event.title} — ${when(event)}${event.location ? ` at ${event.location}` : ''}`,
           '/events'
         )
         await stamp(event, 'announced_at')
-        sentLog.push({ event: event.title, stage: 'announce', recipients: audience.length, delivered })
+        sentLog.push({ event: event.title, stage: 'announce', recipients: audience.length, delivered, by_email })
         if (attempted === 0) {
           skipped.push({ event: event.title, stage: 'announce', reason: 'nobody in the audience has push enabled' })
         }
@@ -186,14 +234,14 @@ export async function POST(req: NextRequest) {
         skipped.push({ event: event.title, stage: 'reminder_24h', reason: 'less than 12h out — too late to be a day-ahead reminder' })
       } else if (untilStart <= 36 * HOUR) {
         const audience = await rsvpsFor(event)
-        const { delivered } = await push(
+        const { delivered, by_email } = await push(
           audience,
           'Tomorrow at Breakthrough Table',
           `${event.title} — ${when(event)}`,
           '/events'
         )
         await stamp(event, 'reminder_24h_sent_at')
-        sentLog.push({ event: event.title, stage: 'reminder_24h', recipients: audience.length, delivered })
+        sentLog.push({ event: event.title, stage: 'reminder_24h', recipients: audience.length, delivered, by_email })
       }
     }
 
@@ -203,14 +251,14 @@ export async function POST(req: NextRequest) {
         await stamp(event, 'reminder_1h_sent_at', true)
       } else if (untilStart <= 90 * 60_000) {
         const audience = await rsvpsFor(event)
-        const { delivered } = await push(
+        const { delivered, by_email } = await push(
           audience,
           'Starting soon',
           `${event.title} — ${when(event)}`,
           '/events'
         )
         await stamp(event, 'reminder_1h_sent_at')
-        sentLog.push({ event: event.title, stage: 'reminder_1h', recipients: audience.length, delivered })
+        sentLog.push({ event: event.title, stage: 'reminder_1h', recipients: audience.length, delivered, by_email })
       }
     }
 
@@ -223,14 +271,14 @@ export async function POST(req: NextRequest) {
         await stamp(event, 'followup_sent_at', true)
         skipped.push({ event: event.title, stage: 'followup', reason: 'nobody RSVPed' })
       } else {
-        const { delivered } = await push(
+        const { delivered, by_email } = await push(
           audience,
           'Thanks for coming',
           event.followup_message?.trim() || `How was ${event.title}? Take a minute to note your next step.`,
           '/journal'
         )
         await stamp(event, 'followup_sent_at')
-        sentLog.push({ event: event.title, stage: 'followup', recipients: audience.length, delivered })
+        sentLog.push({ event: event.title, stage: 'followup', recipients: audience.length, delivered, by_email })
       }
     }
   }

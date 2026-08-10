@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
+import { sendEmail, notificationEmail } from '@/lib/send-email'
+import { fetchMemberEmails } from '@/lib/member-emails'
 
 // Fans out a push per member; the 10s default would cut a real table off.
 export const maxDuration = 60
@@ -88,47 +90,82 @@ export async function POST(req: NextRequest) {
     .select('*')
     .in('user_id', userIds)
 
-  if (!subs || subs.length === 0) {
-    return NextResponse.json({ message: 'No push subscriptions found', sent: 0 })
-  }
-
   // Grouped per member so a second device is notified too, rather than the map
   // silently keeping whichever row came back last.
   const subsByUser = new Map<string, any[]>()
-  for (const s of subs) {
+  for (const s of subs || []) {
     subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
   }
 
-  const results = (await Promise.all(
+  // This used to return "No push subscriptions found" and stop here whenever the
+  // table was empty, which is precisely the population email exists to reach.
+  const withoutPush = participants.filter((p: any) => !(subsByUser.get(p.id) || []).length)
+  const emailsByUser = withoutPush.length
+    ? await fetchMemberEmails(supabase, withoutPush.map((p: any) => p.id))
+    : new Map<string, string>()
+
+  const unreachable: string[] = []
+
+  const outcomes = await Promise.all(
     participants.map(async (p: any) => {
       const firstName = p.full_name?.split(' ')[0] || 'there'
-      return Promise.all(
-        (subsByUser.get(p.id) || []).map(async sub => {
-          const result = dryRun ? 'would-send' : await sendPush(sub, {
-            title: 'Breakthrough Table',
-            body: `Hey ${firstName} — time to check in your habit and reading for today! 📋`,
-            url: '/tasks',
-          })
-          if (result === 'expired') {
-            // By endpoint, not user_id — one stale device used to unsubscribe
-            // the member from every device they own.
-            await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
-          }
-          return result
-        })
-      )
-    })
-  )).flat()
+      const body = `Hey ${firstName} — time to check in your habit and reading for today! 📋`
+      const devices = subsByUser.get(p.id) || []
 
-  const sent = results.filter(r => r === true).length
-  const wouldSend = results.filter(r => r === 'would-send').length
+      // Push OR email, never both. The same reminder arriving twice is how a
+      // re-engagement nudge turns into the reason someone mutes you.
+      if (devices.length > 0) {
+        const results = await Promise.all(
+          devices.map(async sub => {
+            const result = dryRun ? 'would-send' : await sendPush(sub, {
+              title: 'Breakthrough Table',
+              body,
+              url: '/tasks',
+            })
+            if (result === 'expired') {
+              // By endpoint, not user_id — one stale device used to unsubscribe
+              // the member from every device they own.
+              await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+            }
+            return result
+          })
+        )
+        return { channel: 'push' as const, results }
+      }
+
+      const to = emailsByUser.get(p.id)
+      if (!to) {
+        unreachable.push(p.full_name || p.id)
+        return { channel: 'none' as const, results: [] as any[] }
+      }
+
+      const msg = notificationEmail({
+        memberName: firstName,
+        subject: 'Time to check in',
+        body,
+        ctaLabel: 'Check in',
+        ctaPath: '/tasks',
+      })
+      const res = dryRun
+        ? { sent: false as const, reason: 'not_configured' as const }
+        : await sendEmail({ to, ...msg })
+      return { channel: 'email' as const, results: [dryRun ? 'would-send' : res.sent] }
+    })
+  )
+
+  const pushResults = outcomes.filter(o => o.channel === 'push').flatMap(o => o.results)
+  const emailOutcomes = outcomes.filter(o => o.channel === 'email')
+
   return NextResponse.json({
     dry_run: dryRun,
-    sent,
-    would_send: wouldSend,
+    sent: pushResults.filter(r => r === true).length,
+    would_send: pushResults.filter(r => r === 'would-send').length,
+    emails_sent: emailOutcomes.filter(o => o.results[0] === true).length,
+    emails_would_send: dryRun ? emailOutcomes.length : 0,
     members_considered: participants.length,
-    members_without_push: participants
-      .filter((p: any) => !(subsByUser.get(p.id) || []).length)
-      .map((p: any) => p.full_name || p.id),
+    members_without_push: withoutPush.map((p: any) => p.full_name || p.id),
+    // Neither channel can reach these people. That is a real gap in the roster,
+    // not a delivery failure, so it is reported separately from a failed send.
+    unreachable,
   })
 }

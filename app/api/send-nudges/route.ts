@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
+import { sendEmail, notificationEmail } from '@/lib/send-email'
+import { fetchMemberEmails } from '@/lib/member-emails'
 import { dayInTimezone } from '@/lib/dates'
 import { fetchAllRows } from '@/lib/fetch-all'
 
@@ -108,6 +110,15 @@ export async function POST(req: NextRequest) {
     subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
   }
   const subsFor = (userId: string): any[] => subsByUser.get(userId) || []
+
+  // Addresses for the members push cannot reach. Fetched once for the whole run
+  // rather than per member: this sweeps the auth user list, and doing that
+  // inside the per-member loop would be one round-trip each inside a function
+  // with a 60-second ceiling.
+  const withoutPush = participantIds.filter(id => subsFor(id).length === 0)
+  const emailsByUser = withoutPush.length
+    ? await fetchMemberEmails(supabase, withoutPush)
+    : new Map<string, string>()
 
   // "Today" is each member's own calendar day, so a single UTC date would check
   // the wrong day for anyone whose timezone has already rolled over. Fetch a
@@ -292,13 +303,37 @@ export async function POST(req: NextRequest) {
         }
 
         const subs = subsFor(participant.id)
+
+        // No push: fall back to email rather than skipping. Push only works
+        // inside the installed PWA, so "no subscription" describes most members
+        // — exactly the people a nudge is supposed to pull back in.
         if (subs.length === 0) {
-          skipped.push({
-            name: participant.full_name || participant.id,
-            reason: 'due for a nudge, but no push subscription saved for this account',
-            times: `${prefs?.nudge_times?.join(', ') || '09:00'} ${prefs?.timezone || 'America/Chicago'}`,
+          const to = emailsByUser.get(participant.id)
+          if (!to) {
+            skipped.push({
+              name: participant.full_name || participant.id,
+              reason: 'due for a nudge, but no push subscription and no email address on the account',
+              times: `${prefs?.nudge_times?.join(', ') || '09:00'} ${prefs?.timezone || 'America/Chicago'}`,
+            })
+            return null
+          }
+
+          const msg = notificationEmail({
+            memberName: firstName,
+            subject: 'Your Breakthrough Table nudge',
+            body: message,
+            ctaLabel: 'Open your tasks',
+            ctaPath: '/tasks',
           })
-          return null
+          const res = dryRun ? null : await sendEmail({ to, ...msg })
+          return {
+            id: participant.id,
+            name: participant.full_name,
+            message,
+            result: dryRun ? 'would-send' : res!.sent,
+            devices: 0,
+            channel: 'email' as const,
+          }
         }
 
         const deviceResults = await Promise.all(
@@ -323,7 +358,14 @@ export async function POST(req: NextRequest) {
             : deviceResults.every(r => r === 'expired')
               ? 'expired'
               : false
-        return { id: participant.id, name: participant.full_name, message, result, devices: subs.length }
+        return {
+          id: participant.id,
+          name: participant.full_name,
+          message,
+          result,
+          devices: subs.length,
+          channel: 'push' as const,
+        }
       })
   )
 
@@ -365,29 +407,86 @@ export async function POST(req: NextRequest) {
         subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
       }
 
+      // Same fallback as the nudges above. A leader who schedules a reminder for
+      // their table means all of it, not just the members who installed the PWA.
+      const gpWithoutPush = gpIds.filter((id: string) => !(subsByUser.get(id) || []).length)
+      const gpEmails = gpWithoutPush.length
+        ? await fetchMemberEmails(supabase, gpWithoutPush)
+        : new Map<string, string>()
+
       return Promise.all(
-        groupParticipants.flatMap((p: any) =>
-          (subsByUser.get(p.id) || []).map(async sub => {
-            const res = dryRun
-              ? 'would-send'
-              : await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
-            if (res === 'expired') {
-              await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
-            }
-            return { id: p.id, name: p.full_name, result: res }
+        groupParticipants.map(async (p: any) => {
+          const devices = subsByUser.get(p.id) || []
+
+          if (devices.length > 0) {
+            const results = await Promise.all(
+              devices.map(async sub => {
+                const res = dryRun
+                  ? 'would-send'
+                  : await sendPush(sub, { title: 'Breakthrough Table', body: setting.reminder_message })
+                if (res === 'expired') {
+                  await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+                }
+                return res
+              })
+            )
+            // One member, one outcome — delivered if any of their devices took it.
+            const result = results.includes(true)
+              ? true
+              : results.includes('would-send')
+                ? 'would-send'
+                : results.every(r => r === 'expired')
+                  ? 'expired'
+                  : false
+            return { id: p.id, name: p.full_name, result, channel: 'push' as const }
+          }
+
+          const to = gpEmails.get(p.id)
+          if (!to) return { id: p.id, name: p.full_name, result: 'unreachable' as const, channel: 'none' as const }
+
+          const msg = notificationEmail({
+            memberName: p.full_name?.split(' ')[0] || 'there',
+            subject: 'A reminder from your table',
+            body: setting.reminder_message,
+            ctaLabel: 'Open Breakthrough Table',
+            ctaPath: '/dashboard',
           })
-        )
+          const res = dryRun ? null : await sendEmail({ to, ...msg })
+          return {
+            id: p.id,
+            name: p.full_name,
+            result: dryRun ? ('would-send' as const) : res!.sent,
+            channel: 'email' as const,
+          }
+        })
       )
     })
   )).flat()
 
-  // `results` holds a null for every matched member without a subscription, so
-  // its length was never the number of notifications that actually went out.
-  const attempted = results.filter(r => r !== null) as Array<{ result: boolean | 'expired' }>
-  const delivered = attempted.filter(r => r.result === true).length
-  const hardFailed = attempted.filter(r => r.result === false).length
-  const reminderDelivered = reminderResults.filter(r => r.result === true).length
-  const reminderHardFailed = reminderResults.filter(r => r.result === false).length
+  // `results` holds a null for every matched member we could not reach at all,
+  // so its length was never the number of notifications that actually went out.
+  const attempted = results.filter(r => r !== null) as Array<{
+    result: boolean | 'expired' | 'would-send'
+    channel: 'push' | 'email'
+  }>
+  // Counted separately because they diagnose different things: a push failure
+  // points at VAPID keys or a stale device, an email failure at Resend. Rolling
+  // them into one number would make the 500 below fire on the wrong evidence.
+  const pushAttempts = attempted.filter(r => r.channel === 'push')
+  const emailAttempts = attempted.filter(r => r.channel === 'email')
+  const delivered = pushAttempts.filter(r => r.result === true).length
+  const hardFailed = pushAttempts.filter(r => r.result === false).length
+  const emailsDelivered = emailAttempts.filter(r => r.result === true).length
+  const emailsFailed = emailAttempts.filter(r => r.result === false).length
+  // Split by channel for the same reason as the nudges: the 500 at the bottom is
+  // a push-setup alarm, and counting a delivered email as a delivered push would
+  // silence it exactly when push is broken for everyone.
+  const reminderPush = reminderResults.filter(r => r.channel === 'push')
+  const reminderEmail = reminderResults.filter(r => r.channel === 'email')
+  const reminderDelivered = reminderPush.filter(r => r.result === true).length
+  const reminderHardFailed = reminderPush.filter(r => r.result === false).length
+  const reminderEmailsDelivered = reminderEmail.filter(r => r.result === true).length
+  const reminderEmailsFailed = reminderEmail.filter(r => r.result === false).length
 
   const body = {
     dry_run: dryRun,
@@ -411,8 +510,18 @@ export async function POST(req: NextRequest) {
         streak: p.streak,
       })),
     } : {}),
+    nudge_emails_delivered: emailsDelivered,
+    nudge_emails_failed: emailsFailed,
+    reminder_emails_delivered: reminderEmailsDelivered,
+    reminder_emails_failed: reminderEmailsFailed,
     push_ready: participants.filter(p => subsFor(p.id).length > 0).length,
     members_without_push: participants.filter(p => subsFor(p.id).length === 0).map(p => p.full_name || p.id),
+    // No push AND no address. These people cannot be reached by this app at all,
+    // which is a roster problem rather than a delivery one — worth seeing apart
+    // from members_without_push, who email still reaches.
+    unreachable: participants
+      .filter(p => subsFor(p.id).length === 0 && !emailsByUser.get(p.id))
+      .map(p => p.full_name || p.id),
     skipped,
     results,
     reminderResults,

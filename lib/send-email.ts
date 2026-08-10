@@ -133,3 +133,50 @@ export function bookingCancellationEmail(d: BookingEmailDetails) {
   ]
   return { subject: `Booking cancelled: ${d.roomName}, ${d.dateLabel}`, text: lines.join('\n') }
 }
+
+// ---------------------------------------------------------------------------
+// Notification fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * The email a member gets when a nudge, check-in or event notice could not
+ * reach them by push.
+ *
+ * It deliberately carries the SAME sentence the push notification would have
+ * carried, rather than a longer "proper email" rewrite. Two reasons: the message
+ * logic already lives in the notification jobs and duplicating it would let the
+ * two channels drift apart, and a member who later installs the app should not
+ * experience the nudges as suddenly getting terser.
+ *
+ * The footer explains why they are getting email instead of a notification.
+ * Without it this reads as unsolicited mail from an app they thought was silent,
+ * and the fastest way to lose someone is to look like spam while trying to
+ * re-engage them.
+ */
+export function notificationEmail(d: {
+  memberName: string
+  subject: string
+  /** The same text the push body would have carried. */
+  body: string
+  ctaLabel: string
+  ctaPath: string
+}) {
+  const url = `${APP_URL()}${d.ctaPath}`
+  const lines = [
+    `Hi ${d.memberName},`,
+    '',
+    d.body,
+    '',
+    `${d.ctaLabel}: ${url}`,
+    '',
+    '—',
+    "You're getting this by email because notifications aren't switched on for",
+    `your account. To get these on your phone instead, open ${APP_URL()} and`,
+    'turn on notifications.',
+    '',
+    `Change what you receive: ${APP_URL()}/preferences`,
+    '',
+    '— Breakthrough Table',
+  ]
+  return { subject: d.subject, text: lines.join('\n') }
+}
