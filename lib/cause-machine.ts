@@ -46,6 +46,19 @@ let cachedToken: { value: string; expiresAt: number } | null = null
 /** Refresh 60s early so a token cannot expire mid-request. */
 const EXPIRY_MARGIN_MS = 60_000
 
+/**
+ * Cause Machine answers every credential problem with a 400 — wrong secret,
+ * unknown id, empty value, stray whitespace, all of them. Measured against the
+ * live endpoint 2026-08-10. So a 5xx is never "your key is wrong"; it is their
+ * server having a moment, and it is worth waiting out.
+ *
+ * That distinction is the whole point of retrying only on 5xx: retrying a 400
+ * would hammer their auth endpoint with credentials it has already rejected, and
+ * would turn a clear "fix your key" into a slow, confusing failure.
+ */
+const AUTH_RETRIES = 2
+const AUTH_RETRY_DELAY_MS = 400
+
 async function getToken(): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value
 
@@ -55,16 +68,36 @@ async function getToken(): Promise<string> {
     client_secret: process.env.CAUSE_MACHINE_KEY!,
   })
 
-  const res = await fetch(`${BASE}/Token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  })
+  let res: Response | null = null
 
-  if (!res.ok) {
+  for (let attempt = 0; attempt <= AUTH_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, AUTH_RETRY_DELAY_MS * attempt))
+    }
+
+    res = await fetch(`${BASE}/Token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+
+    if (res.ok) break
+    // A rejected credential will be rejected again. Fail immediately so the
+    // dashboard says something true and actionable.
+    if (res.status < 500) break
+    console.warn(`Cause Machine auth returned ${res.status}, attempt ${attempt + 1} of ${AUTH_RETRIES + 1}`)
+  }
+
+  if (!res || !res.ok) {
     // Never include the response body: on a credentials failure it can echo
-    // back what was sent.
-    throw new Error(`Cause Machine auth failed (HTTP ${res.status})`)
+    // back what was sent. The status alone separates the two real cases, and
+    // the message has to make sense to whoever is looking at the dashboard.
+    const status = res?.status ?? 0
+    throw new Error(
+      status >= 500
+        ? `Cause Machine is not responding (HTTP ${status} after ${AUTH_RETRIES + 1} attempts). This is their end, not your credentials — try again shortly.`
+        : `Cause Machine rejected the credentials (HTTP ${status}). Check CAUSE_MACHINE_APP_ID and CAUSE_MACHINE_KEY.`
+    )
   }
 
   const json = await res.json()
