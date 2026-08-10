@@ -324,6 +324,7 @@ export async function POST(req: NextRequest) {
             body: message,
             ctaLabel: 'Open your tasks',
             ctaPath: '/tasks',
+            greeting: false,
           })
           const res = dryRun ? null : await sendEmail({ to, ...msg })
           return {

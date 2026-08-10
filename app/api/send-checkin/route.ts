@@ -145,6 +145,8 @@ export async function POST(req: NextRequest) {
         body,
         ctaLabel: 'Check in',
         ctaPath: '/tasks',
+        // The body already opens "Hey <name> —".
+        greeting: false,
       })
       const res = dryRun
         ? { sent: false as const, reason: 'not_configured' as const }

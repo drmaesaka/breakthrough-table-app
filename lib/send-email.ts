@@ -160,11 +160,22 @@ export function notificationEmail(d: {
   body: string
   ctaLabel: string
   ctaPath: string
+  /**
+   * Whether to open with "Hi <name>,".
+   *
+   * Off for nudges and check-ins, whose bodies are written for a push
+   * notification and already start "Hey Sarah — ...". Leaving it on produced
+   * "Hi Sarah," directly above "Hey Sarah —", which reads like a broken mail
+   * merge on what is often the first email a drifting member gets from us.
+   *
+   * On by default, because a body that does not greet is the more surprising
+   * case and should not silently arrive headless.
+   */
+  greeting?: boolean
 }) {
   const url = `${APP_URL()}${d.ctaPath}`
   const lines = [
-    `Hi ${d.memberName},`,
-    '',
+    ...(d.greeting === false ? [] : [`Hi ${d.memberName},`, '']),
     d.body,
     '',
     `${d.ctaLabel}: ${url}`,
