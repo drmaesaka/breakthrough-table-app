@@ -43,6 +43,22 @@ export function causeMachineConfigured(): boolean {
 // with the lambda, which is correct — it is a cache, not a store.
 let cachedToken: { value: string; expiresAt: number } | null = null
 
+/**
+ * The in-flight authentication, shared by every caller that arrives before it
+ * resolves.
+ *
+ * The value cache above only helps once a token exists. On a cold lambda the
+ * summary view fires three reads at once, all three miss the empty cache, and
+ * all three authenticate — three round-trips for one token. Production logged
+ * exactly that on 2026-08-10: "auth returned 500" three times in parallel, one
+ * per redundant call.
+ *
+ * Holding the promise rather than the result collapses them into one request.
+ * Fewer calls, less latency, and a third of the exposure to whatever is making
+ * their token endpoint intermittently 500 from Vercel's network.
+ */
+let inFlightAuth: Promise<string> | null = null
+
 /** Refresh 60s early so a token cannot expire mid-request. */
 const EXPIRY_MARGIN_MS = 60_000
 
@@ -59,9 +75,17 @@ const EXPIRY_MARGIN_MS = 60_000
 const AUTH_RETRIES = 2
 const AUTH_RETRY_DELAY_MS = 400
 
-async function getToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value
+function getToken(): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return Promise.resolve(cachedToken.value)
+  if (inFlightAuth) return inFlightAuth
 
+  // Cleared in both directions: a failed auth must not be handed to the next
+  // caller forever, and a successful one is superseded by the value cache.
+  inFlightAuth = authenticate().finally(() => { inFlightAuth = null })
+  return inFlightAuth
+}
+
+async function authenticate(): Promise<string> {
   const body = new URLSearchParams({
     grant_type: 'client_credentials',
     client_id: process.env.CAUSE_MACHINE_APP_ID!,
