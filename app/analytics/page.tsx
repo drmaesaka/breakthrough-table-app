@@ -35,22 +35,44 @@ export default function AnalyticsPage() {
       // unfiltered task_completions scan would be silently truncated by
       // PostgREST's 1000-row cap once the table grows, corrupting these numbers.
       const [{ data: allMembers }, { data: allTasks }] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id, current_habit').in('group_id', groupIds),
+        supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id').in('group_id', groupIds),
         supabase.from('tasks').select('id, group_id').eq('archived', false).in('group_id', groupIds),
       ])
 
       const memberIds = (allMembers || []).map((m: any) => m.id)
       const taskIds = (allTasks || []).map((t: any) => t.id)
-      const [{ data: habitToday }, { data: allTaskCompletions }] = await Promise.all([
+      const [{ data: habitToday }, { data: allTaskCompletions }, { data: liveHabits }] = await Promise.all([
         memberIds.length
-          ? supabase.from('habit_completions').select('user_id').eq('completed_date', today).in('user_id', memberIds)
+          ? supabase.from('habit_completions').select('user_id, habit_id').eq('completed_date', today).in('user_id', memberIds)
           : Promise.resolve({ data: [] as any[] }),
         taskIds.length && memberIds.length
           ? supabase.from('task_completions').select('user_id, task_id').in('task_id', taskIds).in('user_id', memberIds)
           : Promise.resolve({ data: [] as any[] }),
+        memberIds.length
+          ? supabase.from('habits').select('id, user_id, name').is('archived_at', null).in('user_id', memberIds)
+          : Promise.resolve({ data: [] as any[] }),
       ])
 
-      const habitDoneSet = new Set((habitToday || []).map((h: any) => h.user_id))
+      // A member's habits, and which of them are logged today. "Habit done" now
+      // means ALL of them — with several running, counting a member as done
+      // after one would quietly overstate the whole table.
+      const habitsByUser = new Map<string, any[]>()
+      for (const h of liveHabits || []) {
+        habitsByUser.set(h.user_id, [...(habitsByUser.get(h.user_id) || []), h])
+      }
+      const doneTodayByUser = new Map<string, Set<string>>()
+      for (const c of habitToday || []) {
+        if (!c.habit_id) continue
+        const set = doneTodayByUser.get(c.user_id) ?? new Set<string>()
+        set.add(c.habit_id)
+        doneTodayByUser.set(c.user_id, set)
+      }
+      const allHabitsDone = (userId: string) => {
+        const mine = habitsByUser.get(userId) || []
+        if (mine.length === 0) return false
+        const done = doneTodayByUser.get(userId) ?? new Set<string>()
+        return mine.every((h: any) => done.has(h.id))
+      }
 
       const enriched = groupsData.map(g => {
         const members = (allMembers || [])
@@ -60,12 +82,13 @@ export default function AnalyticsPage() {
         const groupTasks = (allTasks || []).filter((t: any) => t.group_id === g.id)
 
         const membersWithStats = members.map((m: any) => {
-          const habitDone = habitDoneSet.has(m.id)
+          const habitDone = allHabitsDone(m.id)
+          const habitNames = (habitsByUser.get(m.id) || []).map((h: any) => h.name)
           const userCompletedTaskIds = new Set(
             (allTaskCompletions || []).filter((c: any) => c.user_id === m.id).map((c: any) => c.task_id)
           )
           const readingDone = groupTasks.length === 0 || groupTasks.every((t: any) => userCompletedTaskIds.has(t.id))
-          return { ...m, habitDone, readingDone }
+          return { ...m, habitDone, habitNames, readingDone }
         })
 
         const avg = members.length > 0
@@ -73,7 +96,7 @@ export default function AnalyticsPage() {
           : 0
         const at100 = members.filter((p: any) => (p.adherence_percent || 0) === 100).length
         const topStreak = Math.max(...members.map((p: any) => p.streak || 0), 0)
-        const habitDoneCount = members.filter((m: any) => habitDoneSet.has(m.id)).length
+        const habitDoneCount = members.filter((m: any) => allHabitsDone(m.id)).length
 
         return { ...g, members: membersWithStats, avg, at100, topStreak, habitDoneCount }
       }).filter(g => g.members.length > 0) // hide empty groups
@@ -206,10 +229,12 @@ export default function AnalyticsPage() {
                               <span className={`text-xs font-medium ${member.readingDone ? 'text-green-500' : 'text-gray-300'}`}>
                                 {member.readingDone ? '✓ reading' : '○ reading'}
                               </span>
-                              {member.current_habit && (
+                              {member.habitNames?.length > 0 && (
                                 <>
                                   <span className="text-gray-200">·</span>
-                                  <span className="text-xs text-gray-400 truncate italic">{member.current_habit}</span>
+                                  <span className="text-xs text-gray-400 truncate italic">
+                                    {member.habitNames.join(', ')}
+                                  </span>
                                 </>
                               )}
                             </div>

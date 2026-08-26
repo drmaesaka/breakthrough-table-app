@@ -4,19 +4,22 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { localDay } from '@/lib/dates'
+import { calcAdherence, datesByHabit, streakFor, type Habit } from '@/lib/habits'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([])
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
-  const [habitDoneToday, setHabitDoneToday] = useState(false)
-  const [currentHabit, setCurrentHabit] = useState('')
+  const [habits, setHabits] = useState<Habit[]>([])
+  /** Habit ids logged today. */
+  const [doneToday, setDoneToday] = useState<Set<string>>(new Set())
+  /** Habit id → consecutive days. Separate per habit, so one lapsing leaves the rest alone. */
+  const [streaks, setStreaks] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [periodLabel, setPeriodLabel] = useState('Current')
   const [streak, setStreak] = useState(0)
-  const [habitStreak, setHabitStreak] = useState(0)
-  const [habitStreakAtRisk, setHabitStreakAtRisk] = useState(false)
-  const [habitJustDone, setHabitJustDone] = useState(false)
+  /** Which habit just got ticked, for the streak flourish. */
+  const [justDone, setJustDone] = useState<string | null>(null)
   const router = useRouter()
 
   const today = localDay()
@@ -31,50 +34,41 @@ export default function TasksPage() {
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('group_id, streak, current_habit')
+      .select('group_id, streak')
       .eq('id', user.id)
       .single()
 
     if (!prof?.group_id) { setLoading(false); return }
     setStreak(prof.streak || 0)
-    setCurrentHabit(prof.current_habit || '')
 
-    const [{ data: taskData }, { data: completions }, { data: habitToday }, { data: habitHistory }] = await Promise.all([
+    // 60 days of completions covers any streak worth displaying and is one
+    // query instead of one per habit.
+    const [{ data: taskData }, { data: completions }, { data: habitRows }, { data: habitLog }] = await Promise.all([
       supabase.from('tasks').select('*').eq('group_id', prof.group_id).eq('archived', false).order('created_at', { ascending: false }),
       supabase.from('task_completions').select('task_id, tasks!inner(archived)').eq('user_id', user.id).eq('tasks.archived', false),
-      supabase.from('habit_completions').select('id').eq('user_id', user.id).eq('completed_date', today).maybeSingle(),
-      supabase.from('habit_completions').select('completed_date').eq('user_id', user.id).order('completed_date', { ascending: false }).limit(60),
+      supabase.from('habits').select('*').eq('user_id', user.id).is('archived_at', null).order('created_at', { ascending: true }),
+      supabase.from('habit_completions').select('habit_id, completed_date').eq('user_id', user.id).order('completed_date', { ascending: false }).limit(400),
     ])
 
     setTasks(taskData || [])
     if (taskData && taskData.length > 0) setPeriodLabel(taskData[0].period_label || 'Current')
     setCompletedIds(new Set(completions?.map((c: any) => c.task_id)))
-    setHabitDoneToday(!!habitToday)
 
-    // Calculate habit streak. When today's check-in is still outstanding, count
-    // back from yesterday instead — a run in progress should read as intact and
-    // at risk, not collapse to 0 every morning before the member has tapped in.
-    if (habitHistory && habitHistory.length > 0) {
-      const dates = new Set(habitHistory.map((h: any) => h.completed_date))
-      const doneToday = !!habitToday
-      const d = new Date()
-      if (!doneToday) d.setDate(d.getDate() - 1)
-      let streak = 0
-      while (dates.has(localDay(d))) {
-        streak++
-        d.setDate(d.getDate() - 1)
-      }
-      setHabitStreak(streak)
-      setHabitStreakAtRisk(!doneToday && streak > 0)
+    const live = (habitRows || []) as Habit[]
+    setHabits(live)
+
+    const log = (habitLog || []) as { habit_id: string | null; completed_date: string }[]
+    setDoneToday(new Set(log.filter(c => c.completed_date === today && c.habit_id).map(c => c.habit_id as string)))
+
+    const byHabit = datesByHabit(log)
+    const next = new Map<string, number>()
+    for (const h of live) {
+      const dates = byHabit.get(h.id) ?? new Set<string>()
+      next.set(h.id, streakFor(dates, dates.has(today)))
     }
+    setStreaks(next)
 
     setLoading(false)
-  }
-
-  function calcAdherence(completed: Set<string>, habitDone: boolean, totalTasks: number) {
-    const total = totalTasks + 1 // +1 for habit
-    const done = completed.size + (habitDone ? 1 : 0)
-    return total > 0 ? Math.round((done / total) * 100) : 0
   }
 
   async function toggleTask(taskId: string) {
@@ -91,7 +85,7 @@ export default function TasksPage() {
     }
 
     setCompletedIds(newSet)
-    const adherence = calcAdherence(newSet, habitDoneToday, tasks.length)
+    const adherence = calcAdherence(newSet.size, doneToday.size, tasks.length, habits.length)
 
     // Streak is credited once per period when the leader rolls the period over,
     // not here — incrementing on each toggle meant unchecking and rechecking an
@@ -99,30 +93,35 @@ export default function TasksPage() {
     await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
   }
 
-  async function toggleHabit() {
+  async function toggleHabit(habitId: string) {
     const supabase = createClient()
-    const newHabitDone = !habitDoneToday
+    const wasDone = doneToday.has(habitId)
+    const nextDone = new Set(doneToday)
 
-    if (habitDoneToday) {
-      await supabase.from('habit_completions').delete().eq('user_id', userId).eq('completed_date', today)
-      const reverted = Math.max(0, habitStreak - 1)
-      setHabitStreak(reverted)
-      setHabitStreakAtRisk(reverted > 0)
+    // Delete is scoped to the habit as well as the day. Without habit_id it
+    // would clear every habit the member logged today.
+    if (wasDone) {
+      await supabase.from('habit_completions')
+        .delete().eq('user_id', userId).eq('habit_id', habitId).eq('completed_date', today)
+      nextDone.delete(habitId)
+      setStreaks(prev => new Map(prev).set(habitId, Math.max(0, (prev.get(habitId) || 0) - 1)))
     } else {
-      await supabase.from('habit_completions').insert({ user_id: userId, completed_date: today })
-      setHabitStreak(habitStreak + 1)
-      setHabitStreakAtRisk(false)
-      setHabitJustDone(true)
-      setTimeout(() => setHabitJustDone(false), 3000)
+      await supabase.from('habit_completions')
+        .insert({ user_id: userId, habit_id: habitId, completed_date: today })
+      nextDone.add(habitId)
+      setStreaks(prev => new Map(prev).set(habitId, (prev.get(habitId) || 0) + 1))
+      setJustDone(habitId)
+      setTimeout(() => setJustDone(null), 3000)
     }
 
-    setHabitDoneToday(newHabitDone)
-    const adherence = calcAdherence(completedIds, newHabitDone, tasks.length)
+    setDoneToday(nextDone)
+    const adherence = calcAdherence(completedIds.size, nextDone.size, tasks.length, habits.length)
     await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
   }
 
-  const adherence = calcAdherence(completedIds, habitDoneToday, tasks.length)
-  const allDone = tasks.length > 0 && completedIds.size === tasks.length && habitDoneToday
+  const adherence = calcAdherence(completedIds.size, doneToday.size, tasks.length, habits.length)
+  const allDone = tasks.length > 0 && completedIds.size === tasks.length
+    && habits.length > 0 && doneToday.size === habits.length
 
   return (
     <div className="min-h-screen bg-bt-pale">
@@ -162,47 +161,69 @@ export default function TasksPage() {
 
         {!loading && (
           <>
-            {/* Daily Habit Section */}
+            {/* Daily Habits — each tracked separately, each with its own
+                streak. Mo's rule 2026-08-24: one lapsing must not reset the
+                others, so nothing here aggregates across habits. */}
             <div>
               <div className="flex items-center justify-between mb-2 px-1">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Daily Habit</p>
-                {habitStreak > 0 && (
-                  <p className={`text-xs font-semibold ${habitStreakAtRisk ? 'text-gray-400' : 'text-orange-500'}`}>
-                    🔥 {habitStreak} day{habitStreak !== 1 ? 's' : ''}
-                    {habitStreakAtRisk && ' — check in to keep it'}
-                  </p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">
+                  Daily Habit{habits.length === 1 ? '' : 's'}
+                </p>
+                {habits.length > 0 && (
+                  <a href="/profile" className="text-bt-blue text-xs font-semibold">Manage</a>
                 )}
               </div>
-              {habitJustDone && (
+
+              {justDone && (streaks.get(justDone) || 0) > 0 && (
                 <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 text-center mb-3">
                   <p className="text-3xl mb-1">🔥</p>
-                  <p className="font-bold text-orange-700">{habitStreak > 1 ? `${habitStreak} days in a row!` : 'Habit done!'}</p>
+                  <p className="font-bold text-orange-700">
+                    {(streaks.get(justDone) || 0) > 1
+                      ? `${streaks.get(justDone)} days in a row!`
+                      : 'Habit done!'}
+                  </p>
                   <p className="text-orange-500 text-xs mt-0.5">Keep the streak alive tomorrow</p>
                 </div>
               )}
-              {currentHabit ? (
-                <button onClick={toggleHabit}
-                  className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity ${habitDoneToday ? 'opacity-60' : ''}`}>
-                  <div className={`mt-0.5 w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                    habitDoneToday ? 'bg-bt-navy border-bt-navy' : 'border-gray-300'
-                  }`}>
-                    {habitDoneToday && (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5">
-                        <path d="M20 6L9 17l-5-5"/>
-                      </svg>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className={`font-semibold text-gray-900 ${habitDoneToday ? 'line-through text-gray-400' : ''}`}>
-                      {currentHabit}
-                    </p>
-                    <p className="text-gray-400 text-xs mt-0.5">Daily check-in</p>
-                  </div>
-                </button>
-              ) : (
+
+              {habits.length === 0 ? (
                 <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
                   <p className="text-gray-400 text-sm">No habit set yet</p>
                   <a href="/profile" className="text-bt-blue text-sm font-semibold mt-1 block">Set your habit →</a>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {habits.map(h => {
+                    const done = doneToday.has(h.id)
+                    const days = streaks.get(h.id) || 0
+                    const atRisk = !done && days > 0
+                    return (
+                      <button key={h.id} onClick={() => toggleHabit(h.id)}
+                        className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity ${done ? 'opacity-60' : ''}`}>
+                        <div className={`mt-0.5 w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          done ? 'bg-bt-navy border-bt-navy' : 'border-gray-300'
+                        }`}>
+                          {done && (
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5">
+                              <path d="M20 6L9 17l-5-5"/>
+                            </svg>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-semibold text-gray-900 ${done ? 'line-through text-gray-400' : ''}`}>
+                            {h.name}
+                          </p>
+                          {days > 0 ? (
+                            <p className={`text-xs mt-0.5 font-semibold ${atRisk ? 'text-gray-400' : 'text-orange-500'}`}>
+                              🔥 {days} day{days !== 1 ? 's' : ''}{atRisk ? ' — check in to keep it' : ''}
+                            </p>
+                          ) : (
+                            <p className="text-gray-400 text-xs mt-0.5">Daily check-in</p>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>

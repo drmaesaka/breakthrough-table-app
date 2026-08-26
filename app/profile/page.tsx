@@ -14,13 +14,14 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
 
   // Habit state
-  const [currentHabit, setCurrentHabit] = useState('')
+  const [habits, setHabits] = useState<any[]>([])
   const [habitInput, setHabitInput] = useState('')
   const [habitSaving, setHabitSaving] = useState(false)
   const [habitSaved, setHabitSaved] = useState(false)
   const [habitError, setHabitError] = useState(false)
   const [graduatedHabits, setGraduatedHabits] = useState<any[]>([])
-  const [graduating, setGraduating] = useState(false)
+  /** Habit id currently being graduated, so only its own button shows a spinner. */
+  const [graduating, setGraduating] = useState<string | null>(null)
   const [graduateError, setGraduateError] = useState(false)
   const [showGradHistory, setShowGradHistory] = useState(false)
   const [userId, setUserId] = useState('')
@@ -44,22 +45,22 @@ export default function ProfilePage() {
       setEmail(user.email || '')
       setUserId(user.id)
 
-      const [{ data: prof }, { data: history }] = await Promise.all([
+      const [{ data: prof }, { data: history }, { data: habitRows }] = await Promise.all([
         supabase.from('profiles').select('*, groups(name)').eq('id', user.id).single(),
         supabase.from('habit_history').select('*').eq('user_id', user.id).order('graduated_at', { ascending: false }),
+        supabase.from('habits').select('*').eq('user_id', user.id).is('archived_at', null).order('created_at', { ascending: true }),
       ])
 
       if (prof) {
         setProfile(prof)
         setName(prof.full_name || '')
-        setCurrentHabit(prof.current_habit || '')
-        setHabitInput(prof.current_habit || '')
         setDirectoryOptIn(prof.directory_opt_in || false)
         setBio(prof.bio || '')
         setLinkedinUrl(prof.linkedin_url || '')
         setContactEmail(prof.contact_email || '')
       }
       setGraduatedHabits(history || [])
+      setHabits(habitRows || [])
       setLoading(false)
     }
     load()
@@ -83,53 +84,65 @@ export default function ProfilePage() {
     setTimeout(() => setSaved(false), 2500)
   }
 
+  /** Adds a habit alongside any already running. */
   async function saveHabit() {
-    if (!habitInput.trim()) return
+    const name = habitInput.trim()
+    if (!name) return
+    if (habits.some(h => h.name.toLowerCase() === name.toLowerCase())) {
+      setHabitError(true)
+      setTimeout(() => setHabitError(false), 4000)
+      return
+    }
     setHabitSaving(true)
     const supabase = createClient()
-    const { error } = await supabase.from('profiles').update({ current_habit: habitInput.trim() }).eq('id', userId)
+    const { data, error } = await supabase
+      .from('habits')
+      .insert({ user_id: userId, name })
+      .select()
+      .single()
     setHabitSaving(false)
-    // Only reflect the new habit locally once it is actually stored — the save
-    // button is disabled while habitInput matches currentHabit, so updating it
-    // optimistically would leave no way to retry.
+    // Only reflect it locally once it is actually stored, so a failed save
+    // leaves the typed name in the box to retry with.
     if (error) {
       console.error('habit save failed:', error.message)
       setHabitError(true)
       setTimeout(() => setHabitError(false), 4000)
       return
     }
-    setCurrentHabit(habitInput.trim())
+    setHabits(prev => [...prev, data])
+    setHabitInput('')
     setHabitSaved(true)
     setTimeout(() => setHabitSaved(false), 2500)
   }
 
-  async function graduateHabit() {
-    if (!currentHabit) return
-    setGraduating(true)
+  async function graduateHabit(habit: { id: string; name: string }) {
+    setGraduating(habit.id)
     const supabase = createClient()
 
-    // Archive to history FIRST and stop if it fails. Clearing current_habit
-    // after a failed insert would destroy the habit with no record of it.
+    // Archive to history FIRST and stop if it fails. Retiring the habit after a
+    // failed insert would destroy it with no record that it ever existed.
     const { error: historyError } = await supabase.from('habit_history').insert({
       user_id: userId,
-      habit_name: currentHabit,
+      habit_name: habit.name,
       graduated_at: new Date().toISOString(),
     })
 
     if (historyError) {
       console.error('habit_history insert failed:', historyError.message)
-      setGraduating(false)
+      setGraduating(null)
       setGraduateError(true)
       setTimeout(() => setGraduateError(false), 5000)
       return
     }
 
+    // Archived, not deleted: habit_completions references this row, and the
+    // member's proof that they did it should outlive the habit.
     const { error: clearError } = await supabase
-      .from('profiles').update({ current_habit: null }).eq('id', userId)
+      .from('habits').update({ archived_at: new Date().toISOString() }).eq('id', habit.id)
 
     if (clearError) {
-      console.error('clearing current_habit failed:', clearError.message)
-      setGraduating(false)
+      console.error('archiving habit failed:', clearError.message)
+      setGraduating(null)
       setGraduateError(true)
       setTimeout(() => setGraduateError(false), 5000)
       return
@@ -140,9 +153,8 @@ export default function ProfilePage() {
       .from('habit_history').select('*').eq('user_id', userId).order('graduated_at', { ascending: false })
 
     setGraduatedHabits(history || [])
-    setCurrentHabit('')
-    setHabitInput('')
-    setGraduating(false)
+    setHabits(prev => prev.filter(h => h.id !== habit.id))
+    setGraduating(null)
   }
 
   async function saveDirectory() {
@@ -213,31 +225,47 @@ export default function ProfilePage() {
 
       <div className="px-5 py-5 pb-28 space-y-4">
 
-        {/* Current Habit */}
+        {/* Current habits. Several can run at once, each with its own streak
+            on the tasks screen — Mo's rule 2026-08-24. */}
         <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-bold text-bt-navy">Current Habit</h3>
-              <p className="text-gray-400 text-xs mt-0.5">What you're actively building</p>
+              <h3 className="font-bold text-bt-navy">
+                Current Habit{habits.length === 1 ? '' : 's'}
+              </h3>
+              <p className="text-gray-400 text-xs mt-0.5">What you&apos;re actively building</p>
             </div>
             <span className="text-2xl">🎯</span>
           </div>
+
+          {habits.length > 0 && (
+            <div className="space-y-2">
+              {habits.map(h => (
+                <div key={h.id} className="bg-bt-pale rounded-xl px-3 py-2.5 space-y-2">
+                  <p className="font-semibold text-gray-900 text-sm break-words">{h.name}</p>
+                  <button onClick={() => graduateHabit(h)} disabled={graduating === h.id}
+                    className="w-full bg-green-50 text-green-700 border-2 border-green-200 py-2 rounded-lg font-semibold text-xs disabled:opacity-50">
+                    {graduating === h.id ? 'Graduating...' : '🏅 I\'ve fully installed this one'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <input
             value={habitInput}
             onChange={e => setHabitInput(e.target.value)}
-            placeholder="e.g. Morning cold plunge, Daily journaling..."
+            placeholder={habits.length ? 'Add another habit...' : 'e.g. Morning cold plunge, Daily journaling...'}
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />
-          <button onClick={saveHabit} disabled={habitSaving || !habitInput.trim() || habitInput.trim() === currentHabit}
+          <button onClick={saveHabit} disabled={habitSaving || !habitInput.trim()}
             className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${habitError ? 'bg-red-600' : 'bg-bt-navy'}`}>
-            {habitSaving ? 'Saving...' : habitError ? "Couldn't save — tap to retry" : habitSaved ? '✓ Saved!' : currentHabit ? 'Update Habit' : 'Set Habit'}
+            {habitSaving ? 'Saving...'
+              : habitError ? "Couldn't save — check it isn't already listed"
+              : habitSaved ? '✓ Added!'
+              : habits.length ? 'Add Habit' : 'Set Habit'}
           </button>
-          {currentHabit && (
-            <button onClick={graduateHabit} disabled={graduating}
-              className="w-full bg-green-50 text-green-700 border-2 border-green-200 py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
-              {graduating ? 'Graduating...' : '🏅 I\'ve fully installed this habit'}
-            </button>
-          )}
+
           {graduateError && (
             <p className="text-red-600 text-xs leading-relaxed">
               Couldn&apos;t graduate that habit — it&apos;s still here, nothing was lost. Try again.

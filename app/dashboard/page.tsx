@@ -31,17 +31,25 @@ export default function DashboardPage() {
         // daily habit as one more item. Counting archived tasks and omitting
         // the habit made this number drift further from the tasks page every
         // period — by period five it showed roughly a fifth of the real figure.
-        const [{ data: tasks }, { data: completions }, { data: habitToday }] = await Promise.all([
+        const [{ data: tasks }, { data: completions }, { data: habitToday }, { data: liveHabits }] = await Promise.all([
           supabase.from('tasks').select('id').eq('group_id', prof.group_id).eq('archived', false),
           supabase.from('task_completions').select('task_id').eq('user_id', user.id),
-          supabase.from('habit_completions').select('id')
-            .eq('user_id', user.id).eq('completed_date', localDay()).maybeSingle(),
+          // Not maybeSingle: a member with two habits logs two rows a day, and
+          // maybeSingle errors on more than one — which read as "habit not
+          // done" and quietly understated the figure.
+          supabase.from('habit_completions').select('habit_id')
+            .eq('user_id', user.id).eq('completed_date', localDay()),
+          supabase.from('habits').select('id').eq('user_id', user.id).is('archived_at', null),
         ])
         if (tasks) {
           const completedIds = new Set(completions?.map((c: any) => c.task_id))
+          const habitCount = (liveHabits || []).length
+          const habitsDone = new Set(
+            (habitToday || []).map((r: any) => r.habit_id).filter(Boolean)
+          ).size
           setTaskStats({
-            total: tasks.length + 1,
-            completed: tasks.filter((t: any) => completedIds.has(t.id)).length + (habitToday ? 1 : 0),
+            total: tasks.length + habitCount,
+            completed: tasks.filter((t: any) => completedIds.has(t.id)).length + habitsDone,
           })
         }
       }

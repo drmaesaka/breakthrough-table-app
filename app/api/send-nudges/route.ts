@@ -5,6 +5,7 @@ import { sendEmail, notificationEmail } from '@/lib/send-email'
 import { fetchMemberEmails } from '@/lib/member-emails'
 import { dayInTimezone } from '@/lib/dates'
 import { fetchAllRows } from '@/lib/fetch-all'
+import { calcAdherence } from '@/lib/habits'
 
 // This route fans out a push per member and rewrites every adherence figure.
 // Vercel's default cap is 10s, which a table of any size will exceed.
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
   // default, leaders opt in by saving their Nudge Settings.
   const { data: participants, error: participantsError } = await supabase
     .from('profiles')
-    .select('id, full_name, role, group_id, adherence_percent, streak, current_habit, nudge_preferences(enabled, tone, nudge_times, timezone)')
+    .select('id, full_name, role, group_id, adherence_percent, streak, nudge_preferences(enabled, tone, nudge_times, timezone)')
     .in('role', ['participant', 'leader'])
     .not('group_id', 'is', null)
 
@@ -126,23 +127,42 @@ export async function POST(req: NextRequest) {
   const dayWindow = [-1, 0, 1].map(offset =>
     new Date(now.getTime() + offset * 86400000).toISOString().split('T')[0]
   )
-  const { data: habitRows } = await fetchAllRows<{ user_id: string; completed_date: string }>(
+  const { data: habitRows } = await fetchAllRows<{ user_id: string; habit_id: string | null; completed_date: string }>(
     (from, to) => supabase
       .from('habit_completions')
-      .select('user_id, completed_date')
+      .select('user_id, habit_id, completed_date')
       .in('completed_date', dayWindow)
       .in('user_id', participantIds)
       .range(from, to)
   )
 
-  const habitDaysByUser = new Map<string, Set<string>>()
-  for (const row of habitRows || []) {
-    const set = habitDaysByUser.get(row.user_id) ?? new Set<string>()
-    set.add(row.completed_date)
-    habitDaysByUser.set(row.user_id, set)
+  // A member may run several habits at once, each tracked separately.
+  const { data: liveHabits } = await fetchAllRows<{ id: string; user_id: string; name: string }>(
+    (from, to) => supabase
+      .from('habits')
+      .select('id, user_id, name')
+      .is('archived_at', null)
+      .in('user_id', participantIds)
+      .range(from, to)
+  )
+
+  const habitsByUser = new Map<string, { id: string; name: string }[]>()
+  for (const h of liveHabits || []) {
+    habitsByUser.set(h.user_id, [...(habitsByUser.get(h.user_id) || []), { id: h.id, name: h.name }])
   }
-  const habitDoneFor = (userId: string, timezone: string) =>
-    habitDaysByUser.get(userId)?.has(dayInTimezone(timezone, now)) ?? false
+
+  // Keyed by habit, not by member: with several habits a bare user+date would
+  // report every habit done as soon as one of them was.
+  const doneKeys = new Set<string>()
+  for (const row of habitRows || []) {
+    if (row.habit_id) doneKeys.add(`${row.habit_id}:${row.completed_date}`)
+  }
+
+  /** The member's habits still outstanding on their own calendar day. */
+  const outstandingHabits = (userId: string, timezone: string) => {
+    const day = dayInTimezone(timezone, now)
+    return (habitsByUser.get(userId) || []).filter(h => !doneKeys.has(`${h.id}:${day}`))
+  }
 
   // Get reading completions for current period (tasks not archived)
   // We check if user has completed ALL current tasks for their group
@@ -187,11 +207,17 @@ export async function POST(req: NextRequest) {
     }
 
     const prefs = Array.isArray(p.nudge_preferences) ? p.nudge_preferences[0] : p.nudge_preferences
-    const habitDone = habitDoneFor(p.id, prefs?.timezone || 'America/Chicago')
-    // Same formula the tasks page uses: every task plus the daily habit.
-    const total = groupTasks.length + 1
-    const done = groupTasks.filter((t: any) => userCompletedIds.has(t.id)).length + (habitDone ? 1 : 0)
-    freshAdherence.set(p.id, Math.round((done / total) * 100))
+    const tz = prefs?.timezone || 'America/Chicago'
+    const allHabits = habitsByUser.get(p.id) || []
+    const habitsLeft = outstandingHabits(p.id, tz).length
+    // Shared with the tasks screen so the two cannot disagree: every task plus
+    // every habit, each worth one.
+    freshAdherence.set(p.id, calcAdherence(
+      groupTasks.filter((t: any) => userCompletedIds.has(t.id)).length,
+      allHabits.length - habitsLeft,
+      groupTasks.length,
+      allHabits.length
+    ))
   }
 
   // adherence_percent was only ever written when a member tapped something on
@@ -241,9 +267,9 @@ export async function POST(req: NextRequest) {
 
         if (p.role === 'leader' && !prefs) return skip('leader has not saved nudge settings yet')
         if (prefs && prefs.enabled === false) return skip('nudges turned off in their settings')
-        // Only nudge if habit not done OR reading not done
-        if (habitDoneFor(p.id, userTZ) && readingDoneSet.has(p.id)) {
-          return skip('habit and reading both already done')
+        // Only nudge if a habit is outstanding OR reading is not done.
+        if (outstandingHabits(p.id, userTZ).length === 0 && readingDoneSet.has(p.id)) {
+          return skip('habits and reading both already done')
         }
         // Convert user's local nudge times to UTC and check against current window
         const slotsUTC = nudgeTimes.map(t => localTimeToUTC(t, userTZ))
@@ -254,15 +280,25 @@ export async function POST(req: NextRequest) {
       })
       .map(async (participant) => {
         const firstName = participant.full_name?.split(' ')[0] || 'there'
-        const habit = participant.current_habit || 'your habit'
         const prefs = Array.isArray(participant.nudge_preferences) ? participant.nudge_preferences[0] : participant.nudge_preferences
         const tone = prefs?.tone || 'encouraging'
 
-        const habitDone = habitDoneFor(participant.id, prefs?.timezone || 'America/Chicago')
+        const pending = outstandingHabits(participant.id, prefs?.timezone || 'America/Chicago')
+        // Fully formed including its own quotes, so the templates below do not
+        // have to quote it — with several habits the label carries a closing
+        // quote mid-phrase and an outer pair would strand one at the end.
+        //
+        // Naming one habit keeps the nudge concrete; listing four turns a lock
+        // screen notification into something nobody reads.
+        const habit = pending.length === 0
+          ? 'your habit'
+          : pending.length === 1
+            ? `"${pending[0].name}"`
+            : `"${pending[0].name}" and ${pending.length - 1} more`
         const readingDone = readingDoneSet.has(participant.id)
 
         // Pick what to nudge about
-        const needsHabit = !habitDone
+        const needsHabit = pending.length > 0
         const needsReading = !readingDone
 
         let message: string
@@ -270,24 +306,24 @@ export async function POST(req: NextRequest) {
         if (needsHabit && needsReading) {
           // Both outstanding
           if (tone === 'direct') {
-            message = `${firstName}: reading and "${habit}" still pending. Get both done.`
+            message = `${firstName}: reading and ${habit} still pending. Get both done.`
           } else if (tone === 'gentle') {
-            message = `Hey ${firstName} — when you get a moment, your reading and "${habit}" are both still waiting 🌱`
+            message = `Hey ${firstName} — when you get a moment, your reading and ${habit} are both still waiting 🌱`
           } else if (tone === 'competitive') {
-            message = `${firstName} — your table is checking things off. Reading + "${habit}" still open. Don't fall behind. 🏆`
+            message = `${firstName} — your table is checking things off. Reading + ${habit} still open. Don't fall behind. 🏆`
           } else {
-            message = `Hey ${firstName}! Two things still open: your reading and "${habit}". You've got this 💪`
+            message = `Hey ${firstName}! Two things still open: your reading and ${habit}. You've got this 💪`
           }
         } else if (needsHabit) {
           // Only habit outstanding
           if (tone === 'direct') {
-            message = `${firstName}: "${habit}" not checked in today. Do it.`
+            message = `${firstName}: ${habit} not checked in today. Do it.`
           } else if (tone === 'gentle') {
-            message = `Just a soft reminder ${firstName} — did you get to "${habit}" today? 🌱`
+            message = `Just a soft reminder ${firstName} — did you get to ${habit} today? 🌱`
           } else if (tone === 'competitive') {
-            message = `${firstName} — streak on the line. "${habit}" isn't checked yet. 🔥`
+            message = `${firstName} — streak on the line. ${habit} isn't checked yet. 🔥`
           } else {
-            message = `Hey ${firstName} — don't forget to check in "${habit}" today! Keep that streak alive 🔥`
+            message = `Hey ${firstName} — don't forget to check in ${habit} today! Keep that streak alive 🔥`
           }
         } else {
           // Only reading outstanding
