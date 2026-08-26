@@ -19,9 +19,13 @@ export default function BottomNav() {
     checkRole()
   }, [])
 
+  // Leaders get My Table too. Without it a TC had no way to see their own
+  // table the way their members see it, and no way to check what a member
+  // actually looks at — every other leader screen is the leader's view.
   const tabs = isLeader
     ? [
         { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
+        { href: '/group', label: 'My Table', icon: <GroupIcon /> },
         { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
         { href: '/leaders', label: 'TC Room', icon: <LeaderIcon /> },
         { href: '/analytics', label: 'Stats', icon: <StatsIcon /> },
@@ -55,7 +59,7 @@ export default function BottomNav() {
             const active = pathname === tab.href
             return (
               <Link key={tab.href} href={tab.href}
-                className={`flex-1 flex flex-col items-center py-2 gap-0.5 text-xs font-medium transition-colors ${
+                className={`flex-1 min-w-0 flex flex-col items-center py-2 gap-0.5 text-[11px] leading-tight font-medium whitespace-nowrap transition-colors ${
                   active ? 'text-bt-navy' : 'text-gray-400'
                 }`}>
                 <span className={active ? 'text-bt-navy' : 'text-gray-400'}>{tab.icon}</span>

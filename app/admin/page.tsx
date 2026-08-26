@@ -34,6 +34,9 @@ type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | '
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
   const [groups, setGroups] = useState<any[]>([])
+  /** Which table is being renamed, and the in-progress value. */
+  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
+  const [renameSaving, setRenameSaving] = useState(false)
   const [tasks, setTasks] = useState<any[]>([])
   const [content, setContent] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
@@ -758,6 +761,28 @@ export default function AdminPage() {
     alert(`New period "${periodLabel}" started. ${summary}. Add new tasks below.`)
   }
 
+  /**
+   * Renames a table. Server-side via edit-item like every other leader edit —
+   * `groups` carries no UPDATE policy for leaders, so a browser write would
+   * return 200 and change nothing.
+   */
+  async function saveGroupName() {
+    if (!renaming) return
+    const value = renaming.value.trim()
+    if (!value) { alert('A table needs a name'); return }
+    setRenameSaving(true)
+    const res = await fetch('/api/admin/edit-item', {
+      method: 'PATCH',
+      headers: await authHeaders(),
+      body: JSON.stringify({ table: 'groups', id: renaming.id, fields: { name: value } }),
+    })
+    const result = await res.json().catch(() => ({}))
+    setRenameSaving(false)
+    if (!res.ok) { alert(`Could not rename the table: ${result.error || res.status}`); return }
+    setGroups(p => p.map(x => (x.id === result.item.id ? { ...x, name: result.item.name } : x)))
+    setRenaming(null)
+  }
+
   async function createGroup() {
     if (!groupName.trim()) return
     const supabase = createClient()
@@ -1156,11 +1181,38 @@ export default function AdminPage() {
                 const link = inviteLinks[g.id]
                 const inviteLink = link?.url || `${process.env.NEXT_PUBLIC_APP_URL}/join?group=${g.id}`
                 const copied = copiedGroupId === g.id
+                // Narrowed here rather than inline: `renaming?.id === g.id`
+                // does not narrow the state value inside the JSX callbacks.
+                const rename = renaming && renaming.id === g.id ? renaming : null
                 return (
                   <div key={g.id} className="bg-white rounded-2xl px-4 py-4 shadow-sm space-y-3">
                     <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-gray-900">{g.name}</p>
+                      <div className="min-w-0 flex-1">
+                        {rename ? (
+                          <div className="flex gap-2 items-center">
+                            <input
+                              autoFocus
+                              value={rename.value}
+                              onChange={e => setRenaming({ id: g.id, value: e.target.value })}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveGroupName()
+                                if (e.key === 'Escape') setRenaming(null)
+                              }}
+                              className="flex-1 min-w-0 px-2 py-1 rounded-lg border border-gray-200 text-sm font-semibold text-gray-900" />
+                            <button onClick={saveGroupName} disabled={renameSaving || !rename.value.trim()}
+                              className="px-2 py-1 rounded-lg bg-bt-navy text-white text-xs font-semibold disabled:opacity-40">
+                              {renameSaving ? '...' : 'Save'}
+                            </button>
+                            <button onClick={() => setRenaming(null)}
+                              className="px-2 py-1 rounded-lg text-gray-400 text-xs font-semibold">Cancel</button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2 items-center">
+                            <p className="font-semibold text-gray-900 truncate">{g.name}</p>
+                            <button onClick={() => setRenaming({ id: g.id, value: g.name })}
+                              className="text-bt-blue text-xs font-semibold flex-shrink-0">Rename</button>
+                          </div>
+                        )}
                         <p className="text-gray-400 text-xs mt-0.5">{users.filter(u => u.group_id === g.id).length} members</p>
                         {(() => {
                           const days = daysUntilReset(g.last_period_start)
@@ -1213,10 +1265,31 @@ export default function AdminPage() {
                           onChange={e => setLeaderPick(prev => ({ ...prev, [g.id]: e.target.value }))}
                           className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white">
                           <option value="">Add a co-leader...</option>
+                          {/* Deliberately NOT limited to this table's members.
+                              A person sits at exactly one table, so filtering
+                              by group_id made it impossible to give a TC a
+                              second table — the only thing that ever blocked
+                              it. The join table and the permission checks have
+                              always handled many tables per leader. Own-table
+                              members sort first; anyone else is labelled with
+                              the table they sit at so the pick is deliberate. */}
                           {users
-                            .filter((u: any) => u.group_id === g.id)
                             .filter((u: any) => !(groupLeaders[g.id] || []).some((l: any) => l.user_id === u.id))
-                            .map((u: any) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                            .slice()
+                            .sort((a: any, b: any) => {
+                              const own = (u: any) => (u.group_id === g.id ? 0 : 1)
+                              return own(a) - own(b) || (a.full_name || '').localeCompare(b.full_name || '')
+                            })
+                            .map((u: any) => {
+                              const elsewhere = u.group_id && u.group_id !== g.id
+                                ? groups.find((x: any) => x.id === u.group_id)?.name
+                                : null
+                              return (
+                                <option key={u.id} value={u.id}>
+                                  {u.full_name}{elsewhere ? ` — ${elsewhere}` : ''}
+                                </option>
+                              )
+                            })}
                         </select>
                         <button
                           disabled={!leaderPick[g.id] || leaderBusy.startsWith(`${g.id}:`)}
