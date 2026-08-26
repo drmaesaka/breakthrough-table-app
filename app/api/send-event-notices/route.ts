@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
 import { sendEmail, notificationEmail } from '@/lib/send-email'
 import { fetchMemberEmails } from '@/lib/member-emails'
+import { retryQuery } from '@/lib/db-retry'
 
 // Event announcements, reminders and follow-ups.
 //
@@ -52,11 +53,18 @@ export async function POST(req: NextRequest) {
 
   // Anything that could still need a stage. Events more than a day past are
   // done with: their follow-up either went out or was backfilled as sent.
-  const { data: events, error: eventsError } = await supabase
-    .from('events')
-    .select('id, title, event_date, group_id, event_type, location, notifications_enabled, announced_at, reminder_24h_sent_at, reminder_1h_sent_at, followup_sent_at, followup_message')
-    .gte('event_date', new Date(now - 36 * HOUR).toISOString())
-    .order('event_date', { ascending: true })
+  // Retried for the same reason as the other two jobs: Supabase intermittently
+  // rejects our own key with "JWT issued at future". Milder here — every stage
+  // is gated on its own timestamp, so a lost run delays a notice by half an hour
+  // rather than deleting it — but it still fires a failure alert for nothing.
+  const { data: events, error: eventsError } = await retryQuery(
+    'send-event-notices: events',
+    () => supabase
+      .from('events')
+      .select('id, title, event_date, group_id, event_type, location, notifications_enabled, announced_at, reminder_24h_sent_at, reminder_1h_sent_at, followup_sent_at, followup_message')
+      .gte('event_date', new Date(now - 36 * HOUR).toISOString())
+      .order('event_date', { ascending: true })
+  )
 
   // A dead database hands back `{ data: null, error }` instead of throwing, so
   // without this the run reports a cheerful zero through a total outage.
