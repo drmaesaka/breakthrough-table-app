@@ -102,10 +102,22 @@ begin
   end loop;
 
   -- Plain unique indexes are not constraints and would survive the loop above.
+  --
+  -- Two exclusions matter here. The primary key is unique but is not the rule
+  -- we are removing, and Postgres refuses to drop the index backing it anyway.
+  -- Any index owned by a constraint is likewise off limits — the first loop
+  -- already dropped those constraints, and their indexes went with them.
   for r in
-    select indexname from pg_indexes
-    where schemaname = 'public' and tablename = 'habit_completions'
-      and indexdef like 'CREATE UNIQUE INDEX%'
+    select i.relname as indexname
+    from pg_index x
+    join pg_class i on i.oid = x.indexrelid
+    join pg_class t on t.oid = x.indrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    where n.nspname = 'public'
+      and t.relname = 'habit_completions'
+      and x.indisunique
+      and not x.indisprimary
+      and not exists (select 1 from pg_constraint c where c.conindid = x.indexrelid)
   loop
     execute format('drop index if exists public.%I', r.indexname);
   end loop;

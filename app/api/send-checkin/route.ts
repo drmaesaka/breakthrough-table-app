@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
 import { sendEmail, notificationEmail } from '@/lib/send-email'
 import { fetchMemberEmails } from '@/lib/member-emails'
+import { retryQuery } from '@/lib/db-retry'
 
 // Fans out a push per member; the 10s default would cut a real table off.
 export const maxDuration = 60
@@ -44,10 +45,15 @@ export async function POST(req: NextRequest) {
     } catch { return localTime }
   }
 
-  const { data: settings, error: settingsError } = await supabase
-    .from('group_notification_settings')
-    .select('group_id, checkin_enabled, checkin_time, checkin_timezone')
-    .eq('checkin_enabled', true)
+  // Retried: a transient rejection does not delay this run, it deletes it —
+  // the slot is never revisited, so this check-in never goes out.
+  const { data: settings, error: settingsError } = await retryQuery(
+    'send-checkin: settings',
+    () => supabase
+      .from('group_notification_settings')
+      .select('group_id, checkin_enabled, checkin_time, checkin_timezone')
+      .eq('checkin_enabled', true)
+  )
 
   // A dead database returns `{ data: null, error }` rather than throwing, which
   // would otherwise read as "nothing configured" and let the cron report success

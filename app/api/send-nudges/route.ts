@@ -6,6 +6,7 @@ import { fetchMemberEmails } from '@/lib/member-emails'
 import { dayInTimezone } from '@/lib/dates'
 import { fetchAllRows } from '@/lib/fetch-all'
 import { calcAdherence } from '@/lib/habits'
+import { retryQuery } from '@/lib/db-retry'
 
 // This route fans out a push per member and rewrites every adherence figure.
 // Vercel's default cap is 10s, which a table of any size will exceed.
@@ -74,11 +75,16 @@ export async function POST(req: NextRequest) {
   // Get members with their preferences and habit info. Leaders are included
   // only once they have a nudge_preferences row — participants get nudges by
   // default, leaders opt in by saving their Nudge Settings.
-  const { data: participants, error: participantsError } = await supabase
-    .from('profiles')
-    .select('id, full_name, role, group_id, adherence_percent, streak, nudge_preferences(enabled, tone, nudge_times, timezone)')
-    .in('role', ['participant', 'leader'])
-    .not('group_id', 'is', null)
+  // Retried: a transient rejection here does not delay this run, it deletes it.
+  // The slot is never revisited, so the nudges due at this time never go out.
+  const { data: participants, error: participantsError } = await retryQuery(
+    'send-nudges: profiles',
+    () => supabase
+      .from('profiles')
+      .select('id, full_name, role, group_id, adherence_percent, streak, nudge_preferences(enabled, tone, nudge_times, timezone)')
+      .in('role', ['participant', 'leader'])
+      .not('group_id', 'is', null)
+  )
 
   // A dead database returns `{ data: null, error }` rather than throwing, which
   // would otherwise read as "nobody to nudge" and let the cron report success
