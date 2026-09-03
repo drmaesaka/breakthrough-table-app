@@ -58,6 +58,14 @@ export default function AdminPage() {
   const [prompts, setPrompts] = useState<any[]>([])
   const [promptText, setPromptText] = useState('')
   const [promptSaving, setPromptSaving] = useState(false)
+  const [promptError, setPromptError] = useState('')
+  /**
+   * Extra tables a prompt also goes to, beyond the one selected at the top.
+   * Leaders asked to post one prompt to several tables without retyping it.
+   * Kept separate from selectedGroup so switching tables never silently
+   * changes where the next prompt lands: the current table is always in.
+   */
+  const [promptAlsoTo, setPromptAlsoTo] = useState<Set<string>>(new Set())
 
   // Inline editing (tasks, content, events, prompts) — one item at a time
   const [editing, setEditing] = useState<{ table: string; id: string; fields: any } | null>(null)
@@ -1144,21 +1152,76 @@ export default function AdminPage() {
                 rows={3}
                 className={`${inputClass} resize-none leading-relaxed`}
               />
+              {groups.length > 1 && (() => {
+                const targets = groups.filter(g => g.id === selectedGroup || promptAlsoTo.has(g.id))
+                const allOn = targets.length === groups.length
+                return (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-400 font-medium">Send to</p>
+                      <button type="button"
+                        onClick={() => setPromptAlsoTo(allOn
+                          ? new Set()
+                          : new Set(groups.filter(g => g.id !== selectedGroup).map(g => g.id)))}
+                        className="text-xs text-bt-blue font-semibold">
+                        {allOn ? 'Only this table' : 'All my tables'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {groups.map(g => {
+                        const current = g.id === selectedGroup
+                        const on = current || promptAlsoTo.has(g.id)
+                        return (
+                          <button key={g.id} type="button" disabled={current}
+                            onClick={() => setPromptAlsoTo(prev => {
+                              const next = new Set(prev)
+                              if (next.has(g.id)) next.delete(g.id); else next.add(g.id)
+                              return next
+                            })}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                              on ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-gray-500 border-gray-200'
+                            } ${current ? 'opacity-90' : ''}`}>
+                            {on ? '✓ ' : ''}{g.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[11px] text-gray-400">
+                      The table picked at the top is always included. Tap others to add them.
+                    </p>
+                  </div>
+                )
+              })()}
+              {promptError && <p className="text-red-600 text-xs">{promptError}</p>}
               <button onClick={async () => {
                 if (!promptText.trim() || !selectedGroup) return
                 setPromptSaving(true)
+                setPromptError('')
                 const supabase = createClient()
                 const { data: { user } } = await supabase.auth.getUser()
-                const { data } = await supabase.from('journal_prompts').insert({
-                  group_id: selectedGroup,
-                  prompt: promptText.trim(),
-                  posted_by: user?.id,
-                }).select().single()
-                if (data) { setPrompts(p => [data, ...p]); setPromptText('') }
+                // The selected table first, then any extras — one row per
+                // table, because members read prompts by their own group_id.
+                const targetIds = [selectedGroup, ...groups.map(g => g.id).filter(id => id !== selectedGroup && promptAlsoTo.has(id))]
+                const { data, error } = await supabase.from('journal_prompts').insert(
+                  targetIds.map(group_id => ({ group_id, prompt: promptText.trim(), posted_by: user?.id }))
+                ).select()
+                if (error) {
+                  setPromptError(`Could not post the prompt: ${error.message}`)
+                } else {
+                  const here = (data || []).find(row => row.group_id === selectedGroup)
+                  if (here) setPrompts(p => [here, ...p])
+                  setPromptText('')
+                  const names = targetIds.map(id => groups.find(g => g.id === id)?.name).filter(Boolean)
+                  if (names.length > 1) alert(`Posted to ${names.length} tables: ${names.join(', ')}`)
+                }
                 setPromptSaving(false)
               }} disabled={promptSaving || !promptText.trim()}
                 className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                {promptSaving ? 'Posting...' : 'Post Prompt'}
+                {promptSaving
+                  ? 'Posting...'
+                  : promptAlsoTo.size > 0 && groups.length > 1
+                    ? `Post to ${1 + [...promptAlsoTo].filter(id => id !== selectedGroup && groups.some(g => g.id === id)).length} tables`
+                    : 'Post Prompt'}
               </button>
             </div>
             {prompts.length > 0 && journalResponses && (
