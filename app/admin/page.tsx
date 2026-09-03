@@ -31,6 +31,67 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 
 type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
 
+// Members see what a leader adds under "tasks" as "Reading & Homework" on
+// My Tasks. Leaders could not connect the two names, so the tab now uses the
+// members' one. Everything else keeps its bare name.
+const TAB_LABEL: Partial<Record<Tab, string>> = { tasks: 'Reading & Homework' }
+
+/**
+ * "Send to" chips for anything a leader posts to a table. The table picked at
+ * the top of Admin is always in; `extra` holds the others they ticked. Only
+ * rendered for leaders with more than one table — for everyone else the
+ * destination is the one table and the chips would be noise.
+ */
+function TablePicker({ groups, selectedGroup, extra, setExtra }: {
+  groups: { id: string; name: string }[]
+  selectedGroup: string
+  extra: Set<string>
+  setExtra: (next: Set<string>) => void
+}) {
+  if (groups.length < 2) return null
+  const others = groups.filter(g => g.id !== selectedGroup)
+  const allOn = others.every(g => extra.has(g.id))
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400 font-medium">Send to</p>
+        <button type="button"
+          onClick={() => setExtra(allOn ? new Set() : new Set(others.map(g => g.id)))}
+          className="text-xs text-bt-blue font-semibold">
+          {allOn ? 'Only this table' : 'All my tables'}
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {groups.map(g => {
+          const current = g.id === selectedGroup
+          const on = current || extra.has(g.id)
+          return (
+            <button key={g.id} type="button" disabled={current}
+              onClick={() => {
+                const next = new Set(extra)
+                if (next.has(g.id)) next.delete(g.id); else next.add(g.id)
+                setExtra(next)
+              }}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                on ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-gray-500 border-gray-200'
+              }`}>
+              {on ? '✓ ' : ''}{g.name}
+            </button>
+          )
+        })}
+      </div>
+      <p className="text-[11px] text-gray-400">
+        The table picked at the top is always included. Tap others to add them.
+      </p>
+    </div>
+  )
+}
+
+/** The table picked at the top plus any extras that are still tables this leader has. */
+function targetTables(groups: { id: string }[], selectedGroup: string, extra: Set<string>) {
+  return [selectedGroup, ...groups.map(g => g.id).filter(id => id !== selectedGroup && extra.has(id))]
+}
+
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>('tasks')
   const [groups, setGroups] = useState<any[]>([])
@@ -59,6 +120,9 @@ export default function AdminPage() {
   const [promptText, setPromptText] = useState('')
   const [promptSaving, setPromptSaving] = useState(false)
   const [promptError, setPromptError] = useState('')
+  const [taskAlsoTo, setTaskAlsoTo] = useState<Set<string>>(new Set())
+  const [taskSaving, setTaskSaving] = useState(false)
+  const [taskError, setTaskError] = useState('')
   /**
    * Extra tables a prompt also goes to, beyond the one selected at the top.
    * Leaders asked to post one prompt to several tables without retyping it.
@@ -865,15 +929,41 @@ export default function AdminPage() {
 
   async function addTask() {
     if (!taskTitle.trim() || !selectedGroup) return
+    setTaskSaving(true)
+    setTaskError('')
     const supabase = createClient()
-    const currentPeriod = tasks.length > 0 ? tasks[0].period_label : 'Current'
-    const { data } = await supabase.from('tasks').insert({
-      group_id: selectedGroup,
-      title: taskTitle.trim(),
-      description: taskDesc.trim(),
-      period_label: currentPeriod
-    }).select().single()
-    if (data) { setTasks(p => [data, ...p]); setTaskTitle(''); setTaskDesc('') }
+    const targetIds = targetTables(groups, selectedGroup, taskAlsoTo)
+
+    // Each table is in its own period, so the label comes from that table's
+    // current tasks — the selected table's from what is already loaded, the
+    // others' from one query. A brand-new table gets 'Current', as before.
+    const periodFor: Record<string, string> = { [selectedGroup]: tasks.length > 0 ? tasks[0].period_label : 'Current' }
+    const others = targetIds.filter(id => id !== selectedGroup)
+    if (others.length) {
+      const { data: rows } = await supabase
+        .from('tasks').select('group_id, period_label')
+        .in('group_id', others).eq('archived', false)
+        .order('created_at', { ascending: false })
+      for (const r of rows || []) if (!periodFor[r.group_id]) periodFor[r.group_id] = r.period_label
+    }
+
+    const { data, error } = await supabase.from('tasks').insert(
+      targetIds.map(group_id => ({
+        group_id,
+        title: taskTitle.trim(),
+        description: taskDesc.trim(),
+        period_label: periodFor[group_id] || 'Current',
+      }))
+    ).select()
+    setTaskSaving(false)
+    if (error) { setTaskError(`Could not assign: ${error.message}`); return }
+    const here = (data || []).find(row => row.group_id === selectedGroup)
+    if (here) setTasks(p => [here, ...p])
+    setTaskTitle(''); setTaskDesc('')
+    if (targetIds.length > 1) {
+      const names = targetIds.map(id => groups.find(g => g.id === id)?.name).filter(Boolean)
+      alert(`Assigned to ${names.length} tables: ${names.join(', ')}`)
+    }
   }
 
   async function deleteTask(id: string) {
@@ -991,7 +1081,7 @@ export default function AdminPage() {
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
                 tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
               }`}>
-              {t}
+              {TAB_LABEL[t] || t}
             </button>
           ))}
           {/* Sits in the same rail as the tabs so there is one place to look for
@@ -1025,18 +1115,40 @@ export default function AdminPage() {
               </button>
             </div>
 
-            {/* Add Task */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-              <h3 className="font-bold text-bt-navy">Add Task</h3>
-              <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Task title *" className={inputClass} />
-              <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Description (optional)" className={inputClass} />
-              <button onClick={addTask} className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm">Add Task</button>
-            </div>
+            {/* Assign reading / homework. Members see these under
+                "Reading & Homework" on My Tasks and tick them off; each one
+                counts toward their adherence like a habit does. */}
+            {(() => {
+              const tableName = groups.find(g => g.id === selectedGroup)?.name || 'this table'
+              const count = targetTables(groups, selectedGroup, taskAlsoTo).length
+              return (
+                <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+                  <h3 className="font-bold text-bt-navy">Assign Reading or Homework</h3>
+                  <p className="text-gray-400 text-xs">
+                    Members of <span className="font-semibold text-bt-navy">{tableName}</span> see this under
+                    “Reading &amp; Homework” on their My Tasks screen and check it off when it’s done.
+                    To assign to a different table, change the table at the top of this page.
+                  </p>
+                  <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)}
+                    placeholder="e.g. Read chapters 3–4 before next meeting *" className={inputClass} />
+                  <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Details (optional)" className={inputClass} />
+                  <TablePicker groups={groups} selectedGroup={selectedGroup} extra={taskAlsoTo} setExtra={setTaskAlsoTo} />
+                  {taskError && <p className="text-red-600 text-xs">{taskError}</p>}
+                  <button onClick={addTask} disabled={taskSaving || !taskTitle.trim()}
+                    className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                    {taskSaving ? 'Assigning...' : count > 1 ? `Assign to ${count} tables` : `Assign to ${tableName}`}
+                  </button>
+                </div>
+              )
+            })()}
 
             {/* Task list */}
             <div className="space-y-2">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide px-1">
+                Currently assigned to {groups.find(g => g.id === selectedGroup)?.name || 'this table'}
+              </p>
               {tasks.length === 0 && (
-                <p className="text-center text-gray-400 text-sm py-4">No active tasks. Add one above.</p>
+                <p className="text-center text-gray-400 text-sm py-4">Nothing assigned yet. Add reading or homework above.</p>
               )}
               {tasks.map(task => (
                 editing?.table === 'tasks' && editing.id === task.id ? (
@@ -1152,46 +1264,7 @@ export default function AdminPage() {
                 rows={3}
                 className={`${inputClass} resize-none leading-relaxed`}
               />
-              {groups.length > 1 && (() => {
-                const targets = groups.filter(g => g.id === selectedGroup || promptAlsoTo.has(g.id))
-                const allOn = targets.length === groups.length
-                return (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-gray-400 font-medium">Send to</p>
-                      <button type="button"
-                        onClick={() => setPromptAlsoTo(allOn
-                          ? new Set()
-                          : new Set(groups.filter(g => g.id !== selectedGroup).map(g => g.id)))}
-                        className="text-xs text-bt-blue font-semibold">
-                        {allOn ? 'Only this table' : 'All my tables'}
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {groups.map(g => {
-                        const current = g.id === selectedGroup
-                        const on = current || promptAlsoTo.has(g.id)
-                        return (
-                          <button key={g.id} type="button" disabled={current}
-                            onClick={() => setPromptAlsoTo(prev => {
-                              const next = new Set(prev)
-                              if (next.has(g.id)) next.delete(g.id); else next.add(g.id)
-                              return next
-                            })}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                              on ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-gray-500 border-gray-200'
-                            } ${current ? 'opacity-90' : ''}`}>
-                            {on ? '✓ ' : ''}{g.name}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <p className="text-[11px] text-gray-400">
-                      The table picked at the top is always included. Tap others to add them.
-                    </p>
-                  </div>
-                )
-              })()}
+              <TablePicker groups={groups} selectedGroup={selectedGroup} extra={promptAlsoTo} setExtra={setPromptAlsoTo} />
               {promptError && <p className="text-red-600 text-xs">{promptError}</p>}
               <button onClick={async () => {
                 if (!promptText.trim() || !selectedGroup) return
@@ -1201,7 +1274,7 @@ export default function AdminPage() {
                 const { data: { user } } = await supabase.auth.getUser()
                 // The selected table first, then any extras — one row per
                 // table, because members read prompts by their own group_id.
-                const targetIds = [selectedGroup, ...groups.map(g => g.id).filter(id => id !== selectedGroup && promptAlsoTo.has(id))]
+                const targetIds = targetTables(groups, selectedGroup, promptAlsoTo)
                 const { data, error } = await supabase.from('journal_prompts').insert(
                   targetIds.map(group_id => ({ group_id, prompt: promptText.trim(), posted_by: user?.id }))
                 ).select()
@@ -1219,8 +1292,8 @@ export default function AdminPage() {
                 className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
                 {promptSaving
                   ? 'Posting...'
-                  : promptAlsoTo.size > 0 && groups.length > 1
-                    ? `Post to ${1 + [...promptAlsoTo].filter(id => id !== selectedGroup && groups.some(g => g.id === id)).length} tables`
+                  : targetTables(groups, selectedGroup, promptAlsoTo).length > 1
+                    ? `Post to ${targetTables(groups, selectedGroup, promptAlsoTo).length} tables`
                     : 'Post Prompt'}
               </button>
             </div>
