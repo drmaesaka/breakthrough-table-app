@@ -110,6 +110,10 @@ export default function AdminPage() {
   const [sessionKind, setSessionKind] = useState<'alumni' | 'dropin'>('dropin')
   const [sessionTitle, setSessionTitle] = useState('')
   const [sessionDate, setSessionDate] = useState('')
+  /** Clock time only ("20:00"); the day is the start date's. */
+  const [sessionEndTime, setSessionEndTime] = useState('')
+  /** Which existing session's end time is being edited, and the value. */
+  const [editingEnd, setEditingEnd] = useState<{ id: string; value: string } | null>(null)
   const [sessionLocation, setSessionLocation] = useState('')
   const [sessionDesc, setSessionDesc] = useState('')
   const [sessionCapacity, setSessionCapacity] = useState('')
@@ -415,6 +419,13 @@ export default function AdminPage() {
       return
     }
 
+    const endDate = combineEnd(sessionDate, sessionEndTime)
+    if (endDate === 'invalid') {
+      setSessionSaving(false)
+      setSessionError('The end time has to be after the start time')
+      return
+    }
+
     const { error } = await supabase.from('signup_sessions').insert({
       kind: sessionKind,
       title: sessionTitle.trim(),
@@ -425,11 +436,64 @@ export default function AdminPage() {
       description: sessionDesc.trim() || null,
       capacity,
       created_by: user!.id,
+      // Only sent when set, so the form keeps working if this code deploys
+      // ahead of the 2026-09-03 migration that adds the column.
+      ...(endDate ? { end_date: endDate } : {}),
     })
     setSessionSaving(false)
-    if (error) { setSessionError(error.message); return }
-    setSessionTitle(''); setSessionDate(''); setSessionLocation(''); setSessionDesc(''); setSessionCapacity('')
+    if (error) { setSessionError(friendlySessionError(error.message)); return }
+    setSessionTitle(''); setSessionDate(''); setSessionEndTime(''); setSessionLocation(''); setSessionDesc(''); setSessionCapacity('')
     loadSessions()
+  }
+
+  /**
+   * Turns a start (datetime-local string or ISO) and a clock time ("20:00")
+   * into an ISO end on the same day. '' when no end time, 'invalid' when the
+   * end would not be after the start — sessions do not cross midnight.
+   */
+  function combineEnd(start: string, endTime: string): string {
+    if (!endTime) return ''
+    const [h, m] = endTime.split(':').map(Number)
+    const end = new Date(start)
+    end.setHours(h, m, 0, 0)
+    return end > new Date(start) ? end.toISOString() : 'invalid'
+  }
+
+  function friendlySessionError(message: string) {
+    if (/end_date/.test(message) && /column/i.test(message)) {
+      return 'End times need the 2026-09-03 migration to be run in Supabase first'
+    }
+    if (/end_after_start/.test(message)) return 'The end time has to be after the start time'
+    return message
+  }
+
+  /** Clock time ("20:00") for a time input, from an ISO timestamp. */
+  function clockTime(iso: string | null) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+
+  /**
+   * Sets or clears the end time on an existing session. A browser write is
+   * fine here: signup_sessions carries an UPDATE policy for leaders, the same
+   * one toggleSessionOpen already relies on.
+   */
+  async function saveSessionEnd() {
+    if (!editingEnd) return
+    const session = sessions.find(s => s.id === editingEnd.id)
+    if (!session) return
+    const endDate = combineEnd(session.session_date, editingEnd.value)
+    if (endDate === 'invalid') { setSessionError('The end time has to be after the start time'); return }
+    setSessionError('')
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('signup_sessions')
+      .update({ end_date: endDate || null })
+      .eq('id', session.id)
+    if (error) { setSessionError(friendlySessionError(error.message)); return }
+    setSessions(p => p.map(s => s.id === session.id ? { ...s, end_date: endDate || null } : s))
+    setEditingEnd(null)
   }
 
   async function toggleSessionOpen(session: any) {
@@ -2157,8 +2221,16 @@ export default function AdminPage() {
               </div>
               <input value={sessionTitle} onChange={e => setSessionTitle(e.target.value)}
                 placeholder="Session title" className={inputClass} />
-              <input type="datetime-local" value={sessionDate} onChange={e => setSessionDate(e.target.value)}
-                className={inputClass} />
+              <label className="block">
+                <span className="text-xs text-gray-400 font-medium">Starts</span>
+                <input type="datetime-local" value={sessionDate} onChange={e => setSessionDate(e.target.value)}
+                  className={inputClass} />
+              </label>
+              <label className="block">
+                <span className="text-xs text-gray-400 font-medium">Ends (optional, same day)</span>
+                <input type="time" value={sessionEndTime} onChange={e => setSessionEndTime(e.target.value)}
+                  className={inputClass} />
+              </label>
               <input value={sessionLocation} onChange={e => setSessionLocation(e.target.value)}
                 placeholder="Location (optional)" className={inputClass} />
               <textarea value={sessionDesc} onChange={e => setSessionDesc(e.target.value)} rows={2}
@@ -2180,6 +2252,9 @@ export default function AdminPage() {
               const roster = registrations.filter(r => r.session_id === session.id)
               const seatsLeft = session.capacity === null ? null : session.capacity - roster.length
               const showing = openRoster === session.id
+              // Narrowed here: `editingEnd?.id === session.id` does not narrow
+              // the state value inside the JSX callbacks.
+              const endEdit = editingEnd && editingEnd.id === session.id ? editingEnd : null
 
               return (
                 <div key={session.id} className="bg-white rounded-2xl p-5 shadow-sm">
@@ -2201,7 +2276,24 @@ export default function AdminPage() {
                           weekday: 'short', month: 'short', day: 'numeric',
                           hour: 'numeric', minute: '2-digit',
                         })}
+                        {session.end_date && ` – ${new Date(session.end_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`}
                       </p>
+                      {endEdit ? (
+                        <div className="flex gap-2 items-center mt-1.5">
+                          <input type="time" value={endEdit.value} autoFocus
+                            onChange={e => setEditingEnd({ id: session.id, value: e.target.value })}
+                            className="px-2 py-1 rounded-lg border border-gray-200 text-xs" />
+                          <button onClick={saveSessionEnd}
+                            className="px-2 py-1 rounded-lg bg-bt-navy text-white text-xs font-semibold">Save</button>
+                          <button onClick={() => setEditingEnd(null)}
+                            className="px-2 py-1 rounded-lg text-gray-400 text-xs font-semibold">Cancel</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setEditingEnd({ id: session.id, value: clockTime(session.end_date) })}
+                          className="text-bt-blue text-xs font-semibold mt-0.5">
+                          {session.end_date ? 'Change end time' : 'Add end time'}
+                        </button>
+                      )}
                       {session.location && <p className="text-xs text-gray-400 mt-0.5">📍 {session.location}</p>}
                       <p className="text-xs font-semibold text-bt-blue mt-1.5">
                         {roster.length} signed up

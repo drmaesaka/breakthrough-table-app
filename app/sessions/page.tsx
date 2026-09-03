@@ -16,6 +16,7 @@ type Session = {
   kind: 'alumni' | 'dropin'
   title: string
   session_date: string
+  end_date: string | null
   location: string | null
   description: string | null
   capacity: number | null
@@ -107,11 +108,13 @@ export default function SessionsPage() {
     setWorking(null)
   }
 
-  function formatWhen(d: string) {
-    return new Date(d).toLocaleString('en-US', {
+  function formatWhen(start: string, end: string | null) {
+    const when = new Date(start).toLocaleString('en-US', {
       weekday: 'short', month: 'long', day: 'numeric',
       hour: 'numeric', minute: '2-digit',
     })
+    if (!end) return when
+    return `${when} – ${new Date(end).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
   }
 
   if (loading) return (
@@ -163,7 +166,7 @@ export default function SessionsPage() {
                 </div>
 
                 <h3 className="font-bold text-gray-900 text-base leading-tight">{session.title}</h3>
-                <p className="text-gray-400 text-xs mt-1">{formatWhen(session.session_date)}</p>
+                <p className="text-gray-400 text-xs mt-1">{formatWhen(session.session_date, session.end_date)}</p>
                 {session.location && (
                   <p className="text-gray-500 text-sm mt-1">📍 {session.location}</p>
                 )}
