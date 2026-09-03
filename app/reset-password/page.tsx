@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState('')
@@ -36,15 +37,11 @@ export default function ResetPasswordPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">New Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
-                placeholder="••••••••" required />
+              <PasswordInput value={password} onChange={setPassword} autoComplete="new-password" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Confirm Password</label>
-              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
-                placeholder="••••••••" required />
+              <PasswordInput value={confirm} onChange={setConfirm} autoComplete="new-password" />
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button type="submit" disabled={loading}

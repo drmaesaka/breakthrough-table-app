@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -45,9 +46,7 @@ export default function LoginPage() {
                 <label className="block text-sm font-medium text-gray-700">Password</label>
                 <Link href="/forgot-password" className="text-xs text-bt-blue font-medium">Forgot password?</Link>
               </div>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full px-4 py-3.5 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue text-base"
-                placeholder="••••••••" required />
+              <PasswordInput value={password} onChange={setPassword} autoComplete="current-password" />
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <button type="submit" disabled={loading}
