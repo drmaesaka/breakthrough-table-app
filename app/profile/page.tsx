@@ -27,7 +27,8 @@ export default function ProfilePage() {
   const [userId, setUserId] = useState('')
 
   // Directory state
-  const [directoryOptIn, setDirectoryOptIn] = useState(false)
+  // Listed by default; only an explicit false hides someone (2026-09-03).
+  const [directoryOptIn, setDirectoryOptIn] = useState(true)
   const [bio, setBio] = useState('')
   const [linkedinUrl, setLinkedinUrl] = useState('')
   const [contactEmail, setContactEmail] = useState('')
@@ -54,7 +55,7 @@ export default function ProfilePage() {
       if (prof) {
         setProfile(prof)
         setName(prof.full_name || '')
-        setDirectoryOptIn(prof.directory_opt_in || false)
+        setDirectoryOptIn(prof.directory_opt_in !== false)
         setBio(prof.bio || '')
         setLinkedinUrl(prof.linkedin_url || '')
         setContactEmail(prof.contact_email || '')
@@ -325,7 +326,9 @@ export default function ProfilePage() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-bold text-bt-navy">Member Directory</h3>
-              <p className="text-gray-400 text-xs mt-0.5">Let other BT members find you</p>
+              <p className="text-gray-400 text-xs mt-0.5">
+                {directoryOptIn ? 'Other BT members can find and message you' : 'Hidden — nobody can find you in the directory'}
+              </p>
             </div>
             <button
               onClick={() => setDirectoryOptIn(!directoryOptIn)}

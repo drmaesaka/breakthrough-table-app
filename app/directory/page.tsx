@@ -23,7 +23,9 @@ export default function DirectoryPage() {
       const { data } = await supabase
         .from('profiles')
         .select('id, full_name, bio, linkedin_url, contact_email, group_id, groups(name)')
-        .eq('directory_opt_in', true)
+        // Listed unless they switched it off. NULL (never touched the
+        // toggle) counts as listed — the default flipped to opt-out 2026-09-03.
+        .or('directory_opt_in.is.null,directory_opt_in.eq.true')
         .order('full_name', { ascending: true })
 
       setMembers(data || [])
