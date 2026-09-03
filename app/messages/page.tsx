@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
+import { ledGroups } from '@/lib/leader-groups'
 
 export default function MessagesPage() {
   const [tab, setTab] = useState<'table' | 'dms'>('table')
@@ -16,6 +17,14 @@ export default function MessagesPage() {
   const [user, setUser] = useState<any>(null)
   const [groupId, setGroupId] = useState<string | null>(null)
   const [groupName, setGroupName] = useState('')
+  /**
+   * Every table this person can chat in: the one they sit at, plus any they
+   * lead. A TC running two tables used to see only the one they sat at and
+   * had no way to reach the other. More than one → a picker appears.
+   */
+  const [tables, setTables] = useState<{ id: string; name: string }[]>([])
+  /** The table they sit at. Its chat goes browser→Supabase; the others via /api/messages. */
+  const homeGroupIdRef = useRef<string | null>(null)
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const groupIdRef = useRef<string | null>(null)
@@ -36,6 +45,31 @@ export default function MessagesPage() {
     // which is the kind of traffic that burns through Supabase's free egress
     // quota and starts failing reads app-wide.
     const newestSeen = newestSeenRef.current
+
+    // A table the leader runs but does not sit at. RLS scopes the browser's
+    // reads to their own table, so this goes through the server instead.
+    if (gid !== homeGroupIdRef.current) {
+      const res = await fetch(
+        `/api/messages?group_id=${encodeURIComponent(gid)}${newestSeen ? `&after=${encodeURIComponent(newestSeen)}` : ''}`,
+        { headers: await authHeaders() }
+      )
+      if (!res.ok) { console.error('messages fetch failed:', res.status); return }
+      const { messages: rows } = await res.json()
+      // The poll may resolve after the person switched tables; drop it then.
+      if (groupIdRef.current !== gid || !rows) return
+      if (!newestSeen) {
+        newestSeenRef.current = rows[rows.length - 1]?.created_at || null
+        setMessages(rows)
+      } else if (rows.length > 0) {
+        newestSeenRef.current = rows[rows.length - 1].created_at
+        setMessages(prev => {
+          const seen = new Set(prev.map(m => m.id))
+          return [...prev, ...rows.filter((m: any) => !seen.has(m.id))]
+        })
+      }
+      return
+    }
+
     if (!newestSeen) {
       const { data: page, error } = await supabase
         .from('messages')
@@ -72,6 +106,28 @@ export default function MessagesPage() {
       const seen = new Set(prev.map(m => m.id))
       return [...prev, ...fresh.filter(m => !seen.has(m.id))]
     })
+  }
+
+  async function authHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await supabase.auth.getSession()
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session?.access_token ?? ''}`,
+    }
+  }
+
+  /** Switches the Table Chat tab to another of this person's tables. */
+  async function switchTable(gid: string) {
+    if (gid === groupIdRef.current) return
+    const t = tables.find(x => x.id === gid)
+    setGroupId(gid)
+    setGroupName(t?.name || 'Table')
+    groupIdRef.current = gid
+    newestSeenRef.current = null
+    lastCountRef.current = 0
+    setMessages([])
+    setSendError(false)
+    await fetchMessages(gid)
   }
 
   async function fetchDMs(userId: string) {
@@ -115,15 +171,27 @@ export default function MessagesPage() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('group_id, groups(name)')
+        .select('group_id, role, groups(name)')
         .eq('id', user.id)
         .single()
 
-      if (profile?.group_id) {
-        setGroupId(profile.group_id)
-        setGroupName((profile.groups as any)?.name || 'Group Chat')
-        groupIdRef.current = profile.group_id
-        await fetchMessages(profile.group_id)
+      const home = profile?.group_id
+        ? { id: profile.group_id as string, name: (profile.groups as any)?.name || 'Group Chat' }
+        : null
+      homeGroupIdRef.current = home?.id || null
+
+      // Leaders also get the tables they run. Own table first, so nothing
+      // changes for a TC with one table.
+      const led = profile?.role === 'leader' ? await ledGroups(supabase, user.id, 'id, name, leader_id') : []
+      const all = [...(home ? [home] : []), ...led.filter(g => g.id !== home?.id).map(g => ({ id: g.id, name: g.name }))]
+      setTables(all)
+
+      const first = all[0]
+      if (first) {
+        setGroupId(first.id)
+        setGroupName(first.name)
+        groupIdRef.current = first.id
+        await fetchMessages(first.id)
       }
       setLoading(false)
     }
@@ -159,11 +227,22 @@ export default function MessagesPage() {
     if (!newMessage.trim() || !groupId || !user || sending) return
     const text = newMessage.trim()
     setSending(true)
-    const { error } = await supabase.from('messages').insert({
-      group_id: groupId,
-      user_id: user.id,
-      content: text,
-    })
+    let error: { message: string } | null = null
+    if (groupId !== homeGroupIdRef.current) {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify({ group_id: groupId, content: text }),
+      })
+      if (!res.ok) error = { message: `send failed (${res.status})` }
+    } else {
+      const r = await supabase.from('messages').insert({
+        group_id: groupId,
+        user_id: user.id,
+        content: text,
+      })
+      error = r.error
+    }
     setSending(false)
     // Keep the member's text in the box if the send failed — clearing it
     // unconditionally destroyed what they had written.
@@ -209,10 +288,23 @@ export default function MessagesPage() {
       {/* Who can see this. Leaders asked whether the chat was their table or
           all of BT — nothing on the screen said. Table chat is one table;
           DMs reach anyone in the BT community. */}
-      <div className="bg-bt-pale px-5 pt-3 pb-1 flex-shrink-0">
+      <div className="bg-bt-pale px-5 pt-3 pb-1 flex-shrink-0 space-y-2">
+        {tab === 'table' && tables.length > 1 && (
+          <label className="block">
+            <span className="text-[11px] text-gray-400 font-medium">Chatting with</span>
+            <select value={groupId || ''} onChange={e => switchTable(e.target.value)}
+              className="mt-0.5 w-full bg-white text-bt-navy text-sm font-semibold rounded-xl px-3 py-2 border border-gray-200 focus:outline-none">
+              {tables.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.name}{t.id === homeGroupIdRef.current ? ' (your table)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <p className="text-xs text-gray-500">
           {tab === 'table'
-            ? <>🔒 <span className="font-semibold text-bt-navy">{groupName || 'Your table'}</span> only. Just you and your tablemates can see this.</>
+            ? <>🔒 <span className="font-semibold text-bt-navy">{groupName || 'Your table'}</span> only. Just the people at this table can see this.</>
             : <>Private one-to-one messages with anyone in the BT community, any table.</>}
         </p>
       </div>
@@ -269,7 +361,7 @@ export default function MessagesPage() {
                 type="text"
                 value={newMessage}
                 onChange={e => setNewMessage(e.target.value)}
-                placeholder="Message your table..."
+                placeholder={groupId === homeGroupIdRef.current ? "Message your table..." : `Message ${groupName}...`}
                 className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
               />
               <button type="submit" disabled={!newMessage.trim() || sending}
