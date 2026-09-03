@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Avatar from '@/components/Avatar'
 
 export default function DirectoryPage() {
   const [members, setMembers] = useState<any[]>([])
@@ -22,7 +23,7 @@ export default function DirectoryPage() {
 
       const { data } = await supabase
         .from('profiles')
-        .select('id, full_name, bio, linkedin_url, contact_email, group_id, groups(name)')
+        .select('id, full_name, bio, linkedin_url, contact_email, group_id, avatar_url, groups(name)')
         // Listed unless they switched it off. NULL (never touched the
         // toggle) counts as listed — the default flipped to opt-out 2026-09-03.
         .or('directory_opt_in.is.null,directory_opt_in.eq.true')
@@ -141,9 +142,7 @@ export default function DirectoryPage() {
         {filtered.map(member => (
           <div key={member.id} className="bg-white rounded-2xl p-4 shadow-sm">
             <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-full bg-bt-navy flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-sm">{getInitials(member.full_name)}</span>
-              </div>
+              <Avatar src={member.avatar_url} name={member.full_name} className="w-11 h-11 bg-bt-navy" textClass="text-white font-bold text-sm" />
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-gray-900">{member.full_name}</p>
                 {(member.groups as any)?.name && (

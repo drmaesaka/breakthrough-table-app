@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
+import Avatar from '@/components/Avatar'
 import { ledGroups } from '@/lib/leader-groups'
 
 export default function MessagesPage() {
@@ -73,7 +74,7 @@ export default function MessagesPage() {
     if (!newestSeen) {
       const { data: page, error } = await supabase
         .from('messages')
-        .select('*, profiles(full_name)')
+        .select('*, profiles(full_name, avatar_url)')
         .eq('group_id', gid)
         .order('created_at', { ascending: false })
         .limit(200)
@@ -92,7 +93,7 @@ export default function MessagesPage() {
 
     const { data: fresh, error } = await supabase
       .from('messages')
-      .select('*, profiles(full_name)')
+      .select('*, profiles(full_name, avatar_url)')
       .eq('group_id', gid)
       .gt('created_at', newestSeen)
       .order('created_at', { ascending: true })
@@ -145,7 +146,7 @@ export default function MessagesPage() {
       const otherId = convo.participant_1 === userId ? convo.participant_2 : convo.participant_1
       const { data: prof } = await supabase
         .from('profiles')
-        .select('full_name, group_id, groups(name)')
+        .select('full_name, group_id, avatar_url, groups(name)')
         .eq('id', otherId)
         .single()
       // Get latest message
@@ -329,9 +330,7 @@ export default function MessagesPage() {
               return (
                 <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                   {!isMe && (
-                    <div className="w-7 h-7 rounded-full bg-bt-pale border border-gray-200 flex items-center justify-center flex-shrink-0 mb-0.5">
-                      <span className="text-bt-navy font-bold text-xs">{getInitials(name)}</span>
-                    </div>
+                    <Avatar src={msg.profiles?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
                   )}
                   <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                     {showName && (
@@ -409,9 +408,7 @@ export default function MessagesPage() {
                 return (
                   <Link key={convo.id} href={`/dm/${convo.id}`}
                     className="flex items-center gap-3 bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-                    <div className="w-11 h-11 rounded-full bg-bt-navy flex items-center justify-center flex-shrink-0">
-                      <span className="text-white font-bold text-sm">{getInitials(name)}</span>
-                    </div>
+                    <Avatar src={convo.other?.avatar_url} name={name} className="w-11 h-11 bg-bt-navy" textClass="text-white font-bold text-sm" />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-gray-900 text-sm">{name}</p>
                       {tableName && <p className="text-xs text-bt-blue">{tableName}</p>}

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -77,7 +78,7 @@ export default function DMPage() {
       const otherId = convo.participant_1 === user.id ? convo.participant_2 : convo.participant_1
       const { data: prof } = await supabase
         .from('profiles')
-        .select('full_name, group_id, groups(name)')
+        .select('full_name, group_id, avatar_url, groups(name)')
         .eq('id', otherId)
         .single()
 
@@ -148,9 +149,7 @@ export default function DMPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div className="w-9 h-9 rounded-full bg-bt-blue flex items-center justify-center flex-shrink-0">
-          <span className="text-white font-bold text-sm">{getInitials(otherName)}</span>
-        </div>
+        <Avatar src={otherPerson?.avatar_url} name={otherName} className="w-9 h-9 bg-bt-blue" textClass="text-white font-bold text-sm" />
         <div>
           <p className="text-white font-bold leading-tight">{otherName}</p>
           {tableName && <p className="text-bt-light/60 text-xs">{tableName}</p>}
@@ -174,9 +173,7 @@ export default function DMPage() {
           return (
             <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
               {!isMe && (
-                <div className="w-7 h-7 rounded-full bg-bt-pale border border-gray-200 flex items-center justify-center flex-shrink-0 mb-0.5">
-                  <span className="text-bt-navy font-bold text-xs">{getInitials(otherName)}</span>
-                </div>
+                <Avatar src={otherPerson?.avatar_url} name={otherName} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
               )}
               <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && (

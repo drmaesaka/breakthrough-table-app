@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Avatar from '@/components/Avatar'
 
 export default function GroupPage() {
   const [members, setMembers] = useState<any[]>([])
@@ -29,7 +30,7 @@ export default function GroupPage() {
 
       const { data: memberData } = await supabase
         .from('profiles')
-        .select('id, full_name, adherence_percent, role')
+        .select('id, full_name, adherence_percent, role, avatar_url')
         .eq('group_id', prof.group_id)
         .order('adherence_percent', { ascending: false })
 
@@ -92,11 +93,9 @@ export default function GroupPage() {
             <div key={member.id}
               className={`bg-white rounded-2xl px-4 py-4 shadow-sm ${isYou ? 'ring-2 ring-bt-blue' : ''}`}>
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isYou ? 'bg-bt-blue' : 'bg-bt-pale'}`}>
-                  <span className={`font-bold text-sm ${isYou ? 'text-white' : 'text-bt-navy'}`}>
-                    {initials(member.full_name)}
-                  </span>
-                </div>
+                <Avatar src={member.avatar_url} name={member.full_name}
+                  className={`w-10 h-10 ${isYou ? 'bg-bt-blue' : 'bg-bt-pale'}`}
+                  textClass={`font-bold text-sm ${isYou ? 'text-white' : 'text-bt-navy'}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <p className="font-semibold text-gray-900 text-sm">

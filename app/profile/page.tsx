@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Avatar from '@/components/Avatar'
+import { shrinkImage } from '@/lib/image'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<any>(null)
@@ -29,6 +31,9 @@ export default function ProfilePage() {
   // Directory state
   // Listed by default; only an explicit false hides someone (2026-09-03).
   const [directoryOptIn, setDirectoryOptIn] = useState(true)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarError, setAvatarError] = useState('')
   const [bio, setBio] = useState('')
   const [linkedinUrl, setLinkedinUrl] = useState('')
   const [contactEmail, setContactEmail] = useState('')
@@ -55,6 +60,7 @@ export default function ProfilePage() {
       if (prof) {
         setProfile(prof)
         setName(prof.full_name || '')
+        setAvatarUrl(prof.avatar_url || null)
         setDirectoryOptIn(prof.directory_opt_in !== false)
         setBio(prof.bio || '')
         setLinkedinUrl(prof.linkedin_url || '')
@@ -193,6 +199,46 @@ export default function ProfilePage() {
     return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
+  /**
+   * Profile picture. Shrunk in the browser to 512px, stored under the
+   * member's own folder in the "avatars" bucket, URL saved on the profile.
+   * A new random file name each time, so a changed photo is not served
+   * stale from a cache that still has the old one under the same path.
+   */
+  async function uploadAvatar(file: File) {
+    if (!userId) return
+    setAvatarError('')
+    setAvatarBusy(true)
+    const supabase = createClient()
+    const blob = await shrinkImage(file)
+    const path = `${userId}/${crypto.randomUUID()}.jpg`
+    const { error: upErr } = await supabase.storage.from('avatars').upload(path, blob, {
+      contentType: blob.type || 'image/jpeg', upsert: false,
+    })
+    if (upErr) {
+      setAvatarBusy(false)
+      setAvatarError(/bucket not found/i.test(upErr.message)
+        ? 'Photos need the 2026-09-03 avatars migration to be run in Supabase first'
+        : `Could not upload the photo: ${upErr.message}`)
+      return
+    }
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+    const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', userId)
+    setAvatarBusy(false)
+    if (dbErr) { setAvatarError(`Could not save the photo: ${dbErr.message}`); return }
+    setAvatarUrl(data.publicUrl)
+  }
+
+  async function removeAvatar() {
+    if (!userId) return
+    setAvatarBusy(true)
+    setAvatarError('')
+    const { error } = await createClient().from('profiles').update({ avatar_url: null }).eq('id', userId)
+    setAvatarBusy(false)
+    if (error) { setAvatarError(`Could not remove the photo: ${error.message}`); return }
+    setAvatarUrl(null)
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
       <p className="text-gray-400">Loading...</p>
@@ -203,9 +249,20 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-10">
         <div className="flex flex-col items-center">
-          <div className="w-20 h-20 rounded-full bg-bt-blue flex items-center justify-center mb-3">
-            <span className="text-white text-2xl font-bold">{getInitials(name)}</span>
-          </div>
+          <label className="relative cursor-pointer mb-3">
+            <Avatar src={avatarUrl} name={name} className="w-20 h-20 bg-bt-blue" textClass="text-white text-2xl font-bold" />
+            <span className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-white shadow flex items-center justify-center text-sm">
+              {avatarBusy ? '…' : '📷'}
+            </span>
+            <input type="file" accept="image/*" className="hidden" disabled={avatarBusy}
+              onChange={e => { const f = e.target.files?.[0]; if (f) uploadAvatar(f); e.target.value = '' }} />
+          </label>
+          <p className="text-bt-light/70 text-xs -mt-1 mb-2">
+            {avatarBusy ? 'Uploading photo…' : avatarUrl ? (
+              <>Tap the photo to change it · <button type="button" onClick={removeAvatar} className="underline">remove</button></>
+            ) : 'Tap to add a photo'}
+          </p>
+          {avatarError && <p className="text-red-200 text-xs mb-2 text-center">{avatarError}</p>}
           <h1 className="text-white text-2xl font-bold">{name || 'Your Name'}</h1>
           <p className="text-bt-light/60 text-sm mt-0.5">{email}</p>
           <div className="flex gap-2 mt-2 flex-wrap justify-center">

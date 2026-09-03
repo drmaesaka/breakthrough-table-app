@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   const supabase = adminClient()
   // Same shape as the browser path: newest 200 on first load, only newer rows
   // on every poll after that.
-  const query = supabase.from('messages').select('*, profiles(full_name)').eq('group_id', groupId)
+  const query = supabase.from('messages').select('*, profiles(full_name, avatar_url)').eq('group_id', groupId)
   const { data, error } = after
     ? await query.gt('created_at', after).order('created_at', { ascending: true })
     : await query.order('created_at', { ascending: false }).limit(200)

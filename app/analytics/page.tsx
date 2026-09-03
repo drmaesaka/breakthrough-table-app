@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Avatar from '@/components/Avatar'
 import { localDay } from '@/lib/dates'
 import { ledGroups } from '@/lib/leader-groups'
 
@@ -37,7 +38,7 @@ export default function AnalyticsPage() {
       // unfiltered task_completions scan would be silently truncated by
       // PostgREST's 1000-row cap once the table grows, corrupting these numbers.
       const [{ data: allMembers }, { data: allTasks }, { data: attendanceRows }] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id').in('group_id', groupIds),
+        supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id, avatar_url').in('group_id', groupIds),
         supabase.from('tasks').select('id, group_id').eq('archived', false).in('group_id', groupIds),
         supabase.from('meeting_attendance').select('user_id').in('group_id', groupIds),
       ])
@@ -212,9 +213,7 @@ export default function AnalyticsPage() {
                           </div>
 
                           {/* Avatar */}
-                          <div className="w-8 h-8 rounded-full bg-bt-pale flex items-center justify-center flex-shrink-0">
-                            <span className="text-bt-navy font-bold text-xs">{initials(member.full_name)}</span>
-                          </div>
+                          <Avatar src={member.avatar_url} name={member.full_name} className="w-8 h-8 bg-bt-pale" textClass="text-bt-navy font-bold text-xs" />
 
                           {/* Name + habit status */}
                           <div className="flex-1 min-w-0">

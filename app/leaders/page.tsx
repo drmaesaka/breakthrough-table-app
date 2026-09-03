@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Avatar from '@/components/Avatar'
 
 // The TCs' own space: one channel across every table, plus a shared shelf of
 // internal material. Table chat is scoped to a group_id and DMs are one-to-one,
@@ -55,7 +56,7 @@ export default function LeadersPage() {
     if (!newestSeen) {
       const { data: page, error } = await supabase
         .from('leader_messages')
-        .select('*, profiles(full_name)')
+        .select('*, profiles(full_name, avatar_url)')
         .order('created_at', { ascending: false })
         .limit(200)
       if (error || !page) {
@@ -70,7 +71,7 @@ export default function LeadersPage() {
 
     const { data: fresh, error } = await supabase
       .from('leader_messages')
-      .select('*, profiles(full_name)')
+      .select('*, profiles(full_name, avatar_url)')
       .gt('created_at', newestSeen)
       .order('created_at', { ascending: true })
     if (error || !fresh || fresh.length === 0) {
@@ -87,7 +88,7 @@ export default function LeadersPage() {
   async function fetchResources() {
     const { data, error } = await supabase
       .from('leader_resources')
-      .select('*, profiles(full_name)')
+      .select('*, profiles(full_name, avatar_url)')
       .order('created_at', { ascending: false })
     if (error) { console.error('leader resources fetch failed:', error.message); return }
     setResources((data || []) as Resource[])
@@ -149,7 +150,7 @@ export default function LeadersPage() {
       type: resType,
       description: resDesc.trim() || null,
       created_by: user.id,
-    }).select('*, profiles(full_name)').single()
+    }).select('*, profiles(full_name, avatar_url)').single()
     setResSaving(false)
     if (error) { setResError(error.message); return }
     setResources(p => [data as Resource, ...p])
@@ -277,9 +278,7 @@ export default function LeadersPage() {
               return (
                 <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                   {!isMe && (
-                    <div className="w-7 h-7 rounded-full bg-bt-pale border border-gray-200 flex items-center justify-center flex-shrink-0 mb-0.5">
-                      <span className="text-bt-navy font-bold text-xs">{getInitials(name)}</span>
-                    </div>
+                    <Avatar src={msg.profiles?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
                   )}
                   <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                     {showName && (
