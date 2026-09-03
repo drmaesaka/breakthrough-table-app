@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   if (!mine.includes((row as any).group_id)) return NextResponse.json({ error: 'Not your table' }, { status: 403 })
 
   const text = String((row as any)[textCol] || '').slice(0, 140)
-  const copy: Record<Exclude<NotifyKind, 'chat' | 'dm'>, { title: string; url: string; cta: string }> = {
+  const copy: Record<Exclude<NotifyKind, 'chat' | 'dm' | 'broadcast'>, { title: string; url: string; cta: string }> = {
     task: { title: '📚 New reading & resources', url: '/tasks', cta: 'See it on My Tasks' },
     prompt: { title: '✍️ New reflection prompt', url: '/journal', cta: 'Write your reflection' },
     content: { title: '📖 New in the Library', url: '/library', cta: 'Open the Library' },
