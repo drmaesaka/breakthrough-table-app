@@ -230,7 +230,7 @@ export default function TasksPage() {
 
             {/* Reading Section */}
             <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 px-1">Reading & Homework</p>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 px-1">Reading & Resources</p>
               {tasks.length === 0 ? (
                 <div className="text-center py-10">
                   <p className="text-4xl mb-3">📚</p>

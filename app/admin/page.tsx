@@ -31,10 +31,10 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 
 type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
 
-// Members see what a leader adds under "tasks" as "Reading & Homework" on
+// Members see what a leader adds under "tasks" as "Reading & Resources" on
 // My Tasks. Leaders could not connect the two names, so the tab now uses the
 // members' one. Everything else keeps its bare name.
-const TAB_LABEL: Partial<Record<Tab, string>> = { tasks: 'Reading & Homework' }
+const TAB_LABEL: Partial<Record<Tab, string>> = { tasks: 'Reading & Resources' }
 
 /**
  * "Send to" chips for anything a leader posts to a table. The table picked at
@@ -956,13 +956,13 @@ export default function AdminPage() {
       }))
     ).select()
     setTaskSaving(false)
-    if (error) { setTaskError(`Could not assign: ${error.message}`); return }
+    if (error) { setTaskError(`Could not post: ${error.message}`); return }
     const here = (data || []).find(row => row.group_id === selectedGroup)
     if (here) setTasks(p => [here, ...p])
     setTaskTitle(''); setTaskDesc('')
     if (targetIds.length > 1) {
       const names = targetIds.map(id => groups.find(g => g.id === id)?.name).filter(Boolean)
-      alert(`Assigned to ${names.length} tables: ${names.join(', ')}`)
+      alert(`Posted to ${names.length} tables: ${names.join(', ')}`)
     }
   }
 
@@ -1115,19 +1115,19 @@ export default function AdminPage() {
               </button>
             </div>
 
-            {/* Assign reading / homework. Members see these under
-                "Reading & Homework" on My Tasks and tick them off; each one
+            {/* Add reading / resources. Members see these under
+                "Reading & Resources" on My Tasks and tick them off; each one
                 counts toward their adherence like a habit does. */}
             {(() => {
               const tableName = groups.find(g => g.id === selectedGroup)?.name || 'this table'
               const count = targetTables(groups, selectedGroup, taskAlsoTo).length
               return (
                 <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-                  <h3 className="font-bold text-bt-navy">Assign Reading or Homework</h3>
+                  <h3 className="font-bold text-bt-navy">Add Reading or Resources</h3>
                   <p className="text-gray-400 text-xs">
                     Members of <span className="font-semibold text-bt-navy">{tableName}</span> see this under
-                    “Reading &amp; Homework” on their My Tasks screen and check it off when it’s done.
-                    To assign to a different table, change the table at the top of this page.
+                    “Reading &amp; Resources” on their My Tasks screen and check it off when it’s done.
+                    To post to a different table, change the table at the top of this page.
                   </p>
                   <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)}
                     placeholder="e.g. Read chapters 3–4 before next meeting *" className={inputClass} />
@@ -1136,7 +1136,7 @@ export default function AdminPage() {
                   {taskError && <p className="text-red-600 text-xs">{taskError}</p>}
                   <button onClick={addTask} disabled={taskSaving || !taskTitle.trim()}
                     className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                    {taskSaving ? 'Assigning...' : count > 1 ? `Assign to ${count} tables` : `Assign to ${tableName}`}
+                    {taskSaving ? 'Posting...' : count > 1 ? `Post to ${count} tables` : `Post to ${tableName}`}
                   </button>
                 </div>
               )
@@ -1145,10 +1145,10 @@ export default function AdminPage() {
             {/* Task list */}
             <div className="space-y-2">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide px-1">
-                Currently assigned to {groups.find(g => g.id === selectedGroup)?.name || 'this table'}
+                Currently posted to {groups.find(g => g.id === selectedGroup)?.name || 'this table'}
               </p>
               {tasks.length === 0 && (
-                <p className="text-center text-gray-400 text-sm py-4">Nothing assigned yet. Add reading or homework above.</p>
+                <p className="text-center text-gray-400 text-sm py-4">Nothing posted yet. Add reading or resources above.</p>
               )}
               {tasks.map(task => (
                 editing?.table === 'tasks' && editing.id === task.id ? (
