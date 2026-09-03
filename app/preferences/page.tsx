@@ -37,6 +37,10 @@ export default function PreferencesPage() {
   const [frequency, setFrequency] = useState(1)
   const [nudgeTimes, setNudgeTimes] = useState(['09:00'])
   const [tone, setTone] = useState('encouraging')
+  /** What to be told about, beyond the daily nudge. All on unless switched off. */
+  const [notifyChat, setNotifyChat] = useState(true)
+  const [notifyDms, setNotifyDms] = useState(true)
+  const [notifyUpdates, setNotifyUpdates] = useState(true)
   const [notifPermission, setNotifPermission] = useState<string>('default')
   const [requestingPermission, setRequestingPermission] = useState(false)
   const [pushSupport, setPushSupport] = useState<'supported' | 'ios-install' | 'unsupported'>('supported')
@@ -62,6 +66,9 @@ export default function PreferencesPage() {
         setFrequency(prefs.frequency)
         setNudgeTimes(prefs.nudge_times || ['09:00'])
         setTone(prefs.tone)
+        setNotifyChat(prefs.notify_chat !== false)
+        setNotifyDms(prefs.notify_dms !== false)
+        setNotifyUpdates(prefs.notify_updates !== false)
       }
 
       // Check current notification permission status
@@ -162,6 +169,9 @@ export default function PreferencesPage() {
       nudge_times: nudgeTimes,
       tone,
       timezone,
+      notify_chat: notifyChat,
+      notify_dms: notifyDms,
+      notify_updates: notifyUpdates,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' })
 
@@ -289,6 +299,31 @@ export default function PreferencesPage() {
         {enabled && (
           <>
             {/* Frequency */}
+            {/* What to be told about. Separate from the daily nudge above:
+                these fire when something happens, not on a schedule. */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+              <div>
+                <h3 className="font-bold text-bt-navy">Tell me when…</h3>
+                <p className="text-gray-400 text-xs mt-0.5">Beyond the daily nudge. All on unless you switch one off.</p>
+              </div>
+              {([
+                ['💬 Someone posts in my table chat', notifyChat, setNotifyChat, 'One ping per conversation, not per message'],
+                ['✉️ I get a direct message', notifyDms, setNotifyDms, ''],
+                ['📚 My TC posts reading, a prompt or a library item', notifyUpdates, setNotifyUpdates, ''],
+              ] as [string, boolean, (v: boolean) => void, string][]).map(([label, on, set, hint]) => (
+                <div key={label} className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{label}</p>
+                    {hint && <p className="text-xs text-gray-400">{hint}</p>}
+                  </div>
+                  <button type="button" onClick={() => set(!on)}
+                    className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${on ? 'bg-bt-navy' : 'bg-gray-200'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${on ? 'translate-x-6' : ''}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
             <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <div>

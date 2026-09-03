@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import { notifyAbout } from '@/lib/notify-client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
@@ -241,8 +242,9 @@ export default function MessagesPage() {
         group_id: groupId,
         user_id: user.id,
         content: text,
-      })
+      }).select('id').single()
       error = r.error
+      if (!r.error) notifyAbout('chat', r.data?.id)
     }
     setSending(false)
     // Keep the member's text in the box if the send failed — clearing it

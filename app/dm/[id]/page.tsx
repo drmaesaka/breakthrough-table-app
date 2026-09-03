@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
+import { notifyAbout } from '@/lib/notify-client'
 import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -110,12 +111,14 @@ export default function DMPage() {
     if (!newMessage.trim() || !user || sending) return
     const text = newMessage.trim()
     setSending(true)
-    const { error } = await supabase.from('direct_messages').insert({
+    const { data: sent, error } = await supabase.from('direct_messages').insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content: text,
-    })
+    }).select('id').single()
     setSending(false)
+    if (!error) notifyAbout('dm', sent?.id)
+    
     if (error) {
       console.error('dm send failed:', error.message)
       setSendError(true)

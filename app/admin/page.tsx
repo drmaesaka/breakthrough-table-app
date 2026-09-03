@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
+import { notifyAbout } from '@/lib/notify-client'
 import BottomNav from '@/components/BottomNav'
 import {
   MEETING_SECTIONS,
@@ -1005,6 +1006,7 @@ export default function AdminPage() {
     ).select()
     setTaskSaving(false)
     if (error) { setTaskError(`Could not post: ${error.message}`); return }
+    for (const row of data || []) notifyAbout('task', row.id)
     const here = (data || []).find(row => row.group_id === selectedGroup)
     if (here) setTasks(p => [here, ...p])
     setTaskTitle(''); setTaskDesc('')
@@ -1035,7 +1037,7 @@ export default function AdminPage() {
     }).select().single()
     setContentSaving(false)
     if (error) { setContentError(error.message); return }
-    if (data) { setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc(''); setContentFileName('') }
+    if (data) { notifyAbout('content', data.id); setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc(''); setContentFileName('') }
   }
 
   /**
@@ -1387,6 +1389,7 @@ export default function AdminPage() {
                 if (error) {
                   setPromptError(`Could not post the prompt: ${error.message}`)
                 } else {
+                  for (const row of data || []) notifyAbout('prompt', row.id)
                   const here = (data || []).find(row => row.group_id === selectedGroup)
                   if (here) setPrompts(p => [here, ...p])
                   setPromptText('')

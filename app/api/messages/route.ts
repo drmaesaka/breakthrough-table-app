@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
+import { notifyTableChat } from '@/lib/notify'
 
 // Table chat for a table the caller LEADS but does not sit at.
 //
@@ -54,9 +55,14 @@ export async function POST(req: NextRequest) {
   }
 
   // user_id comes from the token, never the body.
-  const { error } = await adminClient()
+  const admin = adminClient()
+  const { data: row, error } = await admin
     .from('messages')
     .insert({ group_id, user_id: auth.userId, content: text })
+    .select('id, group_id, user_id, content, created_at')
+    .single()
   if (error) return NextResponse.json({ error: 'Could not send', detail: error.message }, { status: 500 })
+  // Same ping the browser path sends; a failure here must not fail the send.
+  try { await notifyTableChat(admin, row) } catch (err) { console.error('chat notify failed:', err) }
   return NextResponse.json({ ok: true })
 }
