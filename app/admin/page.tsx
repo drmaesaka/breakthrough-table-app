@@ -211,6 +211,9 @@ export default function AdminPage() {
   // edit the outline or broadcast.
   const [groupLeaders, setGroupLeaders] = useState<Record<string, any[]>>({})
   const [leaderPick, setLeaderPick] = useState<Record<string, string>>({})
+  /** "Add a member..." pick per table on the groups tab, keyed by group id. */
+  const [memberPick, setMemberPick] = useState<Record<string, string>>({})
+  const [memberBusy, setMemberBusy] = useState('')
   const [leaderBusy, setLeaderBusy] = useState('')
   const [leaderError, setLeaderError] = useState('')
 
@@ -1561,6 +1564,89 @@ export default function AdminPage() {
                       </div>
                       {leaderError && <p className="text-[11px] text-red-600 font-medium">{leaderError}</p>}
                     </div>
+
+                    {/* Members. Leaders asked to seat someone who is already in
+                        the app without sending them the invite link again. Same
+                        shape as the co-leader box above. The list only offers
+                        people the caller can see: anyone with no table, and
+                        members of the caller's other tables. Someone sitting
+                        at a table this leader does not run is not offered —
+                        the members API refuses that move, deliberately, so no
+                        leader can pull a member off another TC's table. */}
+                    {(() => {
+                      const seated = users
+                        .filter((u: any) => u.group_id === g.id)
+                        .slice()
+                        .sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))
+                      const candidates = users
+                        .filter((u: any) => u.group_id !== g.id)
+                        .slice()
+                        .sort((a: any, b: any) => {
+                          const rank = (u: any) => (u.group_id ? 1 : 0)
+                          return rank(a) - rank(b) || (a.full_name || '').localeCompare(b.full_name || '')
+                        })
+                      const pick = memberPick[g.id] || ''
+                      const busy = memberBusy === g.id
+                      const isLeaderHere = (id: string) => (groupLeaders[g.id] || []).some((l: any) => l.user_id === id)
+                      return (
+                        <div className="bg-bt-pale rounded-xl p-3 space-y-2">
+                          <p className="text-xs text-gray-400 font-medium">Members ({seated.length})</p>
+                          {seated.length === 0 && (
+                            <p className="text-[11px] text-gray-400">Nobody seated yet.</p>
+                          )}
+                          {seated.map((u: any) => (
+                            <div key={u.id} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-700 font-medium flex-1 truncate">
+                                {u.full_name || 'Unnamed'}
+                                {isLeaderHere(u.id) && <span className="text-[10px] text-bt-blue font-bold ml-1">TC</span>}
+                              </span>
+                              <button
+                                disabled={busy}
+                                onClick={async () => {
+                                  if (!confirm(`Take ${u.full_name || 'this member'} off ${g.name}? They keep their account and can be seated again.`)) return
+                                  setMemberBusy(g.id)
+                                  await assignUserToGroup(u.id, '')
+                                  setMemberBusy('')
+                                }}
+                                className="text-[11px] text-red-400 font-medium flex-shrink-0 disabled:opacity-40">
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          <div className="flex gap-2 pt-1">
+                            <select
+                              value={pick}
+                              onChange={e => setMemberPick(prev => ({ ...prev, [g.id]: e.target.value }))}
+                              className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white">
+                              <option value="">Add a member already in the app...</option>
+                              {candidates.map((u: any) => {
+                                const elsewhere = u.group_id ? groups.find((x: any) => x.id === u.group_id)?.name : null
+                                return (
+                                  <option key={u.id} value={u.id}>
+                                    {u.full_name || 'Unnamed'}{elsewhere ? ` — currently at ${elsewhere}` : ' — no table yet'}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                            <button
+                              disabled={!pick || busy}
+                              onClick={async () => {
+                                setMemberBusy(g.id)
+                                await assignUserToGroup(pick, g.id)
+                                setMemberPick(prev => ({ ...prev, [g.id]: '' }))
+                                setMemberBusy('')
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-bt-navy text-white text-xs font-semibold disabled:opacity-40 flex-shrink-0">
+                              {busy ? '...' : 'Add'}
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-gray-400 leading-relaxed">
+                            Shows people with no table yet and members of your other tables. A person sits at one
+                            table, so adding them here moves them. Someone brand new still needs the invite link below.
+                          </p>
+                        </div>
+                      )
+                    })()}
 
                     <div className="bg-bt-pale rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1.5 font-medium">Invite Link</p>
