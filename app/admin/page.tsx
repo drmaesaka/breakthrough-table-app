@@ -173,6 +173,12 @@ export default function AdminPage() {
   const [meetingDefaults, setMeetingDefaults] = useState<StoredMeetingPlan[]>([])
   const [meetingOverrides, setMeetingOverrides] = useState<StoredMeetingPlan[]>([])
   const [selectedMeetingNumber, setSelectedMeetingNumber] = useState<number | null>(null)
+  /** Roll call for the selected meeting: who was there. Saved via /api/admin/attendance. */
+  const [attendance, setAttendance] = useState<Set<string>>(new Set())
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [attendanceSaving, setAttendanceSaving] = useState(false)
+  const [attendanceDirty, setAttendanceDirty] = useState(false)
+  const [attendanceMsg, setAttendanceMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [meetingScope, setMeetingScope] = useState<'default' | 'table'>('table')
   const [meetingDraft, setMeetingDraft] = useState<Record<string, string> | null>(null)
   const [meetingSaving, setMeetingSaving] = useState(false)
@@ -456,6 +462,42 @@ export default function AdminPage() {
     setMeetingDraft(null)
     await loadMeetingPlans()
   }
+
+  async function loadAttendance(gid: string, number: number) {
+    setAttendanceLoading(true)
+    setAttendanceMsg(null)
+    setAttendanceDirty(false)
+    const res = await fetch(`/api/admin/attendance?group_id=${encodeURIComponent(gid)}&number=${number}`, { headers: await authHeaders() })
+    const json = await res.json().catch(() => ({}))
+    setAttendanceLoading(false)
+    if (!res.ok) { setAttendance(new Set()); setAttendanceMsg({ kind: 'err', text: json.error || `Could not load attendance (${res.status})` }); return }
+    setAttendance(new Set<string>(json.user_ids || []))
+  }
+
+  async function saveAttendance() {
+    if (!selectedGroup || selectedMeetingNumber === null) return
+    setAttendanceSaving(true)
+    setAttendanceMsg(null)
+    const res = await fetch('/api/admin/attendance', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify({ group_id: selectedGroup, number: selectedMeetingNumber, user_ids: [...attendance] }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setAttendanceSaving(false)
+    if (!res.ok) { setAttendanceMsg({ kind: 'err', text: json.error || `Could not save (${res.status})` }); return }
+    setAttendance(new Set<string>(json.user_ids || []))
+    setAttendanceDirty(false)
+    setAttendanceMsg({ kind: 'ok', text: `Saved — ${(json.user_ids || []).length} present` })
+  }
+
+  // Roll call follows whichever meeting is open on the meetings tab.
+  useEffect(() => {
+    if (tab === 'meetings' && selectedGroup && selectedMeetingNumber !== null) {
+      loadAttendance(selectedGroup, selectedMeetingNumber)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, selectedGroup, selectedMeetingNumber])
 
   async function setCurrentMeeting(number: number | null) {
     if (!selectedGroup) return
@@ -2756,6 +2798,65 @@ export default function AdminPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Roll call. What fills the "Your BT Journey" timeline on
+                      every member's dashboard — one tap per name, then Save. */}
+                  {(() => {
+                    const seated = users
+                      .filter((u: any) => u.group_id === selectedGroup)
+                      .slice()
+                      .sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))
+                    const toggle = (id: string) => {
+                      setAttendance(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+                      setAttendanceDirty(true)
+                      setAttendanceMsg(null)
+                    }
+                    return (
+                      <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <h3 className="font-bold text-bt-navy">Attendance</h3>
+                            <p className="text-xs text-gray-400 mt-0.5">Tap everyone who was at meeting #{selected.number}, then Save.</p>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button type="button" onClick={() => { setAttendance(new Set(seated.map((u: any) => u.id))); setAttendanceDirty(true); setAttendanceMsg(null) }}
+                              className="text-xs text-bt-blue font-semibold">Everyone</button>
+                            <button type="button" onClick={() => { setAttendance(new Set()); setAttendanceDirty(true); setAttendanceMsg(null) }}
+                              className="text-xs text-gray-400 font-semibold">Nobody</button>
+                          </div>
+                        </div>
+                        {attendanceLoading ? (
+                          <p className="text-xs text-gray-400">Loading...</p>
+                        ) : seated.length === 0 ? (
+                          <p className="text-xs text-gray-400">Nobody is seated at this table yet.</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2">
+                            {seated.map((u: any) => {
+                              const here = attendance.has(u.id)
+                              return (
+                                <button key={u.id} type="button" onClick={() => toggle(u.id)}
+                                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-left text-sm font-medium ${
+                                    here ? 'border-bt-navy bg-bt-navy text-white' : 'border-gray-100 bg-white text-gray-600'
+                                  }`}>
+                                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
+                                    here ? 'bg-white text-bt-navy' : 'border border-gray-300'
+                                  }`}>{here ? '✓' : ''}</span>
+                                  <span className="truncate">{u.full_name || 'Unnamed'}</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {attendanceMsg && (
+                          <p className={`text-xs font-medium ${attendanceMsg.kind === 'ok' ? 'text-green-600' : 'text-red-600'}`}>{attendanceMsg.text}</p>
+                        )}
+                        <button onClick={saveAttendance} disabled={attendanceSaving || attendanceLoading || !attendanceDirty}
+                          className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                          {attendanceSaving ? 'Saving...' : attendanceDirty ? `Save attendance (${attendance.size} present)` : `Attendance saved (${attendance.size} present)`}
+                        </button>
+                      </div>
+                    )
+                  })()}
 
                   {meetingDraft ? (
                     <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">

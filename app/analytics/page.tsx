@@ -10,6 +10,8 @@ export default function AnalyticsPage() {
   const [groups, setGroups] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
+  /** Meetings attended per member, from meeting_attendance (leaders read their tables' rows). */
+  const [attended, setAttended] = useState<Record<string, number>>({})
   const router = useRouter()
 
   const today = localDay()
@@ -34,10 +36,14 @@ export default function AnalyticsPage() {
       // Everything is scoped to this leader's groups — beyond correctness, the
       // unfiltered task_completions scan would be silently truncated by
       // PostgREST's 1000-row cap once the table grows, corrupting these numbers.
-      const [{ data: allMembers }, { data: allTasks }] = await Promise.all([
+      const [{ data: allMembers }, { data: allTasks }, { data: attendanceRows }] = await Promise.all([
         supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, group_id').in('group_id', groupIds),
         supabase.from('tasks').select('id, group_id').eq('archived', false).in('group_id', groupIds),
+        supabase.from('meeting_attendance').select('user_id').in('group_id', groupIds),
       ])
+      const counts: Record<string, number> = {}
+      for (const r of attendanceRows || []) counts[r.user_id] = (counts[r.user_id] || 0) + 1
+      setAttended(counts)
 
       const memberIds = (allMembers || []).map((m: any) => m.id)
       const taskIds = (allTasks || []).map((t: any) => t.id)
@@ -220,6 +226,9 @@ export default function AnalyticsPage() {
                               {member.streak > 0 && (
                                 <span className="text-xs text-orange-500 font-semibold">{member.streak}🔥</span>
                               )}
+                              <span className="text-xs text-gray-400 font-medium" title="Meetings attended">
+                                🗓 {attended[member.id] || 0} mtg{(attended[member.id] || 0) === 1 ? '' : 's'}
+                              </span>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className={`text-xs font-medium ${member.habitDone ? 'text-green-500' : 'text-gray-300'}`}>

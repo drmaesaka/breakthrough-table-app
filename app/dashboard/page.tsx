@@ -6,12 +6,21 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
-import { localDay } from '@/lib/dates'
+import { MEETING_PLANS, resolveMeetingPlans, type StoredMeetingPlan } from '@/lib/meeting-plans'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
   const [groupName, setGroupName] = useState('')
-  const [taskStats, setTaskStats] = useState({ total: 0, completed: 0 })
+  /**
+   * "Your BT Journey": the table's meetings and which ones this member was
+   * at. Replaces the adherence percentage, which started every period at 0
+   * and read as failure. See sql/2026-09-03-attendance.sql.
+   */
+  const [journey, setJourney] = useState<{
+    meetings: { number: number; title: string }[]
+    attended: Set<number>
+    current: number | null
+  } | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -20,45 +29,35 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('*, groups(name), streak').eq('id', user.id).single()
+      const { data: prof } = await supabase.from('profiles').select('*, groups(name, current_meeting_number), streak').eq('id', user.id).single()
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
       }
 
       if (prof?.group_id) {
-        // Must match /tasks exactly: only the current period's tasks, plus the
-        // daily habit as one more item. Counting archived tasks and omitting
-        // the habit made this number drift further from the tasks page every
-        // period — by period five it showed roughly a fifth of the real figure.
-        const [{ data: tasks }, { data: completions }, { data: habitToday }, { data: liveHabits }] = await Promise.all([
-          supabase.from('tasks').select('id').eq('group_id', prof.group_id).eq('archived', false),
-          supabase.from('task_completions').select('task_id').eq('user_id', user.id),
-          // Not maybeSingle: a member with two habits logs two rows a day, and
-          // maybeSingle errors on more than one — which read as "habit not
-          // done" and quietly understated the figure.
-          supabase.from('habit_completions').select('habit_id')
-            .eq('user_id', user.id).eq('completed_date', localDay()),
-          supabase.from('habits').select('id').eq('user_id', user.id).is('archived_at', null),
+        const [{ data: planRows }, { data: attendedRows, error: attendanceError }] = await Promise.all([
+          // RLS hands back the BT defaults plus this table's overrides.
+          supabase.from('meeting_plans').select('group_id, number, title').order('number', { ascending: true }),
+          supabase.from('meeting_attendance').select('meeting_number').eq('user_id', user.id).eq('group_id', prof.group_id),
         ])
-        if (tasks) {
-          const completedIds = new Set(completions?.map((c: any) => c.task_id))
-          const habitCount = (liveHabits || []).length
-          const habitsDone = new Set(
-            (habitToday || []).map((r: any) => r.habit_id).filter(Boolean)
-          ).size
-          setTaskStats({
-            total: tasks.length + habitCount,
-            completed: tasks.filter((t: any) => completedIds.has(t.id)).length + habitsDone,
-          })
-        }
+        // Before the attendance migration the table does not exist; the
+        // journey still renders, with nothing filled in yet.
+        if (attendanceError) console.error('attendance fetch failed:', attendanceError.message)
+        const resolved = planRows && planRows.length
+          ? resolveMeetingPlans(planRows as StoredMeetingPlan[])
+          : (MEETING_PLANS as StoredMeetingPlan[])
+        setJourney({
+          meetings: resolved.map(m => ({ number: m.number, title: m.title })),
+          attended: new Set((attendedRows || []).map((r: any) => r.meeting_number as number)),
+          current: prof.groups?.current_meeting_number ?? null,
+        })
       }
     }
     load()
   }, [router])
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there'
-  const adherence = taskStats.total > 0 ? Math.round((taskStats.completed / taskStats.total) * 100) : 0
 
   return (
     <div className="min-h-screen bg-bt-pale">
@@ -107,26 +106,84 @@ export default function DashboardPage() {
           </Link>
         )}
 
-        {/* Adherence card - only show if in a group */}
+        {/* Journey card + quick links - only show if in a group */}
         {profile?.group_id && (
           <>
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <p className="text-gray-400 text-sm font-medium">Your Adherence This Period</p>
-              <div className="flex items-end gap-2 mt-2 mb-3">
-                <span className="text-5xl font-bold text-bt-navy">{adherence}%</span>
-                <span className="text-gray-400 text-sm pb-1.5">{taskStats.completed} of {taskStats.total} done</span>
-              </div>
-              <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                <div className="h-full bg-bt-blue rounded-full transition-all duration-500" style={{ width: `${adherence}%` }} />
-              </div>
-              {profile?.streak > 0 && (
-                <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-                  <span className="text-xl">🔥</span>
-                  <p className="text-sm font-semibold text-gray-700">{profile.streak} period streak</p>
-                  <p className="text-xs text-gray-400">— keep it going!</p>
+            {/* Your BT Journey — the table's meetings, this member's attended
+                ones filled in. No percentage: nothing here starts at zero. */}
+            {journey && (() => {
+              const numbered = journey.meetings.filter(m => m.number >= 1)
+              const total = numbered.length || 12
+              const maxAttended = Math.max(0, ...[...journey.attended])
+              // Where the table is. If the TC has not marked a current meeting,
+              // the furthest one this member attended stands in.
+              const here = journey.current ?? (maxAttended || null)
+              const current = here !== null ? journey.meetings.find(m => m.number === here) || null : null
+              const next = here === null
+                ? numbered[0] || null
+                : numbered.find(m => m.number > here) || null
+              const missed = numbered.filter(m => here !== null && m.number < here && !journey.attended.has(m.number))
+              const status = (n: number) => {
+                if (n === 0) return 'done'                       // onboarding: they are here, they did it
+                if (journey.attended.has(n)) return 'done'
+                if (here !== null && n === here) return 'current'
+                if (here !== null && n < here) return 'missed'
+                return 'ahead'
+              }
+              return (
+                <div className="bg-white rounded-2xl p-5 shadow-sm">
+                  <p className="text-gray-400 text-sm font-medium">Your BT Journey</p>
+                  {current && current.number >= 1 ? (
+                    <>
+                      <p className="text-3xl font-bold text-bt-navy mt-1">Meeting {current.number} <span className="text-gray-300 text-xl font-semibold">of {total}</span></p>
+                      <p className="text-gray-500 text-sm mt-0.5">{current.title}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-3xl font-bold text-bt-navy mt-1">Your journey begins</p>
+                      <p className="text-gray-500 text-sm mt-0.5">Onboarding ✓ · {total} meetings ahead</p>
+                    </>
+                  )}
+
+                  {/* Timeline: onboarding + the numbered meetings */}
+                  <div className="mt-4 relative">
+                    <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-0.5 bg-gray-100" />
+                    <div className="relative flex justify-between">
+                      {journey.meetings.map(m => {
+                        const st = status(m.number)
+                        return (
+                          <div key={m.number} title={`${m.number === 0 ? 'Onboarding' : `Meeting ${m.number}`} · ${m.title}`}
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold border-2 ${
+                              st === 'done' ? 'bg-bt-navy border-bt-navy text-white'
+                              : st === 'current' ? 'bg-white border-bt-blue text-bt-blue ring-4 ring-bt-blue/15'
+                              : st === 'missed' ? 'bg-white border-gray-300 text-gray-400'
+                              : 'bg-bt-pale border-bt-pale text-gray-300'
+                            }`}>
+                            {st === 'done' ? '✓' : m.number === 0 ? 'O' : m.number}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-gray-100 space-y-1.5">
+                    {next ? (
+                      <p className="text-sm text-gray-700"><span className="font-semibold">Next:</span> Meeting {next.number} · {next.title}</p>
+                    ) : (
+                      <p className="text-sm text-gray-700 font-semibold">Final meeting — you made it 🎉</p>
+                    )}
+                    {missed.map(m => (
+                      <Link key={m.number} href="/meetings" className="block text-xs text-gray-400">
+                        Missed Meeting {m.number} · {m.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span>
+                      </Link>
+                    ))}
+                    {profile?.streak > 0 && (
+                      <p className="text-xs text-gray-400">🔥 {profile.streak} period streak</p>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              )
+            })()}
 
             <div className="grid grid-cols-2 gap-3">
               {[
