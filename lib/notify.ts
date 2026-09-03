@@ -11,12 +11,14 @@ import { fetchMemberEmails } from '@/lib/member-emails'
 // database trigger: those live only in the Supabase console and cannot be
 // audited from the repo.
 
-export type NotifyKind = 'chat' | 'dm' | 'task' | 'prompt' | 'content'
+export type NotifyKind = 'chat' | 'dm' | 'task' | 'prompt' | 'content' | 'broadcast'
 
 type Prefs = { notify_chat: boolean; notify_dms: boolean; notify_updates: boolean }
 const ALL_ON: Prefs = { notify_chat: true, notify_dms: true, notify_updates: true }
 
-const PREF_KEY: Record<NotifyKind, keyof Prefs> = {
+// A leader's broadcast has no switch: it is the one thing a member cannot
+// opt out of short of turning notifications off on the device.
+const PREF_KEY: Record<Exclude<NotifyKind, 'broadcast'>, keyof Prefs> = {
   chat: 'notify_chat', dm: 'notify_dms', task: 'notify_updates', prompt: 'notify_updates', content: 'notify_updates',
 }
 
@@ -55,9 +57,10 @@ export async function notifyMembers(admin: any, args: {
   const recipients = [...new Set(args.recipientIds)]
   if (!recipients.length) return { pushed: 0, emailed: 0, skipped: 0 }
 
-  const prefs = await memberPrefs(admin, recipients)
-  const key = PREF_KEY[args.kind]
-  const wanted = recipients.filter(id => (prefs.get(id) || ALL_ON)[key])
+  const prefs = args.kind === 'broadcast' ? new Map<string, Prefs>() : await memberPrefs(admin, recipients)
+  const wanted = args.kind === 'broadcast'
+    ? recipients
+    : recipients.filter(id => (prefs.get(id) || ALL_ON)[PREF_KEY[args.kind as Exclude<NotifyKind, 'broadcast'>]])
   const skipped = recipients.length - wanted.length
   if (!wanted.length) return { pushed: 0, emailed: 0, skipped }
 

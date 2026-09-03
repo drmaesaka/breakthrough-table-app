@@ -156,6 +156,8 @@ export default function AdminPage() {
   const [notifSaved, setNotifSaved] = useState(false)
   const [notifSaveError, setNotifSaveError] = useState(false)
   const [broadcastMessage, setBroadcastMessage] = useState('')
+  /** Who a broadcast goes to: this table, every table I lead, or all of BT. */
+  const [broadcastScope, setBroadcastScope] = useState<'table' | 'mine' | 'all'>('table')
   const [broadcasting, setBroadcasting] = useState(false)
   const [broadcastSent, setBroadcastSent] = useState(false)
 
@@ -326,7 +328,9 @@ export default function AdminPage() {
   }
 
   async function sendBroadcast() {
-    if (!broadcastMessage.trim() || !selectedGroup) return
+    if (!broadcastMessage.trim() || (broadcastScope === 'table' && !selectedGroup)) return
+    if (broadcastScope === 'all' && !confirm('Send this to EVERY Breakthrough Table member, at every table?')) return
+    if (broadcastScope === 'mine' && groups.length > 1 && !confirm(`Send this to everyone at all ${groups.length} of your tables?`)) return
     setBroadcasting(true)
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -336,7 +340,7 @@ export default function AdminPage() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session?.access_token}`,
       },
-      body: JSON.stringify({ group_id: selectedGroup, message: broadcastMessage.trim() }),
+      body: JSON.stringify({ group_id: selectedGroup, message: broadcastMessage.trim(), scope: broadcastScope }),
     })
     const result = await res.json()
     setBroadcasting(false)
@@ -347,7 +351,9 @@ export default function AdminPage() {
     setBroadcastSent(true)
     setBroadcastMessage('')
     setTimeout(() => setBroadcastSent(false), 3000)
-    alert(`Broadcast sent to ${result.sent} member${result.sent !== 1 ? 's' : ''}!`)
+    const parts = [`${result.sent} by push`]
+    if (result.emailed) parts.push(`${result.emailed} by email`)
+    alert(`Broadcast sent to ${result.recipients} member${result.recipients !== 1 ? 's' : ''} (${parts.join(', ')}).`)
   }
 
   // --- Meeting plans -------------------------------------------------------
@@ -1976,18 +1982,49 @@ export default function AdminPage() {
             <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
               <div>
                 <h3 className="font-bold text-bt-navy">Send Broadcast Now</h3>
-                <p className="text-gray-400 text-xs mt-0.5">One-time push to everyone on this table. No link.</p>
+                <p className="text-gray-400 text-xs mt-0.5">One-time announcement. Push where they have it, email where not.</p>
               </div>
+              {(() => {
+                const tableName = groups.find(g => g.id === selectedGroup)?.name || 'this table'
+                const options: { key: 'table' | 'mine' | 'all'; label: string }[] = [
+                  { key: 'table', label: tableName },
+                  ...(groups.length > 1 ? [{ key: 'mine' as const, label: `All my tables (${groups.length})` }] : []),
+                  { key: 'all', label: 'All BT members' },
+                ]
+                return (
+                  <div>
+                    <p className="text-xs text-gray-400 font-medium mb-1.5">Send to</p>
+                    <div className="flex flex-wrap gap-2">
+                      {options.map(o => (
+                        <button key={o.key} type="button" onClick={() => setBroadcastScope(o.key)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
+                            broadcastScope === o.key
+                              ? o.key === 'all' ? 'bg-red-600 text-white border-red-600' : 'bg-bt-navy text-white border-bt-navy'
+                              : 'bg-white text-gray-500 border-gray-200'
+                          }`}>
+                          {broadcastScope === o.key ? '✓ ' : ''}{o.label}
+                        </button>
+                      ))}
+                    </div>
+                    {broadcastScope === 'all' && (
+                      <p className="text-[11px] text-red-600 mt-1.5">Every member at every table, not just yours. You'll be asked to confirm.</p>
+                    )}
+                  </div>
+                )
+              })()}
               <textarea
                 value={broadcastMessage}
                 onChange={e => setBroadcastMessage(e.target.value)}
-                placeholder="Type your message to the table..."
+                placeholder={broadcastScope === 'all' ? 'Type your message to all of Breakthrough Table...' : 'Type your message...'}
                 rows={3}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue resize-none"
               />
               <button onClick={sendBroadcast} disabled={broadcasting || !broadcastMessage.trim()}
-                className="w-full bg-bt-blue text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                {broadcasting ? 'Sending...' : broadcastSent ? '✓ Sent!' : '📣 Send to Table Now'}
+                className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${broadcastScope === 'all' ? 'bg-red-600' : 'bg-bt-blue'}`}>
+                {broadcasting ? 'Sending...' : broadcastSent ? '✓ Sent!'
+                  : broadcastScope === 'all' ? '📣 Send to All BT Members'
+                  : broadcastScope === 'mine' ? '📣 Send to All My Tables'
+                  : '📣 Send to Table Now'}
               </button>
             </div>
 
