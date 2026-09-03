@@ -25,7 +25,15 @@ function getYouTubeId(url: string): string | null {
 function ContentCard({ item }: { item: any }) {
   const ytId = item.url ? getYouTubeId(item.url) : null
   const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null
-  const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.link
+  // Uploaded documents are saved as type "link" (the only types the table
+  // knows are video/pdf/article/link); badge them by file extension instead.
+  const isDoc = item.type === 'link' && /\.(docx?|pptx?|xlsx?|txt|rtf|pages|key|numbers)(\?|$)/i.test(item.url || '')
+  const isImage = item.type === 'link' && /\.(png|jpe?g|gif|webp|heic)(\?|$)/i.test(item.url || '')
+  const cfg = isDoc
+    ? { label: 'Document', bg: 'bg-emerald-50', text: 'text-emerald-600', icon: '📎' }
+    : isImage
+      ? { label: 'Image', bg: 'bg-pink-50', text: 'text-pink-500', icon: '🖼' }
+      : TYPE_CONFIG[item.type] || TYPE_CONFIG.link
 
   return (
     <a href={item.url} target="_blank" rel="noopener noreferrer"

@@ -109,6 +109,9 @@ export default function AdminPage() {
   const [contentTitle, setContentTitle] = useState('')
   const [contentUrl, setContentUrl] = useState('')
   const [contentType, setContentType] = useState('video')
+  /** A file being uploaded to the library bucket; its URL lands in contentUrl. */
+  const [contentUploading, setContentUploading] = useState(false)
+  const [contentFileName, setContentFileName] = useState('')
   const [contentDesc, setContentDesc] = useState('')
   const [groupName, setGroupName] = useState('')
   const [archiving, setArchiving] = useState(false)
@@ -977,7 +980,7 @@ export default function AdminPage() {
   async function addContent() {
     setContentError('')
     if (!contentTitle.trim()) { setContentError('Title is required'); return }
-    if (!contentUrl.trim()) { setContentError('URL is required'); return }
+    if (!contentUrl.trim()) { setContentError('Upload a file or paste a link'); return }
     if (!selectedGroup) { setContentError('No group selected'); return }
     setContentSaving(true)
     const supabase = createClient()
@@ -987,7 +990,46 @@ export default function AdminPage() {
     }).select().single()
     setContentSaving(false)
     if (error) { setContentError(error.message); return }
-    if (data) { setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc('') }
+    if (data) { setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc(''); setContentFileName('') }
+  }
+
+  /**
+   * Uploads a file to the "library" storage bucket and drops its public URL
+   * into the URL box, so saving works exactly as it does for a pasted link.
+   * Leaders asked to house PDFs, videos and documents in the app rather than
+   * link out. Type is guessed from the file so the badge is right without a
+   * second tap. See sql/2026-09-03-library-uploads.sql for the bucket.
+   */
+  async function uploadContentFile(file: File) {
+    setContentError('')
+    setContentUploading(true)
+    setContentFileName(file.name)
+    const supabase = createClient()
+    // Random prefix: unguessable URL, and two files with the same name
+    // cannot collide. Storage keys allow a narrow character set.
+    const safeName = file.name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80)
+    const path = `${selectedGroup || 'shared'}/${crypto.randomUUID()}-${safeName}`
+    const { error } = await supabase.storage.from('library').upload(path, file, {
+      contentType: file.type || undefined,
+      upsert: false,
+    })
+    setContentUploading(false)
+    if (error) {
+      const msg = /bucket not found/i.test(error.message)
+        ? 'File uploads need the 2026-09-03 migration to be run in Supabase first'
+        : /exceeded|too large|maximum/i.test(error.message)
+          ? 'That file is over the upload size limit. Raise it in Supabase → Settings → Storage, or link it instead.'
+          : `Upload failed: ${error.message}`
+      setContentError(msg)
+      setContentFileName('')
+      return
+    }
+    const { data } = supabase.storage.from('library').getPublicUrl(path)
+    setContentUrl(data.publicUrl)
+    if (!contentTitle.trim()) setContentTitle(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '))
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) setContentType('pdf')
+    else if (file.type.startsWith('video/')) setContentType('video')
+    else setContentType('link')
   }
 
   async function assignUserToGroup(userId: string, groupId: string) {
@@ -1188,7 +1230,26 @@ export default function AdminPage() {
             <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
               <h3 className="font-bold text-bt-navy">Add Content</h3>
               <input value={contentTitle} onChange={e => setContentTitle(e.target.value)} placeholder="Title *" className={inputClass} />
-              <input value={contentUrl} onChange={e => setContentUrl(e.target.value)} placeholder="URL *" className={inputClass} />
+              {/* Either paste a link or upload a file — the file's URL fills the same box. */}
+              <label className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer ${
+                contentUploading ? 'border-bt-blue bg-bt-pale/60' : 'border-gray-200 bg-bt-pale/40'
+              }`}>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-bt-navy">
+                    {contentUploading ? 'Uploading…' : contentFileName && contentUrl ? '✓ File uploaded' : '⬆ Upload a file'}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {contentFileName || 'PDF, video, document or image, stored in the app'}
+                  </p>
+                </div>
+                <input type="file" className="hidden" disabled={contentUploading}
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,image/*,video/*,audio/*"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadContentFile(f); e.target.value = '' }} />
+              </label>
+              <p className="text-center text-xs text-gray-400">or paste a link</p>
+              <input value={contentUrl}
+                onChange={e => { setContentUrl(e.target.value); if (contentFileName) setContentFileName('') }}
+                placeholder="URL (YouTube, website, etc.)" className={inputClass} />
               <input value={contentDesc} onChange={e => setContentDesc(e.target.value)} placeholder="Description (optional)" className={inputClass} />
               <select value={contentType} onChange={e => setContentType(e.target.value)} className={inputClass}>
                 <option value="video">🎥 Video</option>
@@ -1197,7 +1258,7 @@ export default function AdminPage() {
                 <option value="link">🔗 Link</option>
               </select>
               {contentError && <p className="text-red-500 text-sm">{contentError}</p>}
-              <button onClick={addContent} disabled={contentSaving}
+              <button onClick={addContent} disabled={contentSaving || contentUploading}
                 className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
                 {contentSaving ? 'Adding...' : 'Add Content'}
               </button>
