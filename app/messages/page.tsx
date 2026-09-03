@@ -200,10 +200,21 @@ export default function MessagesPage() {
               className={`px-5 py-2 rounded-t-xl text-sm font-semibold transition-colors ${
                 tab === t ? 'bg-bt-pale text-bt-navy' : 'text-white/60 hover:text-white/80'
               }`}>
-              {t === 'table' ? `💬 ${groupName || 'Table'}` : '✉️ Direct Messages'}
+              {t === 'table' ? '💬 Table Chat' : '✉️ Direct Messages'}
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Who can see this. Leaders asked whether the chat was their table or
+          all of BT — nothing on the screen said. Table chat is one table;
+          DMs reach anyone in the BT community. */}
+      <div className="bg-bt-pale px-5 pt-3 pb-1 flex-shrink-0">
+        <p className="text-xs text-gray-500">
+          {tab === 'table'
+            ? <>🔒 <span className="font-semibold text-bt-navy">{groupName || 'Your table'}</span> only. Just you and your tablemates can see this.</>
+            : <>Private one-to-one messages with anyone in the BT community, any table.</>}
+        </p>
       </div>
 
       {/* Table Chat */}
@@ -214,7 +225,7 @@ export default function MessagesPage() {
               <div className="text-center py-16">
                 <p className="text-4xl mb-3">💬</p>
                 <p className="text-gray-500 font-medium">No messages yet</p>
-                <p className="text-gray-400 text-sm mt-1">Say hello to your table!</p>
+                <p className="text-gray-400 text-sm mt-1">Say hello to your tablemates! Only your table sees this.</p>
               </div>
             )}
             {messages.map((msg, i) => {
@@ -282,7 +293,7 @@ export default function MessagesPage() {
               <span className="text-xl">👥</span>
               <div>
                 <p className="font-semibold">Browse Member Directory</p>
-                <p className="text-white/60 text-xs font-normal mt-0.5">Start a new conversation</p>
+                <p className="text-white/60 text-xs font-normal mt-0.5">Message anyone in BT, from any table</p>
               </div>
               <svg className="ml-auto w-4 h-4 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -295,7 +306,7 @@ export default function MessagesPage() {
               <div className="text-center py-12">
                 <p className="text-4xl mb-3">✉️</p>
                 <p className="text-gray-500 font-medium">No direct messages yet</p>
-                <p className="text-gray-400 text-sm mt-1">Find members in the directory to start a chat</p>
+                <p className="text-gray-400 text-sm mt-1">Find anyone in the BT community in the directory to start a chat</p>
               </div>
             )}
 
