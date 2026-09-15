@@ -220,6 +220,8 @@ export default function AdminPage() {
   // edit the outline or broadcast.
   const [groupLeaders, setGroupLeaders] = useState<Record<string, any[]>>({})
   const [leaderPick, setLeaderPick] = useState<Record<string, string>>({})
+  /** Every TC in BT, for the co-leader dropdown — see /api/admin/group-leaders?candidates=1. */
+  const [leaderCandidates, setLeaderCandidates] = useState<{ id: string; full_name: string; group_id: string | null; group_name: string | null }[]>([])
   /** "Add a member..." pick per table on the groups tab, keyed by group id. */
   const [memberPick, setMemberPick] = useState<Record<string, string>>({})
   const [memberBusy, setMemberBusy] = useState('')
@@ -782,6 +784,13 @@ export default function AdminPage() {
     setGroupLeaders(Object.fromEntries(entries))
   }
 
+  async function loadLeaderCandidates() {
+    const res = await fetch('/api/admin/group-leaders?candidates=1', { headers: await authHeaders() })
+    if (!res.ok) return
+    const { candidates } = await res.json()
+    setLeaderCandidates(candidates || [])
+  }
+
   async function changeLeaders(
     method: 'POST' | 'PATCH' | 'DELETE',
     groupId: string,
@@ -1171,6 +1180,7 @@ export default function AdminPage() {
               if (t === 'groups') {
                 groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
                 loadGroupLeaders(groups.map(g => g.id))
+                loadLeaderCandidates()
               }
             }}
               className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
@@ -1588,23 +1598,33 @@ export default function AdminPage() {
                               always handled many tables per leader. Own-table
                               members sort first; anyone else is labelled with
                               the table they sit at so the pick is deliberate. */}
-                          {users
-                            .filter((u: any) => !(groupLeaders[g.id] || []).some((l: any) => l.user_id === u.id))
-                            .slice()
-                            .sort((a: any, b: any) => {
-                              const own = (u: any) => (u.group_id === g.id ? 0 : 1)
-                              return own(a) - own(b) || (a.full_name || '').localeCompare(b.full_name || '')
-                            })
-                            .map((u: any) => {
-                              const elsewhere = u.group_id && u.group_id !== g.id
-                                ? groups.find((x: any) => x.id === u.group_id)?.name
-                                : null
-                              return (
-                                <option key={u.id} value={u.id}>
-                                  {u.full_name}{elsewhere ? ` — ${elsewhere}` : ''}
-                                </option>
-                              )
-                            })}
+                          {(() => {
+                            // Own-table members and unassigned people (the
+                            // members list), plus every TC in BT even when they
+                            // sit at a table this leader cannot see — that is
+                            // how a TC gets a second table.
+                            const seen = new Set<string>()
+                            const pool: any[] = []
+                            for (const u of users) { seen.add(u.id); pool.push(u) }
+                            for (const c of leaderCandidates) if (!seen.has(c.id)) { seen.add(c.id); pool.push({ ...c, isTC: true }) }
+                            const nameOfTable = (gid: string | null) =>
+                              gid ? (groups.find((x: any) => x.id === gid)?.name || leaderCandidates.find(c => c.group_id === gid)?.group_name || 'another table') : null
+                            return pool
+                              .filter((u: any) => !(groupLeaders[g.id] || []).some((l: any) => l.user_id === u.id))
+                              .sort((a: any, b: any) => {
+                                const own = (u: any) => (u.group_id === g.id ? 0 : 1)
+                                return own(a) - own(b) || (a.full_name || '').localeCompare(b.full_name || '')
+                              })
+                              .map((u: any) => {
+                                const elsewhere = u.group_id && u.group_id !== g.id ? nameOfTable(u.group_id) : null
+                                const isTC = u.isTC || u.role === 'leader'
+                                return (
+                                  <option key={u.id} value={u.id}>
+                                    {u.full_name}{isTC ? ' (TC)' : ''}{elsewhere ? ` — ${elsewhere}` : ''}
+                                  </option>
+                                )
+                              })
+                          })()}
                         </select>
                         <button
                           disabled={!leaderPick[g.id] || leaderBusy.startsWith(`${g.id}:`)}
@@ -1614,6 +1634,10 @@ export default function AdminPage() {
                         </button>
                       </div>
                       {leaderError && <p className="text-[11px] text-red-600 font-medium">{leaderError}</p>}
+                      <p className="text-[11px] text-gray-400 leading-relaxed">
+                        To give a TC a second table, add them here. Anyone marked (TC) already leads a table
+                        and keeps it; co-leaders have the same powers as the main TC.
+                      </p>
                     </div>
 
                     {/* Members. Leaders asked to seat someone who is already in

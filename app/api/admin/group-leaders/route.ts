@@ -48,7 +48,26 @@ export async function GET(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const groupId = new URL(req.url).searchParams.get('group_id')
+  const url = new URL(req.url)
+
+  // Who can be made a co-leader of any table: every current TC in BT, with
+  // the table they sit at. The members list a leader normally sees is scoped
+  // to their own tables, so a TC from another table was invisible here and
+  // could never be given a second table.
+  if (url.searchParams.get('candidates')) {
+    const { data } = await adminClient()
+      .from('profiles')
+      .select('id, full_name, group_id, groups(name)')
+      .eq('role', 'leader')
+      .order('full_name', { ascending: true })
+    return NextResponse.json({
+      candidates: (data || []).map((p: any) => ({
+        id: p.id, full_name: p.full_name, group_id: p.group_id, group_name: p.groups?.name || null,
+      })),
+    })
+  }
+
+  const groupId = url.searchParams.get('group_id')
   if (!groupId) return NextResponse.json({ error: 'group_id is required' }, { status: 400 })
 
   const owns = await requireGroupOwnership(auth.userId, groupId)

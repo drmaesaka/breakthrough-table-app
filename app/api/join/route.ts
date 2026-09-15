@@ -27,6 +27,12 @@ async function resolveGroup(invite: string | null, legacyGroupId: string | null)
   const mode = await inviteMode()
 
   if (invite && mode === 'ready') {
+    // Codes are uuids. Anything else is a link that got cut short or altered
+    // on its way through a messaging app — a different fix from a revoked
+    // code, so say so.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invite)) {
+      return { error: 'This invite link looks incomplete — ask your leader to send it again' }
+    }
     const { data } = await supabase
       .from('group_invites')
       .select('group_id')

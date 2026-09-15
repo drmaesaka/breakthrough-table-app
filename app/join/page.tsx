@@ -14,6 +14,7 @@ function JoinForm() {
   const [loading, setLoading] = useState(false)
   const [groupName, setGroupName] = useState('')
   const [inviteExpired, setInviteExpired] = useState(false)
+  const [inviteProblem, setInviteProblem] = useState('')
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -27,7 +28,12 @@ function JoinForm() {
     async function fetchGroup() {
       const params = invite ? `invite=${invite}` : `group=${legacyGroup}`
       const res = await fetch(`/api/join?${params}`)
-      if (!res.ok) { setInviteExpired(true); return }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setInviteProblem(body.error || '')
+        setInviteExpired(true)
+        return
+      }
       const data = await res.json()
       if (data.group_name) setGroupName(data.group_name)
     }
@@ -88,9 +94,13 @@ function JoinForm() {
           </div>
         )}
         {inviteExpired && (
-          <div className="mt-5 bg-red-500/20 rounded-xl px-4 py-2 text-center">
-            <p className="text-white text-sm font-medium">This invite link is no longer valid</p>
-            <p className="text-bt-light/70 text-xs mt-0.5">Ask your leader for a fresh one</p>
+          <div className="mt-5 bg-red-500/20 rounded-xl px-4 py-3 text-center">
+            <p className="text-white text-sm font-medium">{inviteProblem || 'This invite link is no longer valid'}</p>
+            {/* Not a dead end: the account can still be created, and the
+                leader can seat them from Admin → groups → Members. */}
+            <p className="text-bt-light/80 text-xs mt-1 leading-relaxed">
+              You can still create your account below. Your leader can add you to the table from the app afterwards.
+            </p>
           </div>
         )}
       </div>
