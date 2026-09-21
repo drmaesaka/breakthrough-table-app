@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
+import { linkify } from '@/lib/linkify'
 import BottomNav from '@/components/BottomNav'
 import {
   MEETING_SECTIONS,
@@ -1415,7 +1416,8 @@ export default function AdminPage() {
                   </p>
                   <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)}
                     placeholder="e.g. Read chapters 3–4 before next meeting *" className={inputClass} />
-                  <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Details (optional)" className={inputClass} />
+                  <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Details, or paste a link (optional)" className={inputClass} />
+                  <p className="text-[11px] text-gray-400 -mt-1">Any web address you paste becomes a tappable link for members.</p>
                   <TablePicker groups={groups} selectedGroup={selectedGroup} extra={taskAlsoTo} setExtra={setTaskAlsoTo} />
                   {taskError && <p className="text-red-600 text-xs">{taskError}</p>}
                   <button onClick={addTask} disabled={taskSaving || !taskTitle.trim()}
@@ -1454,8 +1456,8 @@ export default function AdminPage() {
                 ) : (
                 <div key={task.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3">
                   <div className="flex-1">
-                    <p className="font-medium text-gray-900 text-sm">{task.title}</p>
-                    {task.description && <p className="text-gray-400 text-xs mt-0.5">{task.description}</p>}
+                    <p className="font-medium text-gray-900 text-sm break-words">{linkify(task.title)}</p>
+                    {task.description && <p className="text-gray-400 text-xs mt-0.5 break-words">{linkify(task.description)}</p>}
                   </div>
                   <button onClick={() => setEditing({ table: 'tasks', id: task.id, fields: { title: task.title, description: task.description || '' } })}
                     className="text-bt-blue text-sm font-medium px-2 py-1">Edit</button>

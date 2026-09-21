@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { linkify, hasLink } from '@/lib/linkify'
 import { localDay } from '@/lib/dates'
 import { calcAdherence, datesByHabit, streakFor, type Habit } from '@/lib/habits'
 
@@ -322,8 +323,10 @@ export default function TasksPage() {
                   {tasks.map(task => {
                     const done = completedIds.has(task.id)
                     return (
-                      <button key={task.id} onClick={() => toggleTask(task.id)}
-                        className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity ${done ? 'opacity-60' : ''}`}>
+                      // A div, not one big button: a link inside the text has
+                      // to be tappable without ticking the item.
+                      <div key={task.id} onClick={() => toggleTask(task.id)} role="button"
+                        className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity cursor-pointer ${done ? 'opacity-60' : ''}`}>
                         <div className={`mt-0.5 w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
                           done ? 'bg-bt-navy border-bt-navy' : 'border-gray-300'
                         }`}>
@@ -333,11 +336,14 @@ export default function TasksPage() {
                             </svg>
                           )}
                         </div>
-                        <div className="flex-1">
-                          <p className={`font-semibold text-gray-900 ${done ? 'line-through text-gray-400' : ''}`}>{task.title}</p>
-                          {task.description && <p className="text-gray-400 text-sm mt-1 leading-relaxed">{task.description}</p>}
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-semibold text-gray-900 break-words ${done ? 'line-through text-gray-400' : ''}`}>{linkify(task.title)}</p>
+                          {task.description && <p className="text-gray-400 text-sm mt-1 leading-relaxed break-words">{linkify(task.description)}</p>}
+                          {(hasLink(task.title) || hasLink(task.description)) && (
+                            <p className="text-[11px] text-gray-300 mt-1">Tap the link to open it · tap anywhere else to mark done</p>
+                          )}
                         </div>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
