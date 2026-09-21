@@ -9,6 +9,7 @@ import {
   MEETING_SECTIONS,
   resolveMeetingPlans,
   type StoredMeetingPlan,
+  MEETING_PLANS,
 } from '@/lib/meeting-plans'
 import { localDay } from '@/lib/dates'
 import {
@@ -91,6 +92,178 @@ function TablePicker({ groups, selectedGroup, extra, setExtra }: {
 /** The table picked at the top plus any extras that are still tables this leader has. */
 function targetTables(groups: { id: string }[], selectedGroup: string, extra: Set<string>) {
   return [selectedGroup, ...groups.map(g => g.id).filter(id => id !== selectedGroup && extra.has(id))]
+}
+
+/** Today as YYYY-MM-DD in the leader's own timezone (not UTC, which rolls at 7pm Central). */
+function todayLocal() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * Roll call for one table, on its card in Admin → groups. Date box (today by
+ * default), optional playbook meeting, tap the names, Save. What fills the
+ * "Your BT Journey" timeline on every member's dashboard. Keyed by date so it
+ * keeps working after the 12-meeting playbook is finished.
+ */
+function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
+  group: { id: string; name: string; current_meeting_number?: number | null }
+  seated: { id: string; full_name: string | null }[]
+  plans: { number: number; title: string }[]
+  headers: () => Promise<Record<string, string>>
+  onCurrentMeeting: (groupId: string, number: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [date, setDate] = useState(todayLocal())
+  const [number, setNumber] = useState<string>(() => {
+    const n = group.current_meeting_number
+    return n !== null && n !== undefined ? String(n) : ''
+  })
+  const [present, setPresent] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [history, setHistory] = useState<{ date: string; meeting_number: number | null; count: number }[] | null>(null)
+
+  async function loadDay(d: string) {
+    setLoading(true); setMsg(null); setDirty(false)
+    const res = await fetch(`/api/admin/attendance?group_id=${encodeURIComponent(group.id)}&date=${d}`, { headers: await headers() })
+    const json = await res.json().catch(() => ({}))
+    setLoading(false)
+    if (!res.ok) { setPresent(new Set()); setMsg({ kind: 'err', text: json.error || `Could not load (${res.status})` }); return }
+    setPresent(new Set<string>(json.user_ids || []))
+    // A day already on record keeps its meeting number; a fresh day defaults
+    // to the meeting after the last one recorded, or the table's current one.
+    if (json.meeting_number !== null && json.meeting_number !== undefined) setNumber(String(json.meeting_number))
+  }
+
+  async function loadHistory() {
+    const res = await fetch(`/api/admin/attendance?group_id=${encodeURIComponent(group.id)}`, { headers: await headers() })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) setHistory(json.days || [])
+  }
+
+  useEffect(() => {
+    if (!open) return
+    loadDay(date)
+    loadHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, date])
+
+  async function save() {
+    setSaving(true); setMsg(null)
+    const res = await fetch('/api/admin/attendance', {
+      method: 'PUT', headers: await headers(),
+      body: JSON.stringify({ group_id: group.id, date, number: number === '' ? null : Number(number), user_ids: [...present] }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setSaving(false)
+    if (!res.ok) { setMsg({ kind: 'err', text: json.error || `Could not save (${res.status})` }); return }
+    setPresent(new Set<string>(json.user_ids || []))
+    setDirty(false)
+    setMsg({ kind: 'ok', text: `Saved — ${(json.user_ids || []).length} present on ${fmtDate(date)}` })
+    if (json.current_meeting_number !== null && json.current_meeting_number !== undefined) onCurrentMeeting(group.id, json.current_meeting_number)
+    loadHistory()
+  }
+
+  function fmtDate(d: string) {
+    const [y, m, dd] = d.split('-').map(Number)
+    return new Date(y, m - 1, dd).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  }
+  const toggle = (id: string) => {
+    setPresent(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+    setDirty(true); setMsg(null)
+  }
+  const numbered = plans.filter(p => p.number >= 1)
+  const lastNumbered = numbered.length ? numbered[numbered.length - 1].number : 12
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="w-full py-2.5 rounded-xl text-sm font-semibold bg-bt-navy text-white">
+        ✓ Take attendance
+      </button>
+    )
+  }
+
+  return (
+    <div className="bg-bt-pale rounded-xl p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400 font-medium">Attendance</p>
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-400 font-semibold">Close</button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="text-[11px] text-gray-400 font-medium">Meeting date</span>
+          <input type="date" value={date} max={todayLocal()}
+            onChange={e => { if (e.target.value) setDate(e.target.value) }}
+            className="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm bg-white" />
+        </label>
+        <label className="block">
+          <span className="text-[11px] text-gray-400 font-medium">Playbook meeting</span>
+          <select value={number} onChange={e => { setNumber(e.target.value); setDirty(true) }}
+            className="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm bg-white">
+            <option value="">After the playbook / other</option>
+            {numbered.map(p => <option key={p.number} value={String(p.number)}>#{p.number} · {p.title}</option>)}
+          </select>
+        </label>
+      </div>
+      {number !== '' && Number(number) === lastNumbered && (
+        <p className="text-[11px] text-gray-400">Last playbook meeting. From the next one, leave the meeting box on “After the playbook”.</p>
+      )}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-500">Tap everyone who was there.</p>
+        <div className="flex gap-3">
+          <button type="button" onClick={() => { setPresent(new Set(seated.map(u => u.id))); setDirty(true); setMsg(null) }}
+            className="text-xs text-bt-blue font-semibold">Everyone</button>
+          <button type="button" onClick={() => { setPresent(new Set()); setDirty(true); setMsg(null) }}
+            className="text-xs text-gray-400 font-semibold">Nobody</button>
+        </div>
+      </div>
+      {loading ? (
+        <p className="text-xs text-gray-400">Loading...</p>
+      ) : seated.length === 0 ? (
+        <p className="text-xs text-gray-400">Nobody is seated at this table yet.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {seated.map(u => {
+            const here = present.has(u.id)
+            return (
+              <button key={u.id} type="button" onClick={() => toggle(u.id)}
+                className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-left text-sm font-medium ${
+                  here ? 'border-bt-navy bg-bt-navy text-white' : 'border-gray-100 bg-white text-gray-600'
+                }`}>
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
+                  here ? 'bg-white text-bt-navy' : 'border border-gray-300'
+                }`}>{here ? '✓' : ''}</span>
+                <span className="truncate">{u.full_name || 'Unnamed'}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {msg && <p className={`text-xs font-medium ${msg.kind === 'ok' ? 'text-green-600' : 'text-red-600'}`}>{msg.text}</p>}
+      <button onClick={save} disabled={saving || loading || !dirty}
+        className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+        {saving ? 'Saving...' : dirty ? `Save — ${present.size} present on ${fmtDate(date)}` : `Saved · ${present.size} present on ${fmtDate(date)}`}
+      </button>
+      {history && history.length > 0 && (
+        <div>
+          <p className="text-[11px] text-gray-400 font-medium mb-1">Past meetings</p>
+          <div className="space-y-1">
+            {history.slice(0, 8).map(h => (
+              <button key={h.date} type="button" onClick={() => setDate(h.date)}
+                className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${h.date === date ? 'bg-white text-bt-navy font-semibold' : 'text-gray-500'}`}>
+                <span>{fmtDate(h.date)}{h.meeting_number !== null ? ` · #${h.meeting_number}` : ''}</span>
+                <span>{h.count} present</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function AdminPage() {
@@ -176,12 +349,6 @@ export default function AdminPage() {
   const [meetingDefaults, setMeetingDefaults] = useState<StoredMeetingPlan[]>([])
   const [meetingOverrides, setMeetingOverrides] = useState<StoredMeetingPlan[]>([])
   const [selectedMeetingNumber, setSelectedMeetingNumber] = useState<number | null>(null)
-  /** Roll call for the selected meeting: who was there. Saved via /api/admin/attendance. */
-  const [attendance, setAttendance] = useState<Set<string>>(new Set())
-  const [attendanceLoading, setAttendanceLoading] = useState(false)
-  const [attendanceSaving, setAttendanceSaving] = useState(false)
-  const [attendanceDirty, setAttendanceDirty] = useState(false)
-  const [attendanceMsg, setAttendanceMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [meetingScope, setMeetingScope] = useState<'default' | 'table'>('table')
   const [meetingDraft, setMeetingDraft] = useState<Record<string, string> | null>(null)
   const [meetingSaving, setMeetingSaving] = useState(false)
@@ -472,42 +639,6 @@ export default function AdminPage() {
     setMeetingDraft(null)
     await loadMeetingPlans()
   }
-
-  async function loadAttendance(gid: string, number: number) {
-    setAttendanceLoading(true)
-    setAttendanceMsg(null)
-    setAttendanceDirty(false)
-    const res = await fetch(`/api/admin/attendance?group_id=${encodeURIComponent(gid)}&number=${number}`, { headers: await authHeaders() })
-    const json = await res.json().catch(() => ({}))
-    setAttendanceLoading(false)
-    if (!res.ok) { setAttendance(new Set()); setAttendanceMsg({ kind: 'err', text: json.error || `Could not load attendance (${res.status})` }); return }
-    setAttendance(new Set<string>(json.user_ids || []))
-  }
-
-  async function saveAttendance() {
-    if (!selectedGroup || selectedMeetingNumber === null) return
-    setAttendanceSaving(true)
-    setAttendanceMsg(null)
-    const res = await fetch('/api/admin/attendance', {
-      method: 'PUT',
-      headers: await authHeaders(),
-      body: JSON.stringify({ group_id: selectedGroup, number: selectedMeetingNumber, user_ids: [...attendance] }),
-    })
-    const json = await res.json().catch(() => ({}))
-    setAttendanceSaving(false)
-    if (!res.ok) { setAttendanceMsg({ kind: 'err', text: json.error || `Could not save (${res.status})` }); return }
-    setAttendance(new Set<string>(json.user_ids || []))
-    setAttendanceDirty(false)
-    setAttendanceMsg({ kind: 'ok', text: `Saved — ${(json.user_ids || []).length} present` })
-  }
-
-  // Roll call follows whichever meeting is open on the meetings tab.
-  useEffect(() => {
-    if (tab === 'meetings' && selectedGroup && selectedMeetingNumber !== null) {
-      loadAttendance(selectedGroup, selectedMeetingNumber)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, selectedGroup, selectedMeetingNumber])
 
   async function setCurrentMeeting(number: number | null) {
     if (!selectedGroup) return
@@ -1749,6 +1880,14 @@ export default function AdminPage() {
                       )
                     })()}
 
+                    <TableAttendance
+                      group={g}
+                      seated={users.filter((u: any) => u.group_id === g.id).slice().sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))}
+                      plans={(meetingDefaults.length ? resolvedMeetings() : MEETING_PLANS).map(p => ({ number: p.number, title: p.title }))}
+                      headers={authHeaders}
+                      onCurrentMeeting={(gid, n) => setGroups(prev => prev.map(x => x.id === gid ? { ...x, current_meeting_number: n } : x))}
+                    />
+
                     <div className="bg-bt-pale rounded-xl p-3">
                       <p className="text-xs text-gray-400 mb-1.5 font-medium">Invite Link</p>
                       <p className="text-xs text-gray-600 break-all font-mono leading-relaxed">{inviteLink}</p>
@@ -2877,6 +3016,7 @@ export default function AdminPage() {
                         }`}>
                         {currentNumber === selected.number ? '✓ Current meeting' : 'Mark as current'}
                       </button>
+                      <span className="self-center text-[11px] text-gray-400">Attendance is on the table’s card under <span className="font-semibold">groups</span>.</span>
                       <button onClick={() => openMeetingEditor(selected.number, 'table')}
                         className="px-3 py-2 rounded-xl text-xs font-semibold bg-bt-navy text-white">
                         Edit for this table
@@ -2893,65 +3033,6 @@ export default function AdminPage() {
                       )}
                     </div>
                   </div>
-
-                  {/* Roll call. What fills the "Your BT Journey" timeline on
-                      every member's dashboard — one tap per name, then Save. */}
-                  {(() => {
-                    const seated = users
-                      .filter((u: any) => u.group_id === selectedGroup)
-                      .slice()
-                      .sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))
-                    const toggle = (id: string) => {
-                      setAttendance(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
-                      setAttendanceDirty(true)
-                      setAttendanceMsg(null)
-                    }
-                    return (
-                      <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <h3 className="font-bold text-bt-navy">Attendance</h3>
-                            <p className="text-xs text-gray-400 mt-0.5">Tap everyone who was at meeting #{selected.number}, then Save.</p>
-                          </div>
-                          <div className="flex gap-2 flex-shrink-0">
-                            <button type="button" onClick={() => { setAttendance(new Set(seated.map((u: any) => u.id))); setAttendanceDirty(true); setAttendanceMsg(null) }}
-                              className="text-xs text-bt-blue font-semibold">Everyone</button>
-                            <button type="button" onClick={() => { setAttendance(new Set()); setAttendanceDirty(true); setAttendanceMsg(null) }}
-                              className="text-xs text-gray-400 font-semibold">Nobody</button>
-                          </div>
-                        </div>
-                        {attendanceLoading ? (
-                          <p className="text-xs text-gray-400">Loading...</p>
-                        ) : seated.length === 0 ? (
-                          <p className="text-xs text-gray-400">Nobody is seated at this table yet.</p>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-2">
-                            {seated.map((u: any) => {
-                              const here = attendance.has(u.id)
-                              return (
-                                <button key={u.id} type="button" onClick={() => toggle(u.id)}
-                                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-left text-sm font-medium ${
-                                    here ? 'border-bt-navy bg-bt-navy text-white' : 'border-gray-100 bg-white text-gray-600'
-                                  }`}>
-                                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
-                                    here ? 'bg-white text-bt-navy' : 'border border-gray-300'
-                                  }`}>{here ? '✓' : ''}</span>
-                                  <span className="truncate">{u.full_name || 'Unnamed'}</span>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        )}
-                        {attendanceMsg && (
-                          <p className={`text-xs font-medium ${attendanceMsg.kind === 'ok' ? 'text-green-600' : 'text-red-600'}`}>{attendanceMsg.text}</p>
-                        )}
-                        <button onClick={saveAttendance} disabled={attendanceSaving || attendanceLoading || !attendanceDirty}
-                          className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                          {attendanceSaving ? 'Saving...' : attendanceDirty ? `Save attendance (${attendance.size} present)` : `Attendance saved (${attendance.size} present)`}
-                        </button>
-                      </div>
-                    )
-                  })()}
 
                   {meetingDraft ? (
                     <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
