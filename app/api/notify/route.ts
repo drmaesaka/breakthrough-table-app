@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
-import { notifyMembers, notifyTableChat, tableAudience, BURST_WINDOW_MS, type NotifyKind } from '@/lib/notify'
+import { notifyMembers, notifyTableChat, notifyTcRoom, tableAudience, BURST_WINDOW_MS, type NotifyKind } from '@/lib/notify'
 
 export const maxDuration = 60
 
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   const { kind, id } = await req.json().catch(() => ({}))
-  if (!id || !['chat', 'dm', 'task', 'prompt', 'content'].includes(kind)) {
+  if (!id || !['chat', 'tc', 'dm', 'task', 'prompt', 'content'].includes(kind)) {
     return NextResponse.json({ error: 'kind and id are required' }, { status: 400 })
   }
   const admin = adminClient()
@@ -26,6 +26,13 @@ export async function POST(req: NextRequest) {
     const { data: m } = await admin.from('messages').select('id, group_id, user_id, content, created_at').eq('id', id).maybeSingle()
     if (!m || m.user_id !== auth.userId || !fresh(m.created_at)) return NextResponse.json({ error: 'Not your fresh message' }, { status: 403 })
     return NextResponse.json(await notifyTableChat(admin, m))
+  }
+
+  if (kind === 'tc') {
+    if (auth.role !== 'leader') return NextResponse.json({ error: 'Leaders only' }, { status: 403 })
+    const { data: m } = await admin.from('leader_messages').select('id, user_id, content, created_at').eq('id', id).maybeSingle()
+    if (!m || m.user_id !== auth.userId || !fresh(m.created_at)) return NextResponse.json({ error: 'Not your fresh message' }, { status: 403 })
+    return NextResponse.json(await notifyTcRoom(admin, m))
   }
 
   if (kind === 'dm') {
@@ -62,7 +69,7 @@ export async function POST(req: NextRequest) {
   if (!mine.includes((row as any).group_id)) return NextResponse.json({ error: 'Not your table' }, { status: 403 })
 
   const text = String((row as any)[textCol] || '').slice(0, 140)
-  const copy: Record<Exclude<NotifyKind, 'chat' | 'dm' | 'broadcast'>, { title: string; url: string; cta: string }> = {
+  const copy: Record<Exclude<NotifyKind, 'chat' | 'tc' | 'dm' | 'broadcast'>, { title: string; url: string; cta: string }> = {
     task: { title: '📚 New reading & resources', url: '/tasks', cta: 'See it on My Tasks' },
     prompt: { title: '✍️ New reflection prompt', url: '/journal', cta: 'Write your reflection' },
     content: { title: '📖 New in the Library', url: '/library', cta: 'Open the Library' },

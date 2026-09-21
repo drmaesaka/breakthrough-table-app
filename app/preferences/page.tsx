@@ -292,7 +292,7 @@ export default function PreferencesPage() {
             <p className="text-gray-400 text-xs mt-0.5">Beyond the daily nudge. All on unless you switch one off.</p>
           </div>
           {([
-            ['💬 Someone posts in my table chat', notifyChat, setNotifyChat, 'One ping per conversation, not per message'],
+            ['💬 Someone posts in my table chat (or the TC Room)', notifyChat, setNotifyChat, 'One ping per conversation, not per message'],
             ['✉️ I get a direct message', notifyDms, setNotifyDms, ''],
             ['📚 My TC posts reading, a prompt or a library item', notifyUpdates, setNotifyUpdates, ''],
           ] as [string, boolean, (v: boolean) => void, string][]).map(([label, on, set, hint]) => (

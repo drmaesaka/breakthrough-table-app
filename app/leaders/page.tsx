@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import Avatar from '@/components/Avatar'
+import { notifyAbout } from '@/lib/notify-client'
 
 // The TCs' own space: one channel across every table, plus a shared shelf of
 // internal material. Table chat is scoped to a group_id and DMs are one-to-one,
@@ -128,12 +129,14 @@ export default function LeadersPage() {
     e.preventDefault()
     if (!newMessage.trim() || !user || sending) return
     setSending(true)
-    const { error } = await supabase
+    const { data: sent, error } = await supabase
       .from('leader_messages')
       .insert({ user_id: user.id, content: newMessage.trim() })
+      .select('id').single()
     setSending(false)
     // Keep what they typed if the insert was rejected.
     if (error) { console.error('leader message send failed:', error.message); setSendError(true); return }
+    notifyAbout('tc', sent?.id)
     setSendError(false)
     setNewMessage('')
     fetchMessages()
