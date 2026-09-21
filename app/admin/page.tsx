@@ -817,10 +817,14 @@ export default function AdminPage() {
   async function loadEvents(gid: string = selectedGroup) {
     loadRsvpCounts()
     const supabase = createClient()
-    const { data } = await supabase.from('events').select('*').order('event_date', { ascending: true })
+    // Through the API (service key): the browser read depended on a console
+    // policy that did not reliably show BT-wide or co-led tables' events.
+    const res = await fetch('/api/admin/events', { headers: await authHeaders() })
+    const json = await res.json().catch(() => ({ events: [] }))
+    const data = json.events || []
     // Community-wide events (no group_id) plus this table's own. Events are
     // BT-wide by default since 2026-09-21; a table id means "this table only".
-    setEvents((data || []).filter((e: any) => !e.group_id || e.group_id === gid))
+    setEvents(data.filter((e: any) => !e.group_id || e.group_id === gid))
   }
 
   async function addEvent() {
@@ -842,15 +846,11 @@ export default function AdminPage() {
       // BT-wide unless the leader chose this table only.
       group_id: eventAudience === 'table' && selectedGroup ? selectedGroup : null,
     }
-    let { error } = await supabase.from('events').insert(row)
-    // Before the migration the column doesn't exist; retry without it rather
-    // than failing the whole add.
-    if (error && /group_id/.test(error.message)) {
-      delete row.group_id
-      ;({ error } = await supabase.from('events').insert(row))
-    }
+    // Server-side: co-leaders were refused by the console INSERT policy.
+    const res = await fetch('/api/admin/events', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(row) })
+    const json = await res.json().catch(() => ({}))
     setEventSaving(false)
-    if (error) { alert(`Could not add the event: ${error.message}`); return }
+    if (!res.ok) { alert(`Could not add the event: ${json.error || res.status}`); return }
     setEventTitle(''); setEventDesc(''); setEventDate(''); setEventLocation(''); setEventLink('')
     loadEvents()
   }
@@ -932,7 +932,8 @@ export default function AdminPage() {
   async function deleteEvent(id: string) {
     if (!confirm('Delete this event?')) return
     const supabase = createClient()
-    await supabase.from('events').delete().eq('id', id)
+    const res = await fetch('/api/admin/events', { method: 'DELETE', headers: await authHeaders(), body: JSON.stringify({ id }) })
+    if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error || 'Could not delete the event'); return }
     setEvents(e => e.filter(x => x.id !== id))
   }
 
