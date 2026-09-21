@@ -3,7 +3,15 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 
-type BannerState = 'hidden' | 'install' | 'enable' | 'enabling' | 'success' | 'failed'
+type BannerState = 'hidden' | 'install' | 'enable' | 'enabling' | 'success' | 'failed' | 'blocked'
+
+// A dismissal used to be permanent, so one tap on the X in week one meant
+// the member was never asked again — and most never turned notifications
+// on. Now it snoozes for three days and comes back until push is working.
+const SNOOZE_MS = 3 * 24 * 60 * 60 * 1000
+function snoozed(key: string) {
+  try { return Number(localStorage.getItem(key) || 0) > Date.now() } catch { return false }
+}
 
 // Walks a new member to working notifications from the dashboard:
 // iOS Safari without the PWA installed → Add to Home Screen instructions;
@@ -17,20 +25,22 @@ export default function PushSetupBanner() {
       || (window.navigator as any).standalone === true
 
     if (isIOS && !isInstalled) {
-      if (!localStorage.getItem('install_banner_dismissed')) setState('install')
+      if (!snoozed('install_banner_snooze')) setState('install')
       return
     }
 
     const hasPush = 'serviceWorker' in navigator && 'PushManager' in window
-    if (hasPush && Notification.permission === 'default'
-      && !localStorage.getItem('push_banner_dismissed')) {
-      setState('enable')
-    }
+    if (!hasPush || snoozed('push_banner_snooze')) return
+    if (Notification.permission === 'default') setState('enable')
+    // They tapped "Don't allow" once; the browser will not ask again, so the
+    // fix is in the phone's settings and they need to be told that.
+    if (Notification.permission === 'denied') setState('blocked')
   }, [])
 
   function dismiss() {
-    localStorage.setItem(
-      state === 'install' ? 'install_banner_dismissed' : 'push_banner_dismissed', '1')
+    try {
+      localStorage.setItem(state === 'install' ? 'install_banner_snooze' : 'push_banner_snooze', String(Date.now() + SNOOZE_MS))
+    } catch {}
     setState('hidden')
   }
 
@@ -56,19 +66,20 @@ export default function PushSetupBanner() {
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
           <span className="text-2xl flex-shrink-0">
-            {state === 'install' ? '📲' : state === 'success' ? '🎉' : '🔔'}
+            {state === 'install' ? '📲' : state === 'success' ? '🎉' : state === 'blocked' ? '🔕' : '🔔'}
           </span>
           <div>
             {state === 'install' ? (
               <>
-                <p className="text-white font-bold text-sm">Add to Home Screen</p>
+                <p className="text-white font-bold text-sm">You're missing notifications</p>
                 <p className="text-bt-light/70 text-xs mt-1 leading-relaxed">
-                  To get nudge notifications, tap{' '}
-                  <span className="text-bt-light font-semibold">Share</span>
-                  {' '}then{' '}
-                  <span className="text-bt-light font-semibold">"Add to Home Screen"</span>
-                  {' '}in Safari, then open the app from your Home Screen.
+                  iPhones only deliver them to installed apps. Two minutes:
                 </p>
+                <ol className="text-bt-light/80 text-xs mt-1.5 space-y-1 leading-relaxed">
+                  <li>1. Tap <span className="text-white font-semibold">Share</span> at the bottom of Safari (square with an arrow)</li>
+                  <li>2. Tap <span className="text-white font-semibold">Add to Home Screen</span>, then <span className="text-white font-semibold">Add</span></li>
+                  <li>3. Open <span className="text-white font-semibold">Breakthrough Table</span> from your Home Screen and tap <span className="text-white font-semibold">Allow</span></li>
+                </ol>
               </>
             ) : state === 'success' ? (
               <>
@@ -76,6 +87,15 @@ export default function PushSetupBanner() {
                 <p className="text-bt-light/70 text-xs mt-1 leading-relaxed">
                   You can send yourself a test anytime from{' '}
                   <Link href="/preferences" className="text-bt-light font-semibold underline">Nudge Settings</Link>.
+                </p>
+              </>
+            ) : state === 'blocked' ? (
+              <>
+                <p className="text-white font-bold text-sm">Notifications are blocked</p>
+                <p className="text-bt-light/70 text-xs mt-1 leading-relaxed">
+                  Your phone said no once, so it won&apos;t ask again. Open your phone&apos;s{' '}
+                  <span className="text-bt-light font-semibold">Settings → Notifications → Breakthrough Table</span>
+                  {' '}and switch them on, then come back here.
                 </p>
               </>
             ) : state === 'failed' ? (
@@ -101,7 +121,7 @@ export default function PushSetupBanner() {
             )}
           </div>
         </div>
-        {(state === 'install' || state === 'enable') && (
+        {(state === 'install' || state === 'enable' || state === 'blocked') && (
           <button onClick={dismiss} className="text-bt-light/50 hover:text-white flex-shrink-0 mt-0.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M18 6L6 18M6 6l12 12"/>

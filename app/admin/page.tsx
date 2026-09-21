@@ -225,6 +225,7 @@ export default function AdminPage() {
   /** "Add a member..." pick per table on the groups tab, keyed by group id. */
   const [memberPick, setMemberPick] = useState<Record<string, string>>({})
   const [memberBusy, setMemberBusy] = useState('')
+  const [pushReminderBusy, setPushReminderBusy] = useState(false)
   const [leaderBusy, setLeaderBusy] = useState('')
   const [leaderError, setLeaderError] = useState('')
 
@@ -782,6 +783,19 @@ export default function AdminPage() {
       return [gid, leaders || []] as const
     }))
     setGroupLeaders(Object.fromEntries(entries))
+  }
+
+  /** Emails everyone at my tables without push the steps to turn it on. */
+  async function sendPushReminder(names: string[]) {
+    if (!confirm(`Email setup steps to ${names.length} member${names.length === 1 ? '' : 's'} without notifications?\n\n${names.join(', ')}`)) return
+    setPushReminderBusy(true)
+    const res = await fetch('/api/admin/push-reminder', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({}) })
+    const r = await res.json().catch(() => ({}))
+    setPushReminderBusy(false)
+    if (!res.ok) { alert(r.error || `Could not send (${res.status})`); return }
+    const parts = [`Emailed ${r.emailed}.`]
+    if (r.unreachable?.length) parts.push(`No email address on file for: ${r.unreachable.join(', ')}.`)
+    alert(parts.join(' '))
   }
 
   async function loadLeaderCandidates() {
@@ -1778,10 +1792,15 @@ export default function AdminPage() {
                     🔕 {noPush.length} of {users.length} can&apos;t receive notifications
                   </p>
                   <p className="text-amber-700 text-xs mt-1 leading-relaxed">
-                    {noPush.map(u => u.full_name).join(', ')} — nudges are calculated for them but
-                    have nowhere to go. On iPhone they must add the app to their Home Screen, open it
-                    from there, then tap Allow in Nudge Settings.
+                    {noPush.map(u => u.full_name).join(', ')} — nudges, chat pings and your broadcasts
+                    reach them by email only. On iPhone they must add the app to their Home Screen, open it
+                    from there, then tap Allow. The app reminds them every few days; you can also:
                   </p>
+                  <button onClick={() => sendPushReminder(noPush.map(u => u.full_name))} disabled={pushReminderBusy}
+                    className="mt-2 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white disabled:opacity-50">
+                    {pushReminderBusy ? 'Sending...' : `✉️ Email them the setup steps`}
+                  </button>
+                  <p className="text-[11px] text-amber-700/80 mt-1.5">Or say it at the next meeting — that works best.</p>
                 </div>
               )
             })()}
