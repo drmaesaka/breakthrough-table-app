@@ -10,8 +10,12 @@ import { adminClient, requireLeader, leaderGroupIds } from '@/lib/api-auth'
 const EDITABLE: Record<string, string[]> = {
   tasks: ['title', 'description'],
   content: ['title', 'url', 'type', 'description'],
+  // group_id on an event is its AUDIENCE: null = every BT member, a table id =
+  // that table only. Changing it is allowed only to null or to one of the
+  // caller's own tables (checked below), so an event cannot be handed to
+  // another TC's table.
   events: ['title', 'description', 'event_date', 'event_type', 'location', 'virtual_link',
-           'notifications_enabled', 'followup_message'],
+           'notifications_enabled', 'followup_message', 'group_id'],
   journal_prompts: ['prompt'],
   // A table's name was fixed at creation, so a typo lived forever. Name only:
   // leader_id and last_period_start drive authorization and the period reset,
@@ -85,10 +89,14 @@ export async function PATCH(req: NextRequest) {
   // leader may fix them.
   const owningGroupId = table === 'groups' ? row.id : (row.group_id ?? null)
 
-  if (owningGroupId) {
-    const myGroups = await leaderGroupIds(auth.userId)
-    if (!myGroups.includes(owningGroupId)) {
-      return NextResponse.json({ error: 'That item belongs to another table' }, { status: 403 })
+  const myGroups = owningGroupId || 'group_id' in updates ? await leaderGroupIds(auth.userId) : []
+  if (owningGroupId && !myGroups.includes(owningGroupId)) {
+    return NextResponse.json({ error: 'That item belongs to another table' }, { status: 403 })
+  }
+  if (table === 'events' && 'group_id' in updates) {
+    const target = updates.group_id
+    if (target !== null && (typeof target !== 'string' || !myGroups.includes(target))) {
+      return NextResponse.json({ error: 'An event can only be limited to one of your own tables' }, { status: 403 })
     }
   }
 

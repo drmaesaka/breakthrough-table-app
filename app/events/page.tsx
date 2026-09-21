@@ -122,6 +122,9 @@ export default function EventsPage() {
                       <span className={`text-xs font-semibold ${isToday ? 'text-orange-500' : 'text-gray-400'}`}>
                         {until}
                       </span>
+                      {event.group_id && (
+                        <span className="text-xs font-semibold text-gray-400">· Your table</span>
+                      )}
                     </div>
                     <h3 className="font-bold text-gray-900 text-base leading-tight">{event.title}</h3>
                     <p className="text-gray-400 text-xs mt-1">{formatDate(event.event_date)} · {formatTime(event.event_date)}</p>

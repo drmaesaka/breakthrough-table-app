@@ -340,6 +340,8 @@ export default function AdminPage() {
   const [eventDesc, setEventDesc] = useState('')
   const [eventDate, setEventDate] = useState('')
   const [eventType, setEventType] = useState('in_person')
+  /** Who sees the event: everyone in BT (the default) or the selected table only. */
+  const [eventAudience, setEventAudience] = useState<'all' | 'table'>('all')
   const [eventLocation, setEventLocation] = useState('')
   const [eventLink, setEventLink] = useState('')
   const [eventSaving, setEventSaving] = useState(false)
@@ -786,9 +788,8 @@ export default function AdminPage() {
   async function loadEvents(gid: string = selectedGroup) {
     const supabase = createClient()
     const { data } = await supabase.from('events').select('*').order('event_date', { ascending: true })
-    // Client-side group filter so this works before AND after the group_id
-    // migration: a row without the column (or with NULL) is a legacy shared
-    // event and stays visible; stamped rows only show on their own table.
+    // Community-wide events (no group_id) plus this table's own. Events are
+    // BT-wide by default since 2026-09-21; a table id means "this table only".
     setEvents((data || []).filter((e: any) => !e.group_id || e.group_id === gid))
   }
 
@@ -808,7 +809,8 @@ export default function AdminPage() {
       location: eventType === 'in_person' ? eventLocation.trim() || null : null,
       virtual_link: eventType === 'virtual' ? eventLink.trim() || null : null,
       created_by: user!.id,
-      group_id: selectedGroup || null,
+      // BT-wide unless the leader chose this table only.
+      group_id: eventAudience === 'table' && selectedGroup ? selectedGroup : null,
     }
     let { error } = await supabase.from('events').insert(row)
     // Before the migration the column doesn't exist; retry without it rather
@@ -2244,6 +2246,17 @@ export default function AdminPage() {
                   </button>
                 ))}
               </div>
+              <div>
+                <p className="text-xs text-gray-400 font-medium mb-1.5">Who can see it</p>
+                <div className="flex gap-2">
+                  {([['all', '🌐 All BT members'], ['table', `👥 ${groups.find(g => g.id === selectedGroup)?.name || 'This table'} only`]] as const).map(([k, label]) => (
+                    <button key={k} onClick={() => setEventAudience(k)}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 ${eventAudience === k ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {eventType === 'in_person' && (
                 <input value={eventLocation} onChange={e => setEventLocation(e.target.value)}
                   placeholder="Location / address" className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
@@ -2322,7 +2335,26 @@ export default function AdminPage() {
                     <p className="text-xs text-gray-400">{new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
                     {event.location && <p className="text-xs text-gray-400 mt-0.5">📍 {event.location}</p>}
                     {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
-                    <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                    <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
+                      {/* Audience, and a one-tap switch. Goes through edit-item
+                          so the ownership rules apply. */}
+                      <button
+                        onClick={async () => {
+                          const toAll = Boolean(event.group_id)
+                          const label = toAll ? 'Show this event to ALL BT members?' : `Limit this event to ${groups.find(g => g.id === selectedGroup)?.name || 'this table'} only?`
+                          if (!confirm(label)) return
+                          const res = await fetch('/api/admin/edit-item', {
+                            method: 'PATCH', headers: await authHeaders(),
+                            body: JSON.stringify({ table: 'events', id: event.id, fields: { group_id: toAll ? null : selectedGroup } }),
+                          })
+                          const r = await res.json().catch(() => ({}))
+                          if (!res.ok) { alert(r.error || 'Could not change who sees it'); return }
+                          loadEvents()
+                        }}
+                        className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${event.group_id ? 'bg-bt-pale text-bt-navy' : 'bg-green-50 text-green-700'}`}
+                        title="Tap to change who can see this event">
+                        {event.group_id ? `👥 ${groups.find(g => g.id === event.group_id)?.name || 'This table'} only` : '🌐 All BT'} ↕
+                      </button>
                       {event.notifications_enabled === false ? (
                         <span className="text-[10px] font-semibold uppercase tracking-wider bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
                           Notifications off
