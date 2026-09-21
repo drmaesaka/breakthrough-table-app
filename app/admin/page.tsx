@@ -397,6 +397,10 @@ export default function AdminPage() {
   const [memberBusy, setMemberBusy] = useState('')
   const [myId, setMyId] = useState('')
   const [pushReminderBusy, setPushReminderBusy] = useState(false)
+  /** Event id → how many signed up; and the open roster, if any. */
+  const [rsvpCounts, setRsvpCounts] = useState<Record<string, number>>({})
+  const [rsvpOpen, setRsvpOpen] = useState<string | null>(null)
+  const [rsvpRoster, setRsvpRoster] = useState<Record<string, { user_id: string; full_name: string; email: string; table: string | null; signed_up_at: string }[]>>({})
   const [leaderBusy, setLeaderBusy] = useState('')
   const [leaderError, setLeaderError] = useState('')
 
@@ -793,7 +797,25 @@ export default function AdminPage() {
     setRegistrations(p => p.filter(r => r.id !== id))
   }
 
+  async function loadRsvpCounts() {
+    const res = await fetch('/api/admin/event-rsvps', { headers: await authHeaders() })
+    if (!res.ok) return
+    const { counts } = await res.json()
+    setRsvpCounts(counts || {})
+  }
+
+  async function openEventRoster(eventId: string) {
+    if (rsvpOpen === eventId) { setRsvpOpen(null); return }
+    setRsvpOpen(eventId)
+    if (rsvpRoster[eventId]) return
+    const res = await fetch(`/api/admin/event-rsvps?event_id=${encodeURIComponent(eventId)}`, { headers: await authHeaders() })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(json.error || 'Could not load sign-ups'); setRsvpOpen(null); return }
+    setRsvpRoster(prev => ({ ...prev, [eventId]: json.rsvps || [] }))
+  }
+
   async function loadEvents(gid: string = selectedGroup) {
+    loadRsvpCounts()
     const supabase = createClient()
     const { data } = await supabase.from('events').select('*').order('event_date', { ascending: true })
     // Community-wide events (no group_id) plus this table's own. Events are
@@ -2367,6 +2389,35 @@ export default function AdminPage() {
                     <p className="text-xs text-gray-400">{new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
                     {event.location && <p className="text-xs text-gray-400 mt-0.5">📍 {event.location}</p>}
                     {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
+                    {/* Who signed up. Leaders asked; the tab showed events
+                        but never the RSVPs. */}
+                    <button onClick={() => openEventRoster(event.id)}
+                      className="text-xs font-semibold text-bt-blue mt-1.5">
+                      👤 {rsvpCounts[event.id] || 0} signed up {rsvpOpen === event.id ? '▴' : '▾'}
+                    </button>
+                    {rsvpOpen === event.id && (
+                      <div className="mt-1.5 bg-bt-pale rounded-xl p-3 space-y-1">
+                        {!rsvpRoster[event.id] ? (
+                          <p className="text-xs text-gray-400">Loading...</p>
+                        ) : rsvpRoster[event.id].length === 0 ? (
+                          <p className="text-xs text-gray-400">Nobody yet.</p>
+                        ) : (
+                          <>
+                            {rsvpRoster[event.id].map(r => (
+                              <div key={r.user_id} className="flex items-center justify-between gap-2 text-xs">
+                                <span className="text-gray-800 font-medium truncate">{r.full_name}{r.table ? <span className="text-gray-400 font-normal"> · {r.table}</span> : null}</span>
+                                <span className="text-gray-400 flex-shrink-0">{new Date(r.signed_up_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                              </div>
+                            ))}
+                            <button onClick={() => downloadCSV(
+                              `${event.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-signups.csv`,
+                              [['Name', 'Email', 'Table', 'Signed up'],
+                                ...rsvpRoster[event.id].map(r => [r.full_name, r.email, r.table || '', new Date(r.signed_up_at).toLocaleString('en-US')])]
+                            )} className="text-[11px] font-semibold text-bt-navy mt-1">⬇ CSV</button>
+                          </>
+                        )}
+                      </div>
+                    )}
                     <div className="flex gap-1.5 mt-1.5 flex-wrap items-center">
                       {/* Audience, and a one-tap switch. Goes through edit-item
                           so the ownership rules apply. */}
