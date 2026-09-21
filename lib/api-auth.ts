@@ -94,8 +94,24 @@ export async function requireUser(req: NextRequest): Promise<AuthResult> {
  * Tolerates group_leaders not existing yet, so the app behaves exactly as
  * before if the code deploys ahead of the migration.
  */
+/**
+ * The owners of Breakthrough Table: profiles.is_super_admin. They lead every
+ * table for every purpose in the app. Tolerates the column not existing yet
+ * (before sql/2026-09-21-super-admin.sql) by answering false.
+ */
+export async function isSuperAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await adminClient()
+    .from('profiles').select('is_super_admin').eq('id', userId).maybeSingle()
+  if (error) return false
+  return Boolean(data?.is_super_admin)
+}
+
 export async function leaderGroupIds(userId: string): Promise<string[]> {
   const supabase = adminClient()
+  if (await isSuperAdmin(userId)) {
+    const { data } = await supabase.from('groups').select('id')
+    return (data || []).map(g => g.id as string)
+  }
   const [{ data: legacy }, { data: joined }] = await Promise.all([
     supabase.from('groups').select('id').eq('leader_id', userId),
     supabase.from('group_leaders').select('group_id').eq('user_id', userId),
@@ -122,6 +138,7 @@ export async function requireGroupOwnership(
   if (error) return { ok: false, status: 500, error: 'Could not load group' }
   if (!group) return { ok: false, status: 404, error: 'Group not found' }
   if (group.leader_id === userId) return { ok: true }
+  if (await isSuperAdmin(userId)) return { ok: true }
 
   const { data: coLeader } = await supabase
     .from('group_leaders')
