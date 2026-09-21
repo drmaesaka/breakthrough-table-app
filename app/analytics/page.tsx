@@ -28,7 +28,11 @@ export default function AnalyticsPage() {
 
       // Only this leader's tables — analytics used to show every group in the app.
       // Includes tables they co-lead, not just ones they are named on.
-      const groupsData = await ledGroups(supabase, user.id)
+      // Server-resolved list of led tables (see /api/admin/my-groups); the
+      // browser query is the fallback if the route is unreachable.
+      const { data: { session } } = await supabase.auth.getSession()
+      const mineRes = await fetch('/api/admin/my-groups', { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } }).catch(() => null)
+      const groupsData: any[] = mineRes && mineRes.ok ? ((await mineRes.json()).groups || []) : await ledGroups(supabase, user.id)
 
       if (groupsData.length === 0) { setLoading(false); return }
       const groupIds = groupsData.map(g => g.id)

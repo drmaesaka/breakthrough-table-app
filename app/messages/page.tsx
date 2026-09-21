@@ -184,7 +184,13 @@ export default function MessagesPage() {
 
       // Leaders also get the tables they run. Own table first, so nothing
       // changes for a TC with one table.
-      const led = profile?.role === 'leader' ? await ledGroups(supabase, user.id, 'id, name, leader_id') : []
+      let led: { id: string; name: string }[] = []
+      if (profile?.role === 'leader') {
+        // Server-resolved so a co-leader who does not sit at the table still
+        // gets it in the picker (the browser-side groups read may not admit them).
+        const res = await fetch('/api/admin/my-groups', { headers: await authHeaders() }).catch(() => null)
+        led = res && res.ok ? ((await res.json()).groups || []) : await ledGroups(supabase, user.id, 'id, name, leader_id')
+      }
       const all = [...(home ? [home] : []), ...led.filter(g => g.id !== home?.id).map(g => ({ id: g.id, name: g.name }))]
       setTables(all)
 

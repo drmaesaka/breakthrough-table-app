@@ -440,7 +440,12 @@ export default function AdminPage() {
       // to take groups[0] from an unordered, unfiltered list, so with a second
       // table the panel could silently open on someone else's group. Includes
       // tables they co-lead, not only ones they are named on.
-      const grps = await ledGroups(supabase, user.id, '*, last_period_start')
+      // Server-resolved: see /api/admin/my-groups. Falls back to the browser
+      // query only if the route is unreachable, so the page never goes blank.
+      const mineRes = await fetch('/api/admin/my-groups', { headers: await authHeaders() })
+      const grps = mineRes.ok
+        ? ((await mineRes.json()).groups || [])
+        : await ledGroups(supabase, user.id, '*, last_period_start')
       setGroups(grps)
       setUsers(membersRes.members || [])
       if (grps[0]) { setSelectedGroup(grps[0].id); loadGroupData(grps[0].id) }
@@ -1206,7 +1211,7 @@ export default function AdminPage() {
     setContentError('')
     if (!contentTitle.trim()) { setContentError('Title is required'); return }
     if (!contentUrl.trim()) { setContentError('Upload a file or paste a link'); return }
-    if (!selectedGroup) { setContentError('No group selected'); return }
+    if (!selectedGroup) { setContentError('Pick a table at the top first — you are not leading one yet'); return }
     setContentSaving(true)
     const { data: rows, error } = await postItems('content', [{
       group_id: selectedGroup, title: contentTitle.trim(), url: contentUrl.trim(),
@@ -1317,6 +1322,17 @@ export default function AdminPage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-4">
         <h1 className="text-white text-2xl font-bold">Admin Panel</h1>
+        {/* A leader with no table: say so, rather than letting every form
+            fail with "No group selected". */}
+        {!loading && groups.length === 0 && (
+          <div className="mt-3 bg-white/15 rounded-xl px-4 py-3">
+            <p className="text-white text-sm font-semibold">You&apos;re not leading a table yet</p>
+            <p className="text-bt-light/80 text-xs mt-1 leading-relaxed">
+              Everything here posts to a table. Ask the TC of your table to add you as a co-leader
+              (Admin → groups → “Add a co-leader”), or create a new table under the groups tab.
+            </p>
+          </div>
+        )}
         {groups.length > 0 && (
           <select value={selectedGroup}
             onChange={e => {
