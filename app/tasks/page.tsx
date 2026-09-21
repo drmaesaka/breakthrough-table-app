@@ -10,6 +10,11 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([])
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
   const [habits, setHabits] = useState<Habit[]>([])
+  /** Habit id → every day it was logged (YYYY-MM-DD), for the calendar. */
+  const [historyByHabit, setHistoryByHabit] = useState<Map<string, Set<string>>>(new Map())
+  const [showHistory, setShowHistory] = useState(false)
+  /** First day of the month the calendar is showing. */
+  const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   /** Habit ids logged today. */
   const [doneToday, setDoneToday] = useState<Set<string>>(new Set())
   /** Habit id → consecutive days. Separate per habit, so one lapsing leaves the rest alone. */
@@ -61,6 +66,7 @@ export default function TasksPage() {
     setDoneToday(new Set(log.filter(c => c.completed_date === today && c.habit_id).map(c => c.habit_id as string)))
 
     const byHabit = datesByHabit(log)
+    setHistoryByHabit(byHabit)
     const next = new Map<string, number>()
     for (const h of live) {
       const dates = byHabit.get(h.id) ?? new Set<string>()
@@ -105,11 +111,13 @@ export default function TasksPage() {
         .delete().eq('user_id', userId).eq('habit_id', habitId).eq('completed_date', today)
       nextDone.delete(habitId)
       setStreaks(prev => new Map(prev).set(habitId, Math.max(0, (prev.get(habitId) || 0) - 1)))
+      setHistoryByHabit(prev => { const m = new Map(prev); const d = new Set(m.get(habitId) || []); d.delete(today); m.set(habitId, d); return m })
     } else {
       await supabase.from('habit_completions')
         .insert({ user_id: userId, habit_id: habitId, completed_date: today })
       nextDone.add(habitId)
       setStreaks(prev => new Map(prev).set(habitId, (prev.get(habitId) || 0) + 1))
+      setHistoryByHabit(prev => { const m = new Map(prev); const d = new Set(m.get(habitId) || []); d.add(today); m.set(habitId, d); return m })
       setJustDone(habitId)
       setTimeout(() => setJustDone(null), 3000)
     }
@@ -170,9 +178,81 @@ export default function TasksPage() {
                   Daily Habit{habits.length === 1 ? '' : 's'}
                 </p>
                 {habits.length > 0 && (
-                  <a href="/profile" className="text-bt-blue text-xs font-semibold">Manage</a>
+                  <div className="flex gap-3">
+                    <button onClick={() => setShowHistory(v => !v)} className="text-bt-blue text-xs font-semibold">
+                      {showHistory ? 'Hide calendar' : '📅 Calendar'}
+                    </button>
+                    <a href="/profile" className="text-bt-blue text-xs font-semibold">Manage</a>
+                  </div>
                 )}
               </div>
+
+              {/* Month view, one grid per habit. Leaders asked for more than
+                  "just today". View only: back-filling old days would let a
+                  streak be repaired after the fact, which defeats it. */}
+              {showHistory && habits.length > 0 && (() => {
+                const y = calMonth.getFullYear(), m = calMonth.getMonth()
+                const daysInMonth = new Date(y, m + 1, 0).getDate()
+                const firstDow = new Date(y, m, 1).getDay()
+                const pad = (n: number) => String(n).padStart(2, '0')
+                const key = (d: number) => `${y}-${pad(m + 1)}-${pad(d)}`
+                const todayKey = today
+                const isCurrentMonth = todayKey.startsWith(`${y}-${pad(m + 1)}`)
+                const dayCount = isCurrentMonth ? Number(todayKey.slice(-2)) : daysInMonth
+                const monthLabel = calMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                const canForward = !isCurrentMonth && calMonth < new Date()
+                return (
+                  <div className="bg-white rounded-2xl p-4 shadow-sm mb-3 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <button onClick={() => setCalMonth(new Date(y, m - 1, 1))} className="w-8 h-8 rounded-full bg-bt-pale text-bt-navy font-bold">‹</button>
+                      <p className="font-semibold text-bt-navy text-sm">{monthLabel}</p>
+                      <button onClick={() => setCalMonth(new Date(y, m + 1, 1))} disabled={!canForward}
+                        className="w-8 h-8 rounded-full bg-bt-pale text-bt-navy font-bold disabled:opacity-30">›</button>
+                    </div>
+                    {habits.map(h => {
+                      const dates = historyByHabit.get(h.id) || new Set<string>()
+                      let done = 0
+                      for (let d = 1; d <= dayCount; d++) if (dates.has(key(d))) done++
+                      // Days since the habit was created count as "possible";
+                      // before that the box is blank, not a miss.
+                      const createdKey = h.created_at ? String(h.created_at).slice(0, 10) : ''
+                      return (
+                        <div key={h.id}>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{h.name}</p>
+                            <p className="text-xs text-gray-400 flex-shrink-0">{done} of {dayCount} day{dayCount === 1 ? '' : 's'}</p>
+                          </div>
+                          <div className="grid grid-cols-7 gap-1 text-center">
+                            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                              <span key={i} className="text-[10px] text-gray-300 font-semibold">{d}</span>
+                            ))}
+                            {Array.from({ length: firstDow }).map((_, i) => <span key={`pad-${i}`} />)}
+                            {Array.from({ length: daysInMonth }).map((_, i) => {
+                              const d = i + 1
+                              const k = key(d)
+                              const isToday = k === todayKey
+                              const future = k > todayKey
+                              const beforeStart = createdKey && k < createdKey
+                              const hit = dates.has(k)
+                              return (
+                                <span key={k} title={k}
+                                  className={`h-7 rounded-lg flex items-center justify-center text-[11px] font-semibold ${
+                                    hit ? 'bg-bt-navy text-white'
+                                    : future || beforeStart ? 'text-gray-200'
+                                    : 'bg-gray-50 text-gray-400'
+                                  } ${isToday ? 'ring-2 ring-bt-blue' : ''}`}>
+                                  {d}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <p className="text-[11px] text-gray-400">Filled = checked in that day. Today has a blue ring. Past days can’t be edited — that’s what keeps a streak honest.</p>
+                  </div>
+                )
+              })()}
 
               {justDone && (streaks.get(justDone) || 0) > 0 && (
                 <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 text-center mb-3">
