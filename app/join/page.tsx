@@ -62,21 +62,32 @@ function JoinForm() {
     // writes group_id with the service key — the browser cannot write it
     // directly, which is what used to let anyone join any table by id.
     if ((invite || legacyGroup) && data.session) {
-      const res = await fetch('/api/join', {
+      const join = () => fetch('/api/join', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${data.session.access_token}`,
+          Authorization: `Bearer ${data.session!.access_token}`,
         },
         body: JSON.stringify({ invite, group: legacyGroup }),
       })
-      if (!res.ok) {
-        const { error: joinError } = await res.json().catch(() => ({ error: null }))
-        // The account exists — let them continue, but say the seat didn't take
-        // so they know to ask their leader instead of assuming they're in.
-        alert(joinError
-          ? `Your account was created, but joining the table failed: ${joinError}`
-          : 'Your account was created, but joining the table failed. Ask your leader to add you from the Admin panel.')
+      // One retry after a pause: a brand-new account's first request can
+      // land before Supabase is ready for it. The server retries too; this
+      // covers a network blip or a cold start on top.
+      let res = await join().catch(() => null)
+      if (!res || !res.ok) {
+        await new Promise(r => setTimeout(r, 2000))
+        res = await join().catch(() => null)
+      }
+      if (!res || !res.ok) {
+        const { error: joinError } = res ? await res.json().catch(() => ({ error: null })) : { error: null }
+        // The account exists — let them continue, but say plainly what did
+        // and did not happen so they tell their TC instead of assuming.
+        alert(
+          `Your account is created and you're signed in.\n\n` +
+          `We couldn't seat you at ${groupName || 'your table'} just now` +
+          (joinError ? ` (${joinError})` : '') +
+          `. Tell your TC — they can add you in Admin → groups in a few seconds.`
+        )
       }
     }
 

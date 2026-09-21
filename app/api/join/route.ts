@@ -77,8 +77,17 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
-  const { data: { user } } = await userClient.auth.getUser(token)
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // A token minted seconds ago is exactly the one Supabase intermittently
+  // rejects as "issued in the future" (clock skew — the same thing that made
+  // the cron jobs 503). Four sign-ups in one evening hit an error here, so
+  // retry briefly before telling a brand-new member their join failed.
+  let user = null as null | { id: string }
+  for (let attempt = 0; attempt < 4 && !user; attempt++) {
+    if (attempt) await new Promise(r => setTimeout(r, 700))
+    const { data } = await userClient.auth.getUser(token)
+    user = data.user
+  }
+  if (!user) return NextResponse.json({ error: 'Your sign-in was not ready yet' }, { status: 401 })
 
   const { invite, group } = await req.json().catch(() => ({}))
   const resolved = await resolveGroup(invite || null, group || null)
@@ -93,13 +102,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'You are already in a table — ask a leader to move you' }, { status: 409 })
   }
 
-  const { error } = await supabase
-    .from('profiles')
-    .update({ group_id: resolved.group!.id })
-    .eq('id', user.id)
-
-  if (error) {
-    return NextResponse.json({ error: 'Could not join the group' }, { status: 500 })
+  // The profile row is created by a database trigger when the account is;
+  // confirm the update actually touched a row, and give the trigger a
+  // moment if it has not landed yet. An update matching nothing returns no
+  // error and used to read as success.
+  let seated = false
+  for (let attempt = 0; attempt < 4 && !seated; attempt++) {
+    if (attempt) await new Promise(r => setTimeout(r, 600))
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ group_id: resolved.group!.id })
+      .eq('id', user.id)
+      .select('id')
+    if (error) return NextResponse.json({ error: 'Could not join the group' }, { status: 500 })
+    seated = Boolean(data && data.length)
   }
+  if (!seated) return NextResponse.json({ error: 'Your profile was not ready yet' }, { status: 503 })
   return NextResponse.json({ ok: true, group_name: resolved.group!.name })
 }
