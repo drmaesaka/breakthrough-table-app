@@ -21,6 +21,32 @@ async function memberInMyGroups(leaderId: string, userId: string) {
   return { ok: true as const }
 }
 
+// Reservations for the admin Rooms tab, via the service key. The browser
+// read of other members' bookings depends on a console-only RLS policy;
+// leaders asked "how do I see room reservations", so this is the one
+// authoritative list. ?date=YYYY-MM-DD for one day, otherwise everything
+// from today for the next `days` days (default 30).
+export async function GET(req: NextRequest) {
+  const auth = await requireLeader(req)
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
+  const date = req.nextUrl.searchParams.get('date')
+  const days = Math.min(Number(req.nextUrl.searchParams.get('days') || 30), 120)
+  const supabase = adminClient()
+  let q = supabase.from('room_bookings').select('*, rooms(name, suite), profiles(full_name)')
+  if (date) {
+    q = q.eq('booking_date', date)
+  } else {
+    const from = new Date(); from.setHours(0, 0, 0, 0)
+    const to = new Date(from); to.setDate(to.getDate() + days)
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    q = q.gte('booking_date', iso(from)).lte('booking_date', iso(to))
+  }
+  const { data, error } = await q.order('booking_date', { ascending: true }).order('start_time', { ascending: true })
+  if (error) return NextResponse.json({ error: 'Could not load bookings', detail: error.message }, { status: 500 })
+  return NextResponse.json({ bookings: data || [] })
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })

@@ -1012,16 +1012,16 @@ export default function AdminPage() {
   async function loadRooms() {
     const supabase = createClient()
     const headers = await authHeaders()
-    const [{ data: b }, roomsRes, venueRes] = await Promise.all([
-      supabase.from('room_bookings')
-        .select('*, rooms(name), profiles(full_name)')
-        .gte('booking_date', localDay())
-        .order('booking_date', { ascending: true }),
+    const [bookingsRes, roomsRes, venueRes] = await Promise.all([
+      // Through the API: the browser read of other members' bookings depends
+      // on a console-only policy. Next 30 days, every room.
+      fetch('/api/admin/bookings', { headers }),
       // Read through the API rather than the browser client so archived rooms
       // come back too — a room you cannot see is a room you cannot un-archive.
       fetch('/api/admin/rooms', { headers }),
       fetch('/api/admin/venue', { headers }),
     ])
+    const b = (await bookingsRes.json().catch(() => ({ bookings: [] }))).bookings
 
     const roomsJson = await roomsRes.json().catch(() => ({ rooms: [] }))
     // A room with no group_id (or from before the column existed) is shared
@@ -2500,6 +2500,41 @@ export default function AdminPage() {
 
               {/* Dashboard — pick a date, see all rooms */}
               <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+                {/* Every reservation coming up, all rooms, so a leader does
+                    not have to click through the calendar day by day. Shown
+                    while the picker is on today; a picked day narrows below. */}
+                {adminBookDate === todayStr && (() => {
+                  const upcoming = allBookings.slice().sort((a: any, b: any) =>
+                    a.booking_date.localeCompare(b.booking_date) || String(a.start_time).localeCompare(String(b.start_time)))
+                  const byDay = new Map<string, any[]>()
+                  for (const bk of upcoming) byDay.set(bk.booking_date, [...(byDay.get(bk.booking_date) || []), bk])
+                  return (
+                    <div className="bg-bt-pale rounded-xl p-3 mb-3">
+                      <p className="text-xs text-gray-400 font-medium mb-1.5">Upcoming reservations · next 30 days</p>
+                      {byDay.size === 0 ? (
+                        <p className="text-xs text-gray-400">None booked.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {[...byDay.entries()].map(([day, list]) => {
+                            const [y, m, d] = day.split('-').map(Number)
+                            return (
+                              <div key={day}>
+                                <p className="text-[11px] font-bold text-bt-navy">{new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                                {list.map((bk: any) => (
+                                  <div key={bk.id} className="flex items-center justify-between text-xs py-0.5">
+                                    <span className="text-gray-700">{formatTime(parseTime(bk.start_time))}–{formatTime(parseTime(bk.end_time))} · {bk.rooms?.name}{bk.rooms?.suite ? ` (${bk.rooms.suite})` : ''}</span>
+                                    <span className="text-gray-400">{bk.profiles?.full_name}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <p className="text-[11px] text-gray-400 mt-2">Pick a day below to see it room by room, or cancel a booking.</p>
+                    </div>
+                  )
+                })()}
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-bt-navy">Room Dashboard</h3>
                   {closed && <span className="text-xs font-semibold text-amber-600">Venue closed</span>}
@@ -2508,12 +2543,9 @@ export default function AdminPage() {
                   onChange={async e => {
                     setAdminBookDate(e.target.value)
                     setAdminBookTime('')
-                    const supabase = createClient()
-                    const { data } = await supabase.from('room_bookings')
-                      .select('*, rooms(name,suite), profiles(full_name)')
-                      .eq('booking_date', e.target.value)
-                      .order('start_time')
-                    setAllBookings(data || [])
+                    const res = await fetch(`/api/admin/bookings?date=${e.target.value}`, { headers: await authHeaders() })
+                    const json = await res.json().catch(() => ({ bookings: [] }))
+                    setAllBookings(json.bookings || [])
                   }}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
 
