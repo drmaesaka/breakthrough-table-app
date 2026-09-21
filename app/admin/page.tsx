@@ -394,6 +394,7 @@ export default function AdminPage() {
   /** "Add a member..." pick per table on the groups tab, keyed by group id. */
   const [memberPick, setMemberPick] = useState<Record<string, string>>({})
   const [memberBusy, setMemberBusy] = useState('')
+  const [myId, setMyId] = useState('')
   const [pushReminderBusy, setPushReminderBusy] = useState(false)
   const [leaderBusy, setLeaderBusy] = useState('')
   const [leaderError, setLeaderError] = useState('')
@@ -430,6 +431,7 @@ export default function AdminPage() {
       if (!user) { router.push('/login'); return }
       const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
+      setMyId(user.id)
 
       const membersReq = await fetch('/api/admin/members', { headers: await authHeaders() })
       const membersRes = await membersReq.json()
@@ -1832,6 +1834,7 @@ export default function AdminPage() {
                             <div key={u.id} className="flex items-center gap-2">
                               <span className="text-xs text-gray-700 font-medium flex-1 truncate">
                                 {u.full_name || 'Unnamed'}
+                                {u.id === myId && <span className="text-[10px] text-gray-400 ml-1">(you — this is your table)</span>}
                                 {isLeaderHere(u.id) && <span className="text-[10px] text-bt-blue font-bold ml-1">TC</span>}
                               </span>
                               <button
@@ -1875,7 +1878,8 @@ export default function AdminPage() {
                             </button>
                           </div>
                           <p className="text-[11px] text-gray-400 leading-relaxed">
-                            Shows people with no table yet and members of your other tables. A person sits at one
+                            Shows people with no table yet and members of your other tables. Anyone already seated
+                            here (including you) is in the list above, not the dropdown. A person sits at one
                             table, so adding them here moves them. Someone brand new still needs the invite link below.
                           </p>
                         </div>
