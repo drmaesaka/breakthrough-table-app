@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import PushInit from "@/components/PushInit";
 
@@ -11,6 +11,18 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Breakthrough Table",
   },
+};
+
+// iPhone Safari zooms the page when a text box is focused unless the page
+// says maximum-scale=1 — and it still honours pinch-to-zoom, so this only
+// stops the jump, not accessibility. viewportFit covers the notch so the
+// navy header runs edge to edge when installed to the Home Screen.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
+  themeColor: "#1e3a5f",
 };
 
 export default function RootLayout({
