@@ -187,6 +187,10 @@ export default function DashboardPage() {
 
             <div className="grid grid-cols-2 gap-3">
               {[
+                // Stats left the leaders' bottom bar to make room for Home.
+                ...(profile?.role === 'leader'
+                  ? [{ href: '/analytics', emoji: '📊', title: 'Stats', sub: 'Your tables at a glance' }]
+                  : []),
                 { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
                 // /journal had no inbound link anywhere, so reflection prompts
                 // were only reachable by typing the URL.

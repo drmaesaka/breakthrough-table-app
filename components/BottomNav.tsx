@@ -22,17 +22,21 @@ export default function BottomNav() {
   // Leaders get My Table too. Without it a TC had no way to see their own
   // table the way their members see it, and no way to check what a member
   // actually looks at — every other leader screen is the leader's view.
+  // Home is the first tab. Tapping the logo top-right also went home, but
+  // nobody guessed that (leader feedback 2026-09-21). Leaders lose the Stats
+  // tab to make room — Stats is a card on the dashboard instead.
   const tabs = isLeader
     ? [
+        { href: '/dashboard', label: 'Home', icon: <HomeIcon /> },
         { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
         { href: '/group', label: 'My Table', icon: <GroupIcon /> },
         { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
         { href: '/leaders', label: 'TC Room', icon: <LeaderIcon /> },
-        { href: '/analytics', label: 'Stats', icon: <StatsIcon /> },
-        { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
         { href: '/admin', label: 'Admin', icon: <AdminIcon /> },
+        { href: '/profile', label: 'Profile', icon: <ProfileIcon /> },
       ]
     : [
+        { href: '/dashboard', label: 'Home', icon: <HomeIcon /> },
         { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
         { href: '/group', label: 'My Table', icon: <GroupIcon /> },
         { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
@@ -80,6 +84,15 @@ function TaskIcon() {
     </svg>
   )
 }
+function HomeIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11.5 12 4l9 7.5" />
+      <path d="M5 10.5V20h5v-5h4v5h5v-9.5" />
+    </svg>
+  )
+}
+
 function ChatIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
