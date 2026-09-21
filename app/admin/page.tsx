@@ -1538,7 +1538,19 @@ export default function AdminPage() {
                               className="text-bt-blue text-xs font-semibold flex-shrink-0">Rename</button>
                           </div>
                         )}
-                        <p className="text-gray-400 text-xs mt-0.5">{users.filter(u => u.group_id === g.id).length} members</p>
+                        {/* Who runs it, right under the name — the leaders box
+                            further down is for changing that, not finding it. */}
+                        {(() => {
+                          const ls = groupLeaders[g.id] || []
+                          const names = ls.map((l: any) => l.profiles?.full_name || 'Unnamed')
+                          return (
+                            <p className="text-xs mt-0.5">
+                              <span className="text-bt-blue font-semibold">TC: </span>
+                              <span className="text-gray-700">{names.length ? names.join(', ') : '—'}</span>
+                              <span className="text-gray-400"> · {users.filter(u => u.group_id === g.id).length} members</span>
+                            </p>
+                          )
+                        })()}
                         {(() => {
                           const days = daysUntilReset(g.last_period_start)
                           if (days === null) return null
