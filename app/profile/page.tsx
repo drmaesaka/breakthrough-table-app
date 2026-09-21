@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import NotificationCard from '@/components/NotificationCard'
 import Avatar from '@/components/Avatar'
 import { shrinkImage } from '@/lib/image'
 
@@ -377,6 +378,8 @@ export default function ProfilePage() {
             </div>
           </div>
         </div>
+
+        <NotificationCard />
 
         {/* Member Directory */}
         <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3">
