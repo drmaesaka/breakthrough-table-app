@@ -933,6 +933,24 @@ export default function AdminPage() {
     alert(parts.join(' '))
   }
 
+  /** Create rows in tasks / content / journal_prompts via the server (see /api/admin/post-item). */
+  async function postItems(table: 'tasks' | 'content' | 'journal_prompts', rows: Record<string, unknown>[]) {
+    const res = await fetch('/api/admin/post-item', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ table, rows }) })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) return { data: null as any[] | null, error: { message: json.error || `Could not save (${res.status})` } }
+    return { data: (json.items || []) as any[], error: null }
+  }
+
+  async function deleteItem(table: 'tasks' | 'content' | 'journal_prompts', id: string) {
+    const res = await fetch('/api/admin/post-item', { method: 'DELETE', headers: await authHeaders(), body: JSON.stringify({ table, id }) })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      alert(json.error || `Could not remove (${res.status})`)
+      return false
+    }
+    return true
+  }
+
   async function loadLeaderCandidates() {
     const res = await fetch('/api/admin/group-leaders?candidates=1', { headers: await authHeaders() })
     if (!res.ok) return
@@ -1160,14 +1178,14 @@ export default function AdminPage() {
       for (const r of rows || []) if (!periodFor[r.group_id]) periodFor[r.group_id] = r.period_label
     }
 
-    const { data, error } = await supabase.from('tasks').insert(
+    const { data, error } = await postItems('tasks',
       targetIds.map(group_id => ({
         group_id,
         title: taskTitle.trim(),
         description: taskDesc.trim(),
         period_label: periodFor[group_id] || 'Current',
       }))
-    ).select()
+    )
     setTaskSaving(false)
     if (error) { setTaskError(`Could not post: ${error.message}`); return }
     for (const row of data || []) notifyAbout('task', row.id)
@@ -1181,11 +1199,7 @@ export default function AdminPage() {
   }
 
   async function deleteTask(id: string) {
-    const supabase = createClient()
-    // Delete completions first to avoid FK constraint
-    await supabase.from('task_completions').delete().eq('task_id', id)
-    await supabase.from('tasks').delete().eq('id', id)
-    setTasks(p => p.filter(t => t.id !== id))
+    if (await deleteItem('tasks', id)) setTasks(p => p.filter(t => t.id !== id))
   }
 
   async function addContent() {
@@ -1194,13 +1208,13 @@ export default function AdminPage() {
     if (!contentUrl.trim()) { setContentError('Upload a file or paste a link'); return }
     if (!selectedGroup) { setContentError('No group selected'); return }
     setContentSaving(true)
-    const supabase = createClient()
-    const { data, error } = await supabase.from('content').insert({
+    const { data: rows, error } = await postItems('content', [{
       group_id: selectedGroup, title: contentTitle.trim(), url: contentUrl.trim(),
-      type: contentType, description: contentDesc.trim()
-    }).select().single()
+      type: contentType, description: contentDesc.trim(),
+    }])
     setContentSaving(false)
     if (error) { setContentError(error.message); return }
+    const data = rows?.[0]
     if (data) { notifyAbout('content', data.id); setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc(''); setContentFileName('') }
   }
 
@@ -1514,9 +1528,7 @@ export default function AdminPage() {
                     className="text-bt-blue text-sm font-medium px-2 py-1">Edit</button>
                   <button onClick={async () => {
                     if (!confirm(`Remove "${item.title}"?`)) return
-                    const supabase = createClient()
-                    await supabase.from('content').delete().eq('id', item.id)
-                    setContent(p => p.filter(c => c.id !== item.id))
+                    if (await deleteItem('content', item.id)) setContent(p => p.filter(c => c.id !== item.id))
                   }} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
                 </div>
                 )
@@ -1548,9 +1560,9 @@ export default function AdminPage() {
                 // The selected table first, then any extras — one row per
                 // table, because members read prompts by their own group_id.
                 const targetIds = targetTables(groups, selectedGroup, promptAlsoTo)
-                const { data, error } = await supabase.from('journal_prompts').insert(
+                const { data, error } = await postItems('journal_prompts',
                   targetIds.map(group_id => ({ group_id, prompt: promptText.trim(), posted_by: user?.id }))
-                ).select()
+                )
                 if (error) {
                   setPromptError(`Could not post the prompt: ${error.message}`)
                 } else {
@@ -1615,9 +1627,7 @@ export default function AdminPage() {
                       className="text-bt-blue text-sm font-medium px-2 py-1 flex-shrink-0">Edit</button>
                     <button onClick={async () => {
                       if (!confirm('Delete this prompt?')) return
-                      const supabase = createClient()
-                      await supabase.from('journal_prompts').delete().eq('id', p.id)
-                      setPrompts(prev => prev.filter(x => x.id !== p.id))
+                      if (await deleteItem('journal_prompts', p.id)) setPrompts(prev => prev.filter(x => x.id !== p.id))
                     }} className="text-red-400 text-sm font-medium px-2 py-1 flex-shrink-0">Remove</button>
                   </div>
                   {/* Member responses — the leader-facing view that didn't exist:
