@@ -19,11 +19,17 @@ import { adminClient, requireLeader, requireGroupOwnership, leaderGroupIds } fro
 // written in the Supabase console still read that column.
 
 async function leadersOf(groupId: string) {
-  const { data } = await adminClient()
+  // group_leaders points at profiles twice (user_id and added_by), so the
+  // join has to name which one. Unqualified `profiles(...)` made PostgREST
+  // refuse the whole query, and the error was swallowed here — every table's
+  // leader list rendered empty and "Add" appeared to do nothing while the
+  // row was in fact written. Found 2026-09-21.
+  const { data, error } = await adminClient()
     .from('group_leaders')
-    .select('id, user_id, is_primary, added_at, profiles(full_name)')
+    .select('id, user_id, is_primary, added_at, profiles:profiles!group_leaders_user_id_fkey(full_name)')
     .eq('group_id', groupId)
     .order('is_primary', { ascending: false })
+  if (error) console.error('leadersOf failed:', error.message)
   return data || []
 }
 
