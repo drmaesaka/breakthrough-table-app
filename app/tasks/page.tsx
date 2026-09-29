@@ -14,6 +14,11 @@ export default function TasksPage() {
   /** Habit id → every day it was logged (YYYY-MM-DD), for the calendar. */
   const [historyByHabit, setHistoryByHabit] = useState<Map<string, Set<string>>>(new Map())
   const [showHistory, setShowHistory] = useState(false)
+  /** Inline "add a habit" — leaders asked for a plus button here instead of a trip to Profile. */
+  const [adding, setAdding] = useState(false)
+  const [newHabit, setNewHabit] = useState('')
+  const [addSaving, setAddSaving] = useState(false)
+  const [addError, setAddError] = useState('')
   /** First day of the month the calendar is showing. */
   const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1) })
   /** Habit ids logged today. */
@@ -100,6 +105,20 @@ export default function TasksPage() {
     await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
   }
 
+  async function addHabit() {
+    const name = newHabit.trim()
+    if (!name) return
+    if (habits.some(h => h.name.toLowerCase() === name.toLowerCase())) { setAddError('You already have that habit'); return }
+    setAddSaving(true); setAddError('')
+    const supabase = createClient()
+    const { data, error } = await supabase.from('habits').insert({ user_id: userId, name }).select().single()
+    setAddSaving(false)
+    if (error) { setAddError("Couldn't save — try again"); return }
+    setHabits(prev => [...prev, data as Habit])
+    setStreaks(prev => new Map(prev).set(data.id, 0))
+    setNewHabit(''); setAdding(false)
+  }
+
   async function toggleHabit(habitId: string) {
     const supabase = createClient()
     const wasDone = doneToday.has(habitId)
@@ -178,15 +197,37 @@ export default function TasksPage() {
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">
                   Daily Habit{habits.length === 1 ? '' : 's'}
                 </p>
-                {habits.length > 0 && (
-                  <div className="flex gap-3">
+                <div className="flex gap-3 items-center">
+                  {habits.length > 0 && (
                     <button onClick={() => setShowHistory(v => !v)} className="text-bt-blue text-xs font-semibold">
                       {showHistory ? 'Hide calendar' : '📅 Calendar'}
                     </button>
-                    <a href="/profile" className="text-bt-blue text-xs font-semibold">Manage</a>
-                  </div>
-                )}
+                  )}
+                  {habits.length > 0 && <a href="/profile" className="text-bt-blue text-xs font-semibold">Manage</a>}
+                  <button onClick={() => { setAdding(v => !v); setAddError('') }} aria-label="Add a habit"
+                    className="w-7 h-7 rounded-full bg-bt-navy text-white text-lg leading-none font-bold flex items-center justify-center">
+                    {adding ? '×' : '+'}
+                  </button>
+                </div>
               </div>
+
+              {adding && (
+                <div className="bg-white rounded-2xl p-4 shadow-sm mb-3 space-y-2">
+                  <p className="text-xs text-gray-400 font-medium">New daily habit</p>
+                  <div className="flex gap-2">
+                    <input autoFocus value={newHabit} onChange={e => setNewHabit(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') addHabit(); if (e.key === 'Escape') setAdding(false) }}
+                      placeholder="e.g. Read 10 pages"
+                      className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                    <button onClick={addHabit} disabled={addSaving || !newHabit.trim()}
+                      className="px-4 py-3 rounded-xl bg-bt-navy text-white text-sm font-semibold disabled:opacity-40">
+                      {addSaving ? '...' : 'Add'}
+                    </button>
+                  </div>
+                  {addError && <p className="text-xs text-red-600">{addError}</p>}
+                  <p className="text-[11px] text-gray-400">Each habit keeps its own streak. Rename or retire one under Manage.</p>
+                </div>
+              )}
 
               {/* Month view, one grid per habit. Leaders asked for more than
                   "just today". View only: back-filling old days would let a
@@ -268,10 +309,12 @@ export default function TasksPage() {
               )}
 
               {habits.length === 0 ? (
-                <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
-                  <p className="text-gray-400 text-sm">No habit set yet</p>
-                  <a href="/profile" className="text-bt-blue text-sm font-semibold mt-1 block">Set your habit →</a>
-                </div>
+                !adding && (
+                  <button onClick={() => setAdding(true)} className="w-full bg-white rounded-2xl p-4 shadow-sm text-center">
+                    <p className="text-gray-400 text-sm">No habit set yet</p>
+                    <p className="text-bt-blue text-sm font-semibold mt-1">+ Add your first habit</p>
+                  </button>
+                )
               ) : (
                 <div className="space-y-3">
                   {habits.map(h => {
