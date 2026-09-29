@@ -1506,7 +1506,7 @@ export default function AdminPage() {
                     {contentUploading ? 'Uploading…' : contentFileName && contentUrl ? '✓ File uploaded' : '⬆ Upload a file'}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
-                    {contentFileName || 'PDF, video, document or image, stored in the app'}
+                    {contentFileName || 'PDF, video or image, stored in the app. PDFs open on every phone; Word or PowerPoint files may ask members to sign in to Microsoft — save them as PDF first.'}
                   </p>
                 </div>
                 <input type="file" className="hidden" disabled={contentUploading}
