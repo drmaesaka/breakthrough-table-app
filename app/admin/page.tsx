@@ -1378,6 +1378,7 @@ export default function AdminPage() {
               if (t === 'events') loadEvents()
               if (t === 'rooms') loadRooms()
               if (t === 'sessions') loadSessions()
+              if (t === 'members') loadGroupLeaders(groups.map(g => g.id))
               if (t === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans() }
               if (t === 'prompts' && selectedGroup) loadJournalResponses(selectedGroup)
               if (t === 'groups') {
@@ -2062,9 +2063,17 @@ export default function AdminPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-gray-900 text-sm">{u.full_name}</p>
-                        {u.role === 'leader' && (
-                          <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
-                        )}
+                        {u.role === 'leader' && (() => {
+                          // Which tables this TC runs. Two or more is the case
+                          // leaders asked to see at a glance.
+                          const led = groups.filter(g => (groupLeaders[g.id] || []).some((l: any) => l.user_id === u.id))
+                          if (led.length === 0) return <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
+                          return (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${led.length > 1 ? 'bg-amber-400 text-bt-navy' : 'bg-bt-navy text-white'}`}>
+                              {led.length > 1 ? `TC of ${led.length} tables: ` : 'TC · '}{led.map(g => g.name).join(', ')}
+                            </span>
+                          )
+                        })()}
                         {!u.push_enabled && (
                           <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">🔕 No notifications</span>
                         )}
