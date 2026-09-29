@@ -111,8 +111,12 @@ export default function AnalyticsPage() {
           const userCompletedTaskIds = new Set(
             (allTaskCompletions || []).filter((c: any) => c.user_id === m.id).map((c: any) => c.task_id)
           )
-          const readingDone = groupTasks.length === 0 || groupTasks.every((t: any) => userCompletedTaskIds.has(t.id))
-          return { ...m, habitDone, habitNames, readingDone }
+          // No reading posted = nothing to tick. It used to count as "done"
+          // for everyone, which made a table with no reading look perfect.
+          const readingCount = groupTasks.length
+          const readingDoneCount = groupTasks.filter((t: any) => userCompletedTaskIds.has(t.id)).length
+          const readingDone = readingCount > 0 && readingDoneCount === readingCount
+          return { ...m, habitDone, habitNames, readingDone, readingCount, readingDoneCount }
         })
 
         const avg = members.length > 0
@@ -252,7 +256,9 @@ export default function AnalyticsPage() {
                               </span>
                               <span className="text-gray-200">·</span>
                               <span className={`text-xs font-medium ${member.readingDone ? 'text-green-500' : 'text-gray-300'}`}>
-                                {member.readingDone ? '✓ reading' : '○ reading'}
+                                {member.readingCount === 0
+                                  ? '– no reading set'
+                                  : member.readingDone ? '✓ reading' : `○ reading ${member.readingDoneCount}/${member.readingCount}`}
                               </span>
                               {member.habitNames?.length > 0 && (
                                 <>
