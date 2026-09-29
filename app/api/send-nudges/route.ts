@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
+import { doneInPeriod, nudgeDue, freqOf, type Frequency } from '@/lib/habits'
 import { sendEmail, notificationEmail } from '@/lib/send-email'
 import { fetchMemberEmails } from '@/lib/member-emails'
 import { dayInTimezone } from '@/lib/dates'
@@ -130,44 +131,59 @@ export async function POST(req: NextRequest) {
   // "Today" is each member's own calendar day, so a single UTC date would check
   // the wrong day for anyone whose timezone has already rolled over. Fetch a
   // three-day window and match each member against their own day.
-  const dayWindow = [-1, 0, 1].map(offset =>
-    new Date(now.getTime() + offset * 86400000).toISOString().split('T')[0]
-  )
+  // Weekly and monthly habits (2026-09-29) need the whole current period, so
+  // fetch the last five weeks rather than a three-day window.
+  const since = new Date(now.getTime() - 35 * 86400000).toISOString().split('T')[0]
   const { data: habitRows } = await fetchAllRows<{ user_id: string; habit_id: string | null; completed_date: string }>(
     (from, to) => supabase
       .from('habit_completions')
       .select('user_id, habit_id, completed_date')
-      .in('completed_date', dayWindow)
+      .gte('completed_date', since)
       .in('user_id', participantIds)
       .range(from, to)
   )
 
   // A member may run several habits at once, each tracked separately.
-  const { data: liveHabits } = await fetchAllRows<{ id: string; user_id: string; name: string }>(
+  let { data: liveHabits } = await fetchAllRows<{ id: string; user_id: string; name: string; frequency?: string | null }>(
     (from, to) => supabase
       .from('habits')
-      .select('id, user_id, name')
+      .select('id, user_id, name, frequency')
       .is('archived_at', null)
       .in('user_id', participantIds)
       .range(from, to)
   )
+  // Before the 2026-09-29 migration the column does not exist: every habit is daily.
+  if (!liveHabits) {
+    ;({ data: liveHabits } = await fetchAllRows<{ id: string; user_id: string; name: string }>(
+      (from, to) => supabase.from('habits').select('id, user_id, name').is('archived_at', null).in('user_id', participantIds).range(from, to)
+    ))
+  }
 
-  const habitsByUser = new Map<string, { id: string; name: string }[]>()
+  const habitsByUser = new Map<string, { id: string; name: string; frequency: Frequency }[]>()
   for (const h of liveHabits || []) {
-    habitsByUser.set(h.user_id, [...(habitsByUser.get(h.user_id) || []), { id: h.id, name: h.name }])
+    habitsByUser.set(h.user_id, [...(habitsByUser.get(h.user_id) || []), { id: h.id, name: h.name, frequency: freqOf(h) }])
   }
 
-  // Keyed by habit, not by member: with several habits a bare user+date would
-  // report every habit done as soon as one of them was.
-  const doneKeys = new Set<string>()
+  // Completion dates per habit. Keyed by habit, not by member: with several
+  // habits a bare user+date would report every habit done as soon as one was.
+  const datesFor = new Map<string, Set<string>>()
   for (const row of habitRows || []) {
-    if (row.habit_id) doneKeys.add(`${row.habit_id}:${row.completed_date}`)
+    if (!row.habit_id) continue
+    const set = datesFor.get(row.habit_id) ?? new Set<string>()
+    set.add(row.completed_date)
+    datesFor.set(row.habit_id, set)
   }
 
-  /** The member's habits still outstanding on their own calendar day. */
+  /**
+   * The member's habits still outstanding for their own current period, and
+   * due a reminder: daily always; weekly from Friday; monthly in the last
+   * five days of the month.
+   */
   const outstandingHabits = (userId: string, timezone: string) => {
     const day = dayInTimezone(timezone, now)
-    return (habitsByUser.get(userId) || []).filter(h => !doneKeys.has(`${h.id}:${day}`))
+    return (habitsByUser.get(userId) || []).filter(h =>
+      !doneInPeriod(datesFor.get(h.id) ?? new Set<string>(), h.frequency, day) && nudgeDue(h.frequency, day)
+    )
   }
 
   // Get reading completions for current period (tasks not archived)

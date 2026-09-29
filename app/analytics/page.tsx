@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { doneInPeriod, freqOf } from '@/lib/habits'
 import Avatar from '@/components/Avatar'
 import { localDay } from '@/lib/dates'
 import { ledGroups } from '@/lib/leader-groups'
@@ -16,6 +17,8 @@ export default function AnalyticsPage() {
   const router = useRouter()
 
   const today = localDay()
+
+  const fiveWeeksAgo = localDay(new Date(Date.now() - 35 * 86400000))
 
   useEffect(() => {
     async function load() {
@@ -54,13 +57,14 @@ export default function AnalyticsPage() {
       const taskIds = (allTasks || []).map((t: any) => t.id)
       const [{ data: habitToday }, { data: allTaskCompletions }, { data: liveHabits }] = await Promise.all([
         memberIds.length
-          ? supabase.from('habit_completions').select('user_id, habit_id').eq('completed_date', today).in('user_id', memberIds)
+          // Five weeks back, so weekly and monthly habits can be judged for their period.
+          ? supabase.from('habit_completions').select('user_id, habit_id, completed_date').gte('completed_date', fiveWeeksAgo).in('user_id', memberIds)
           : Promise.resolve({ data: [] as any[] }),
         taskIds.length && memberIds.length
           ? supabase.from('task_completions').select('user_id, task_id').in('task_id', taskIds).in('user_id', memberIds)
           : Promise.resolve({ data: [] as any[] }),
         memberIds.length
-          ? supabase.from('habits').select('id, user_id, name').is('archived_at', null).in('user_id', memberIds)
+          ? supabase.from('habits').select('id, user_id, name, frequency').is('archived_at', null).in('user_id', memberIds)
           : Promise.resolve({ data: [] as any[] }),
       ])
 
@@ -71,12 +75,21 @@ export default function AnalyticsPage() {
       for (const h of liveHabits || []) {
         habitsByUser.set(h.user_id, [...(habitsByUser.get(h.user_id) || []), h])
       }
-      const doneTodayByUser = new Map<string, Set<string>>()
+      // Done for the habit's own period (today / this week / this month).
+      const datesByHabitId = new Map<string, Set<string>>()
       for (const c of habitToday || []) {
         if (!c.habit_id) continue
-        const set = doneTodayByUser.get(c.user_id) ?? new Set<string>()
-        set.add(c.habit_id)
-        doneTodayByUser.set(c.user_id, set)
+        const set = datesByHabitId.get(c.habit_id) ?? new Set<string>()
+        set.add(c.completed_date)
+        datesByHabitId.set(c.habit_id, set)
+      }
+      const doneTodayByUser = new Map<string, Set<string>>()
+      for (const h of liveHabits || []) {
+        if (doneInPeriod(datesByHabitId.get(h.id) ?? new Set<string>(), freqOf(h), today)) {
+          const set = doneTodayByUser.get(h.user_id) ?? new Set<string>()
+          set.add(h.id)
+          doneTodayByUser.set(h.user_id, set)
+        }
       }
       const allHabitsDone = (userId: string) => {
         const mine = habitsByUser.get(userId) || []

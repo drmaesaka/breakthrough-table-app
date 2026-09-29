@@ -19,6 +19,7 @@ export default function ProfilePage() {
   // Habit state
   const [habits, setHabits] = useState<any[]>([])
   const [habitInput, setHabitInput] = useState('')
+  const [habitFreq, setHabitFreq] = useState<'daily' | 'weekly' | 'monthly'>('daily')
   const [habitSaving, setHabitSaving] = useState(false)
   const [habitSaved, setHabitSaved] = useState(false)
   const [habitError, setHabitError] = useState(false)
@@ -103,11 +104,15 @@ export default function ProfilePage() {
     }
     setHabitSaving(true)
     const supabase = createClient()
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('habits')
-      .insert({ user_id: userId, name })
+      .insert({ user_id: userId, name, frequency: habitFreq })
       .select()
       .single()
+    // Before the 2026-09-29 migration the column does not exist: save as daily.
+    if (error && /frequency/.test(error.message)) {
+      ;({ data, error } = await supabase.from('habits').insert({ user_id: userId, name }).select().single())
+    }
     setHabitSaving(false)
     // Only reflect it locally once it is actually stored, so a failed save
     // leaves the typed name in the box to retry with.
@@ -301,7 +306,10 @@ export default function ProfilePage() {
             <div className="space-y-2">
               {habits.map(h => (
                 <div key={h.id} className="bg-bt-pale rounded-xl px-3 py-2.5 space-y-2">
-                  <p className="font-semibold text-gray-900 text-sm break-words">{h.name}</p>
+                  <p className="font-semibold text-gray-900 text-sm break-words">
+                    {h.name}
+                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-bt-blue">{h.frequency || 'daily'}</span>
+                  </p>
                   <button onClick={() => graduateHabit(h)} disabled={graduating === h.id}
                     className="w-full bg-green-50 text-green-700 border-2 border-green-200 py-2 rounded-lg font-semibold text-xs disabled:opacity-50">
                     {graduating === h.id ? 'Graduating...' : '🏅 I\'ve fully installed this one'}
@@ -317,6 +325,14 @@ export default function ProfilePage() {
             placeholder={habits.length ? 'Add another habit...' : 'e.g. Morning cold plunge, Daily journaling...'}
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />
+          <div className="flex gap-2">
+            {(['daily', 'weekly', 'monthly'] as const).map(f => (
+              <button key={f} type="button" onClick={() => setHabitFreq(f)}
+                className={`flex-1 py-2 rounded-xl text-xs font-semibold border-2 capitalize ${habitFreq === f ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
+                {f}
+              </button>
+            ))}
+          </div>
           <button onClick={saveHabit} disabled={habitSaving || !habitInput.trim()}
             className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${habitError ? 'bg-red-600' : 'bg-bt-navy'}`}>
             {habitSaving ? 'Saving...'

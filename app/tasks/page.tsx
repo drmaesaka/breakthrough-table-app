@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { linkify, hasLink } from '@/lib/linkify'
 import { localDay } from '@/lib/dates'
-import { calcAdherence, datesByHabit, streakFor, type Habit } from '@/lib/habits'
+import { calcAdherence, datesByHabit, streakFor, doneInPeriod, periodKey, freqOf, FREQ_LABEL, type Habit, type Frequency } from '@/lib/habits'
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<any[]>([])
@@ -17,6 +17,7 @@ export default function TasksPage() {
   /** Inline "add a habit" — leaders asked for a plus button here instead of a trip to Profile. */
   const [adding, setAdding] = useState(false)
   const [newHabit, setNewHabit] = useState('')
+  const [newFreq, setNewFreq] = useState<Frequency>('daily')
   const [addSaving, setAddSaving] = useState(false)
   const [addError, setAddError] = useState('')
   /** First day of the month the calendar is showing. */
@@ -69,15 +70,20 @@ export default function TasksPage() {
     setHabits(live)
 
     const log = (habitLog || []) as { habit_id: string | null; completed_date: string }[]
-    setDoneToday(new Set(log.filter(c => c.completed_date === today && c.habit_id).map(c => c.habit_id as string)))
-
     const byHabit = datesByHabit(log)
     setHistoryByHabit(byHabit)
+    // "Done" means done for the habit's own period — today, this week, or
+    // this month — not only today.
+    const done = new Set<string>()
     const next = new Map<string, number>()
     for (const h of live) {
       const dates = byHabit.get(h.id) ?? new Set<string>()
-      next.set(h.id, streakFor(dates, dates.has(today)))
+      const f = freqOf(h)
+      const isDone = doneInPeriod(dates, f, today)
+      if (isDone) done.add(h.id)
+      next.set(h.id, streakFor(dates, isDone, new Date(), f))
     }
+    setDoneToday(done)
     setStreaks(next)
 
     setLoading(false)
@@ -111,12 +117,16 @@ export default function TasksPage() {
     if (habits.some(h => h.name.toLowerCase() === name.toLowerCase())) { setAddError('You already have that habit'); return }
     setAddSaving(true); setAddError('')
     const supabase = createClient()
-    const { data, error } = await supabase.from('habits').insert({ user_id: userId, name }).select().single()
+    let { data, error } = await supabase.from('habits').insert({ user_id: userId, name, frequency: newFreq }).select().single()
+    // Before the 2026-09-29 migration the column does not exist: save as daily.
+    if (error && /frequency/.test(error.message)) {
+      ;({ data, error } = await supabase.from('habits').insert({ user_id: userId, name }).select().single())
+    }
     setAddSaving(false)
     if (error) { setAddError("Couldn't save — try again"); return }
     setHabits(prev => [...prev, data as Habit])
     setStreaks(prev => new Map(prev).set(data.id, 0))
-    setNewHabit(''); setAdding(false)
+    setNewHabit(''); setNewFreq('daily'); setAdding(false)
   }
 
   async function toggleHabit(habitId: string) {
@@ -126,12 +136,17 @@ export default function TasksPage() {
 
     // Delete is scoped to the habit as well as the day. Without habit_id it
     // would clear every habit the member logged today.
+    const habit = habits.find(h => h.id === habitId)
+    const f = freqOf(habit || {})
     if (wasDone) {
+      // Un-tick clears every check-in in the current period, so a weekly
+      // habit ticked on Tuesday can still be un-ticked on Thursday.
+      const dates = [...(historyByHabit.get(habitId) || [])].filter(d => periodKey(d, f) === periodKey(today, f))
       await supabase.from('habit_completions')
-        .delete().eq('user_id', userId).eq('habit_id', habitId).eq('completed_date', today)
+        .delete().eq('user_id', userId).eq('habit_id', habitId).in('completed_date', dates.length ? dates : [today])
       nextDone.delete(habitId)
       setStreaks(prev => new Map(prev).set(habitId, Math.max(0, (prev.get(habitId) || 0) - 1)))
-      setHistoryByHabit(prev => { const m = new Map(prev); const d = new Set(m.get(habitId) || []); d.delete(today); m.set(habitId, d); return m })
+      setHistoryByHabit(prev => { const m = new Map(prev); const d = new Set(m.get(habitId) || []); for (const x of dates) d.delete(x); m.set(habitId, d); return m })
     } else {
       await supabase.from('habit_completions')
         .insert({ user_id: userId, habit_id: habitId, completed_date: today })
@@ -224,8 +239,19 @@ export default function TasksPage() {
                       {addSaving ? '...' : 'Add'}
                     </button>
                   </div>
+                  <div className="flex gap-2">
+                    {(['daily', 'weekly', 'monthly'] as Frequency[]).map(f => (
+                      <button key={f} type="button" onClick={() => setNewFreq(f)}
+                        className={`flex-1 py-2 rounded-xl text-xs font-semibold border-2 capitalize ${newFreq === f ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
+                        {f}
+                      </button>
+                    ))}
+                  </div>
                   {addError && <p className="text-xs text-red-600">{addError}</p>}
-                  <p className="text-[11px] text-gray-400">Each habit keeps its own streak. Rename or retire one under Manage.</p>
+                  <p className="text-[11px] text-gray-400">
+                    {newFreq === 'daily' ? 'Check in every day.' : newFreq === 'weekly' ? 'Check in once a week (Mon–Sun). Reminders start Friday.' : 'Check in once a month. Reminders in the last few days.'}
+                    {' '}Each habit keeps its own streak.
+                  </p>
                 </div>
               )}
 
@@ -301,10 +327,10 @@ export default function TasksPage() {
                   <p className="text-3xl mb-1">🔥</p>
                   <p className="font-bold text-orange-700">
                     {(streaks.get(justDone) || 0) > 1
-                      ? `${streaks.get(justDone)} days in a row!`
+                      ? `${streaks.get(justDone)} ${FREQ_LABEL[freqOf(habits.find(h => h.id === justDone) || {})].noun}s in a row!`
                       : 'Habit done!'}
                   </p>
-                  <p className="text-orange-500 text-xs mt-0.5">Keep the streak alive tomorrow</p>
+                  <p className="text-orange-500 text-xs mt-0.5">Keep the streak alive next {FREQ_LABEL[freqOf(habits.find(h => h.id === justDone) || {})].noun}</p>
                 </div>
               )}
 
@@ -339,10 +365,10 @@ export default function TasksPage() {
                           </p>
                           {days > 0 ? (
                             <p className={`text-xs mt-0.5 font-semibold ${atRisk ? 'text-gray-400' : 'text-orange-500'}`}>
-                              🔥 {days} day{days !== 1 ? 's' : ''}{atRisk ? ' — check in to keep it' : ''}
+                              🔥 {days} {FREQ_LABEL[freqOf(h)].noun}{days !== 1 ? 's' : ''}{atRisk ? ` — check in ${FREQ_LABEL[freqOf(h)].period} to keep it` : ''}
                             </p>
                           ) : (
-                            <p className="text-gray-400 text-xs mt-0.5">Daily check-in</p>
+                            <p className="text-gray-400 text-xs mt-0.5">{FREQ_LABEL[freqOf(h)].checkIn}</p>
                           )}
                         </div>
                       </button>
