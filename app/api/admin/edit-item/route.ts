@@ -20,7 +20,7 @@ const EDITABLE: Record<string, string[]> = {
   // A table's name was fixed at creation, so a typo lived forever. Name only:
   // leader_id and last_period_start drive authorization and the period reset,
   // and neither belongs behind a rename box.
-  groups: ['name'],
+  groups: ['name', 'program_start_date'],
 }
 
 export async function PATCH(req: NextRequest) {

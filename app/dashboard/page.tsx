@@ -20,6 +20,9 @@ export default function DashboardPage() {
     meetings: { number: number; title: string }[]
     attended: Set<number>
     current: number | null
+    /** Meeting the table should be on, from its programme start date at one meeting per fortnight. */
+    expected: number | null
+    startDate: string | null
   } | null>(null)
   const router = useRouter()
 
@@ -29,7 +32,7 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('*, groups(name, current_meeting_number), streak').eq('id', user.id).single()
+      const { data: prof } = await supabase.from('profiles').select('*, groups(name, current_meeting_number, program_start_date), streak').eq('id', user.id).single()
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
@@ -47,10 +50,22 @@ export default function DashboardPage() {
         const resolved = planRows && planRows.length
           ? resolveMeetingPlans(planRows as StoredMeetingPlan[])
           : (MEETING_PLANS as StoredMeetingPlan[])
+        // Tables join the app months into the programme. The TC's start date
+        // plus the fortnightly cadence says where the table really is; a
+        // marked current meeting or attendance can only move that forward.
+        const startDate: string | null = prof.groups?.program_start_date || null
+        let expected: number | null = null
+        if (startDate) {
+          const days = Math.floor((Date.now() - new Date(startDate + 'T12:00:00').getTime()) / 86400000)
+          const last = resolved.filter(m => m.number >= 1).slice(-1)[0]?.number ?? 12
+          expected = Math.max(1, Math.min(last, Math.floor(days / 14) + 1))
+        }
         setJourney({
           meetings: resolved.map(m => ({ number: m.number, title: m.title })),
           attended: new Set((attendedRows || []).map((r: any) => r.meeting_number as number)),
           current: prof.groups?.current_meeting_number ?? null,
+          expected,
+          startDate,
         })
       }
     }
@@ -117,7 +132,8 @@ export default function DashboardPage() {
               const maxAttended = Math.max(0, ...[...journey.attended])
               // Where the table is. If the TC has not marked a current meeting,
               // the furthest one this member attended stands in.
-              const here = journey.current ?? (maxAttended || null)
+              const candidates = [journey.current ?? 0, maxAttended, journey.expected ?? 0].filter(n => n > 0)
+              const here = candidates.length ? Math.max(...candidates) : null
               const current = here !== null ? journey.meetings.find(m => m.number === here) || null : null
               const next = here === null
                 ? numbered[0] || null
@@ -136,7 +152,10 @@ export default function DashboardPage() {
                   {current && current.number >= 1 ? (
                     <>
                       <p className="text-3xl font-bold text-bt-navy mt-1">Meeting {current.number} <span className="text-gray-300 text-xl font-semibold">of {total}</span></p>
-                      <p className="text-gray-500 text-sm mt-0.5">{current.title}</p>
+                      <p className="text-gray-500 text-sm mt-0.5">
+                        {current.title}
+                        {journey.startDate && <span className="text-gray-300"> · since {new Date(journey.startDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>}
+                      </p>
                     </>
                   ) : (
                     <>

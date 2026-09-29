@@ -1738,6 +1738,30 @@ export default function AdminPage() {
                               className="text-bt-blue text-xs font-semibold flex-shrink-0">Rename</button>
                           </div>
                         )}
+                        {/* When the programme began. Tables join the app months
+                            in; without this every member looked brand new. */}
+                        <label className="flex items-center gap-2 mt-1.5 text-xs text-gray-500">
+                          <span className="font-medium">Programme started</span>
+                          <input type="date" value={g.program_start_date || ''} max={new Date().toISOString().slice(0, 10)}
+                            onChange={async e => {
+                              const value = e.target.value || null
+                              const res = await fetch('/api/admin/edit-item', {
+                                method: 'PATCH', headers: await authHeaders(),
+                                body: JSON.stringify({ table: 'groups', id: g.id, fields: { program_start_date: value } }),
+                              })
+                              if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error || 'Could not save the date'); return }
+                              setGroups(prev => prev.map(x => x.id === g.id ? { ...x, program_start_date: value } : x))
+                            }}
+                            className="px-2 py-1 rounded-lg border border-gray-200 text-xs bg-white" />
+                          {g.program_start_date && (() => {
+                            const days = Math.floor((Date.now() - new Date(g.program_start_date + 'T12:00:00').getTime()) / 86400000)
+                            const n = Math.max(1, Math.min(12, Math.floor(days / 14) + 1))
+                            return <span className="text-gray-400">≈ meeting {n} of 12</span>
+                          })()}
+                        </label>
+                        {!g.program_start_date && (
+                          <p className="text-[11px] text-amber-600 mt-0.5">Set this so members’ journey bar shows where the table really is.</p>
+                        )}
                         {/* Who runs it, right under the name — the leaders box
                             further down is for changing that, not finding it. */}
                         {(() => {
