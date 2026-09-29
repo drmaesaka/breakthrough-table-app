@@ -7,9 +7,17 @@ import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
 import Avatar from '@/components/Avatar'
 import { ledGroups } from '@/lib/leader-groups'
+import PeoplePicker from '@/components/PeoplePicker'
 
 export default function MessagesPage() {
-  const [tab, setTab] = useState<'table' | 'dms'>('table')
+  const [tab, setTab] = useState<'table' | 'groups' | 'dms'>('table')
+  // Custom groups: any set of people, across tables (2026-09-29).
+  const [rooms, setRooms] = useState<any[] | null>(null)
+  const [roomsError, setRoomsError] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [roomName, setRoomName] = useState('')
+  const [roomPeople, setRoomPeople] = useState<Set<string>>(new Set())
+  const [roomSaving, setRoomSaving] = useState(false)
 
   // Table chat state
   const [messages, setMessages] = useState<any[]>([])
@@ -132,6 +140,23 @@ export default function MessagesPage() {
     await fetchMessages(gid)
   }
 
+  async function fetchRooms() {
+    const res = await fetch('/api/rooms', { headers: await authHeaders() })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) { setRooms([]); setRoomsError(json.error || 'Could not load groups'); return }
+    setRoomsError(''); setRooms(json.rooms || [])
+  }
+
+  async function createRoom() {
+    if (!roomName.trim() || !roomPeople.size) return
+    setRoomSaving(true); setRoomsError('')
+    const res = await fetch('/api/rooms', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ name: roomName.trim(), member_ids: [...roomPeople] }) })
+    const json = await res.json().catch(() => ({}))
+    setRoomSaving(false)
+    if (!res.ok) { setRoomsError(json.error || 'Could not create the group'); return }
+    router.push(`/chat/${json.room.id}`)
+  }
+
   async function fetchDMs(userId: string) {
     setDmsLoading(true)
     const { data } = await supabase
@@ -228,6 +253,7 @@ export default function MessagesPage() {
 
   useEffect(() => {
     if (tab === 'dms' && user) fetchDMs(user.id)
+    if (tab === 'groups' && user) fetchRooms()
   }, [tab, user])
 
   async function sendMessage(e: React.FormEvent) {
@@ -283,12 +309,12 @@ export default function MessagesPage() {
         <h1 className="text-white text-2xl font-bold mb-3">Messages</h1>
         {/* Tabs */}
         <div className="flex gap-1">
-          {(['table', 'dms'] as const).map(t => (
+          {(['table', 'groups', 'dms'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-2 rounded-t-xl text-sm font-semibold transition-colors ${
+              className={`px-3.5 py-2 rounded-t-xl text-sm font-semibold transition-colors ${
                 tab === t ? 'bg-bt-pale text-bt-navy' : 'text-white/60 hover:text-white/80'
               }`}>
-              {t === 'table' ? '💬 Table Chat' : '✉️ Direct Messages'}
+              {t === 'table' ? '💬 Table' : t === 'groups' ? '👥 Groups' : '✉️ Direct'}
             </button>
           ))}
         </div>
@@ -314,7 +340,9 @@ export default function MessagesPage() {
         <p className="text-xs text-gray-500">
           {tab === 'table'
             ? <>🔒 <span className="font-semibold text-bt-navy">{groupName || 'Your table'}</span> only. Just the people at this table can see this.</>
-            : <>Private one-to-one messages with anyone in the BT community, any table.</>}
+            : tab === 'groups'
+              ? <>Groups you create with anyone in BT, from any table. Only the people in a group see it.</>
+              : <>Private one-to-one messages with anyone in the BT community, any table.</>}
         </p>
       </div>
 
@@ -381,6 +409,61 @@ export default function MessagesPage() {
             </form>
           )}
         </>
+      )}
+
+      {/* Groups Tab — custom rooms across tables */}
+      {tab === 'groups' && (
+        <div className="flex-1 overflow-y-auto pb-20">
+          <div className="px-5 py-4 space-y-3">
+            {!creating ? (
+              <button onClick={() => setCreating(true)}
+                className="w-full flex items-center gap-3 bg-bt-navy text-white px-4 py-3.5 rounded-2xl font-semibold text-sm">
+                <span className="text-xl">➕</span>
+                <div className="text-left">
+                  <p className="font-semibold">New group</p>
+                  <p className="text-white/60 text-xs font-normal mt-0.5">Pick anyone, from any table</p>
+                </div>
+              </button>
+            ) : (
+              <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-bt-navy">New group</p>
+                  <button onClick={() => { setCreating(false); setRoomName(''); setRoomPeople(new Set()) }} className="text-xs text-gray-400 font-semibold">Cancel</button>
+                </div>
+                <input autoFocus value={roomName} onChange={e => setRoomName(e.target.value)} placeholder="Group name, e.g. Pickleball crew"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                <PeoplePicker selected={roomPeople} onChange={setRoomPeople} />
+                {roomsError && <p className="text-xs text-red-600">{roomsError}</p>}
+                <button onClick={createRoom} disabled={roomSaving || !roomName.trim() || !roomPeople.size}
+                  className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                  {roomSaving ? 'Creating...' : roomPeople.size ? `Create with ${roomPeople.size} ${roomPeople.size === 1 ? 'person' : 'people'}` : 'Pick at least one person'}
+                </button>
+              </div>
+            )}
+
+            {rooms === null && <p className="text-center text-gray-400 py-8">Loading...</p>}
+            {rooms !== null && roomsError && !creating && <p className="text-center text-red-600 text-xs">{roomsError}</p>}
+            {rooms !== null && rooms.length === 0 && !roomsError && !creating && (
+              <div className="text-center py-12">
+                <p className="text-4xl mb-3">👥</p>
+                <p className="text-gray-500 font-medium">No groups yet</p>
+                <p className="text-gray-400 text-sm mt-1">Start one for any few people who need their own thread.</p>
+              </div>
+            )}
+            {(rooms || []).map(r => (
+              <Link key={r.id} href={`/chat/${r.id}`} className="flex items-center gap-3 bg-white rounded-2xl px-4 py-3.5 shadow-sm">
+                <div className="w-11 h-11 rounded-full bg-bt-navy flex items-center justify-center flex-shrink-0 text-white text-lg">👥</div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 text-sm truncate">{r.name}</p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {r.last_message ? r.last_message.content : r.members.map((m: any) => m.full_name.split(' ')[0]).join(', ')}
+                  </p>
+                </div>
+                <span className="text-xs text-gray-300 flex-shrink-0">{r.members.length}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* DMs Tab */}

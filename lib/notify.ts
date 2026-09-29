@@ -11,7 +11,7 @@ import { fetchMemberEmails } from '@/lib/member-emails'
 // database trigger: those live only in the Supabase console and cannot be
 // audited from the repo.
 
-export type NotifyKind = 'chat' | 'tc' | 'dm' | 'task' | 'prompt' | 'content' | 'broadcast'
+export type NotifyKind = 'chat' | 'tc' | 'room' | 'dm' | 'task' | 'prompt' | 'content' | 'broadcast'
 
 type Prefs = { notify_chat: boolean; notify_dms: boolean; notify_updates: boolean }
 const ALL_ON: Prefs = { notify_chat: true, notify_dms: true, notify_updates: true }
@@ -19,7 +19,7 @@ const ALL_ON: Prefs = { notify_chat: true, notify_dms: true, notify_updates: tru
 // A leader's broadcast has no switch: it is the one thing a member cannot
 // opt out of short of turning notifications off on the device.
 const PREF_KEY: Record<Exclude<NotifyKind, 'broadcast'>, keyof Prefs> = {
-  chat: 'notify_chat', tc: 'notify_chat', dm: 'notify_dms', task: 'notify_updates', prompt: 'notify_updates', content: 'notify_updates',
+  chat: 'notify_chat', tc: 'notify_chat', room: 'notify_chat', dm: 'notify_dms', task: 'notify_updates', prompt: 'notify_updates', content: 'notify_updates',
 }
 
 /** Chat bursts collapse to one notification: nothing more for this many ms after a prior message. */
@@ -116,6 +116,29 @@ export async function tableAudience(admin: any, groupId: string, exceptUserId: s
   for (const r of co || []) ids.add(r.user_id)
   ids.delete(exceptUserId)
   return [...ids]
+}
+
+/** A custom group-chat message: the room's members except the sender, same burst rule as table chat. */
+export async function notifyRoom(admin: any, message: { id: string; room_id: string; user_id: string; content: string; created_at: string }) {
+  const since = new Date(new Date(message.created_at).getTime() - BURST_WINDOW_MS).toISOString()
+  const { data: prior } = await admin
+    .from('chat_room_messages').select('id')
+    .eq('room_id', message.room_id).neq('id', message.id)
+    .gte('created_at', since).lt('created_at', message.created_at).limit(1)
+  if (prior && prior.length) return { pushed: 0, emailed: 0, skipped: 0, burst: true }
+  const [{ data: room }, { data: members }, { data: sender }] = await Promise.all([
+    admin.from('chat_rooms').select('name').eq('id', message.room_id).maybeSingle(),
+    admin.from('chat_room_members').select('user_id').eq('room_id', message.room_id),
+    admin.from('profiles').select('full_name').eq('id', message.user_id).maybeSingle(),
+  ])
+  return notifyMembers(admin, {
+    kind: 'room',
+    recipientIds: (members || []).map((m: any) => m.user_id).filter((id: string) => id !== message.user_id),
+    title: `👥 ${room?.name || 'Group chat'}`,
+    body: `${(sender?.full_name || 'Someone').split(' ')[0]}: ${message.content.slice(0, 140)}`,
+    url: `/chat/${message.room_id}`,
+    emailFallback: false,
+  })
 }
 
 /**
