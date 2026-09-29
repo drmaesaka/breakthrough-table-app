@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Link from 'next/link'
 import Avatar from '@/components/Avatar'
 
 export default function GroupPage() {
@@ -10,6 +11,7 @@ export default function GroupPage() {
   const [groupName, setGroupName] = useState('')
   const [loading, setLoading] = useState(true)
   const [currentUserId, setCurrentUserId] = useState('')
+  const [isLeader, setIsLeader] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -21,10 +23,11 @@ export default function GroupPage() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('group_id, groups(name)')
+        .select('group_id, role, groups(name)')
         .eq('id', user.id)
         .single()
 
+      setIsLeader(prof?.role === 'leader')
       if (!prof?.group_id) { router.push('/dashboard'); return }
       setGroupName((prof.groups as any)?.name || 'My Group')
 
@@ -71,8 +74,19 @@ export default function GroupPage() {
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
-        <h1 className="text-white text-2xl font-bold">{groupName}</h1>
-        <p className="text-bt-light/60 text-sm mt-0.5">Group progress this period</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-white text-2xl font-bold">{groupName}</h1>
+            <p className="text-bt-light/60 text-sm mt-0.5">Group progress this period</p>
+          </div>
+          {/* Leaders' Stats lives here now — it is about tables, so it sits
+              with the table. Moved off the home screen 2026-09-29. */}
+          {isLeader && (
+            <Link href="/analytics" className="flex-shrink-0 bg-white/15 text-white text-xs font-semibold px-3 py-2 rounded-xl mt-1">
+              📊 Stats
+            </Link>
+          )}
+        </div>
         <div className="mt-4 bg-white/10 rounded-2xl px-4 py-3 flex items-center justify-between">
           <div>
             <p className="text-bt-light/70 text-xs font-medium">Group Average</p>
