@@ -6,11 +6,13 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
+import { otherLedTableCount } from '@/lib/other-tables'
 import { MEETING_PLANS, resolveMeetingPlans, type StoredMeetingPlan } from '@/lib/meeting-plans'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
   const [groupName, setGroupName] = useState('')
+  const [otherTables, setOtherTables] = useState(0)
   /**
    * "Your BT Journey": the table's meetings and which ones this member was
    * at. Replaces the adherence percentage, which started every period at 0
@@ -36,6 +38,7 @@ export default function DashboardPage() {
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
+        if (prof.role === 'leader') otherLedTableCount(prof.group_id).then(setOtherTables)
       }
 
       if (prof?.group_id) {
@@ -82,7 +85,10 @@ export default function DashboardPage() {
           <div>
             <p className="text-bt-light text-sm font-medium">Welcome back,</p>
             <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
-            {groupName && <p className="text-bt-light/70 text-sm mt-1">{groupName}</p>}
+            {groupName && <p className="text-bt-light/70 text-sm mt-1">🪑 Your table: <span className="text-white font-semibold">{groupName}</span></p>}
+            {groupName && otherTables > 0 && (
+              <p className="text-bt-light/60 text-xs mt-1">You also run {otherTables} other table{otherTables === 1 ? '' : 's'}. See them on <Link href="/group" className="underline text-white">My Table</Link>.</p>
+            )}
           </div>
           <Link href="/profile"
             className="mt-1 w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
@@ -148,7 +154,7 @@ export default function DashboardPage() {
               }
               return (
                 <div className="bg-white rounded-2xl p-5 shadow-sm">
-                  <p className="text-gray-400 text-sm font-medium">Your BT Journey</p>
+                  <p className="text-gray-400 text-sm font-medium">Your BT Journey · {groupName}</p>
                   {current && current.number >= 1 ? (
                     <>
                       <p className="text-3xl font-bold text-bt-navy mt-1">Meeting {current.number} <span className="text-gray-300 text-xl font-semibold">of {total}</span></p>

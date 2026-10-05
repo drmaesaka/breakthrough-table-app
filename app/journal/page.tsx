@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import Link from 'next/link'
+import { otherLedTableCount } from '@/lib/other-tables'
 
 export default function JournalPage() {
   const [prompts, setPrompts] = useState<any[]>([])
@@ -17,6 +19,7 @@ export default function JournalPage() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [groupName, setGroupName] = useState('')
+  const [otherTables, setOtherTables] = useState(0)
   const router = useRouter()
 
   useEffect(() => { load() }, [])
@@ -29,13 +32,14 @@ export default function JournalPage() {
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('group_id, full_name, groups(name)')
+      .select('group_id, full_name, role, groups(name)')
       .eq('id', user.id)
       .single()
 
     setMyName(prof?.full_name || 'You')
     if (!prof?.group_id) { setLoading(false); return }
     setGroupName((prof.groups as any)?.name || '')
+    if (prof.role === 'leader') otherLedTableCount(prof.group_id).then(setOtherTables)
 
     const [{ data: promptData }, { data: myResponses }] = await Promise.all([
       supabase.from('journal_prompts')
@@ -124,7 +128,12 @@ export default function JournalPage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
         <h1 className="text-white text-2xl font-bold">Reflection Prompts</h1>
-        <p className="text-bt-light/60 text-sm mt-0.5">{groupName} · Think before the table</p>
+        <p className="text-bt-light/70 text-sm mt-0.5">Prompts for <span className="text-white font-semibold">{groupName}</span> · Think before the table</p>
+        {otherTables > 0 && (
+          <p className="text-bt-light/60 text-xs mt-2">
+            These are your own table&apos;s prompts. To post to or read answers from the {otherTables} other table{otherTables === 1 ? '' : 's'} you run, use <Link href="/admin" className="underline text-white">Admin → Prompts</Link>.
+          </p>
+        )}
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
