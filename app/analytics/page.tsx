@@ -258,7 +258,7 @@ export default function AnalyticsPage() {
                               <span className={`text-xs font-medium ${member.readingDone ? 'text-green-500' : 'text-gray-300'}`}>
                                 {member.readingCount === 0
                                   ? '– no reading set'
-                                  : member.readingDone ? '✓ reading' : `○ reading ${member.readingDoneCount}/${member.readingCount}`}
+                                  : member.readingDone ? `✓ reading ${member.readingDoneCount}/${member.readingCount}` : `○ reading ${member.readingDoneCount}/${member.readingCount}`}
                               </span>
                               {member.habitNames?.length > 0 && (
                                 <>
