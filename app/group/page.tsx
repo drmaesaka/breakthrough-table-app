@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import Link from 'next/link'
 import Avatar from '@/components/Avatar'
+import { notifyAbout } from '@/lib/notify-client'
 
 type Detail = {
   id: string; full_name: string; avatar_url: string | null; role: string
@@ -29,6 +30,15 @@ export default function GroupPage() {
   const [homeGroupId, setHomeGroupId] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ members: Detail[]; tasks_total: number; prompts_total: number } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  // TC quick-send: a prompt or a message to the selected table, and a
+  // personal nudge to one member — without a trip to Admin.
+  const [sendMode, setSendMode] = useState<'prompt' | 'message' | null>(null)
+  const [sendText, setSendText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendNote, setSendNote] = useState('')
+  const [nudgeText, setNudgeText] = useState('')
+  const [nudging, setNudging] = useState(false)
+  const [nudgeNote, setNudgeNote] = useState<{ id: string; text: string } | null>(null)
   const router = useRouter()
 
   async function headers(): Promise<Record<string, string>> {
@@ -88,8 +98,53 @@ export default function GroupPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
+  async function sendToTable() {
+    const text = sendText.trim()
+    if (!text || !groupId || !sendMode) return
+    if (sendMode === 'message' && !confirm(`Send this to everyone at ${groupName}?`)) return
+    setSending(true); setSendNote('')
+    const h = { ...(await headers()), 'Content-Type': 'application/json' }
+    try {
+      if (sendMode === 'prompt') {
+        const res = await fetch('/api/admin/post-item', { method: 'POST', headers: h,
+          body: JSON.stringify({ table: 'journal_prompts', rows: [{ group_id: groupId, prompt: text }] }) })
+        const r = await res.json().catch(() => ({}))
+        if (!res.ok) { setSendNote(`Could not post: ${r.detail || r.error || res.status}`); return }
+        for (const row of r.items || []) notifyAbout('prompt', row.id)
+        setSendNote(`✓ Prompt posted to ${groupName}. Members will see it in Reflections.`)
+      } else {
+        const res = await fetch('/api/send-broadcast', { method: 'POST', headers: h,
+          body: JSON.stringify({ group_id: groupId, message: text, scope: 'table' }) })
+        const r = await res.json().catch(() => ({}))
+        if (!res.ok) { setSendNote(`Could not send: ${r.error || res.status}`); return }
+        const parts = [`${r.sent} by push`]
+        if (r.emailed) parts.push(`${r.emailed} by email`)
+        setSendNote(`✓ Sent to ${r.recipients} member${r.recipients === 1 ? '' : 's'} (${parts.join(', ')}).`)
+      }
+      setSendText(''); setSendMode(null)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function nudgeMember(id: string, name: string) {
+    const text = nudgeText.trim()
+    if (!text) return
+    setNudging(true); setNudgeNote(null)
+    const res = await fetch('/api/admin/nudge-member', { method: 'POST',
+      headers: { ...(await headers()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: id, message: text }) })
+    const r = await res.json().catch(() => ({}))
+    setNudging(false)
+    if (!res.ok) { setNudgeNote({ id, text: `Could not send: ${r.error || res.status}` }); return }
+    const first = name.split(' ')[0]
+    setNudgeNote({ id, text: r.pushed ? `✓ Sent to ${first}'s phone.` : r.emailed ? `✓ ${first} has notifications off, so it went by email.` : `${first} has no notifications and no email on file, so it could not be delivered.` })
+    if (r.pushed || r.emailed) setNudgeText('')
+  }
+
   async function switchTable(gid: string) {
     setGroupId(gid); setDetail(null); setOpen(null)
+    setSendMode(null); setSendText(''); setSendNote(''); setNudgeText(''); setNudgeNote(null)
     const t = tables.find(x => x.id === gid); if (t) setGroupName(t.name)
     await loadTable(gid, isLeader)
   }
@@ -157,6 +212,37 @@ export default function GroupPage() {
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-3">
+        {isLeader && detail && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+            <h3 className="font-bold text-bt-navy text-sm">Send to {groupName}</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {([['prompt', '✍️ Post a prompt'], ['message', '📣 Send a message']] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => { setSendMode(sendMode === k ? null : k); setSendNote('') }}
+                  className={`py-2.5 rounded-xl text-sm font-semibold border ${sendMode === k ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-bt-navy border-gray-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {sendMode && (
+              <>
+                <p className="text-gray-400 text-xs">
+                  {sendMode === 'prompt'
+                    ? 'Members see this in their Reflections tab and get a notification.'
+                    : 'Goes to everyone at this table now: by push, or by email if their notifications are off.'}
+                </p>
+                <textarea value={sendText} onChange={e => setSendText(e.target.value)} rows={3}
+                  placeholder={sendMode === 'prompt' ? "e.g. What's one belief you're ready to let go of?" : 'Type your message...'}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base text-gray-900 resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                <button onClick={sendToTable} disabled={sending || !sendText.trim()}
+                  className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                  {sending ? 'Sending...' : sendMode === 'prompt' ? 'Post Prompt' : 'Send to Table Now'}
+                </button>
+              </>
+            )}
+            {sendNote && <p className={`text-xs ${sendNote.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{sendNote}</p>}
+          </div>
+        )}
+
         {members.map((member, i) => {
           const pct = member.adherence_percent || 0
           const isYou = member.id === currentUserId
@@ -165,7 +251,7 @@ export default function GroupPage() {
           return (
             <div key={member.id}
               className={`bg-white rounded-2xl px-4 py-4 shadow-sm ${isYou ? 'ring-2 ring-bt-blue' : ''}`}>
-              <div className={`flex items-center gap-3 ${d ? 'cursor-pointer' : ''}`} onClick={() => d && setOpen(expanded ? null : member.id)}>
+              <div className={`flex items-center gap-3 ${d ? 'cursor-pointer' : ''}`} onClick={() => { if (!d) return; setOpen(expanded ? null : member.id); setNudgeText(''); setNudgeNote(null) }}>
                 <Avatar src={member.avatar_url} name={member.full_name}
                   className={`w-10 h-10 ${isYou ? 'bg-bt-blue' : 'bg-bt-pale'}`}
                   textClass={`font-bold text-sm ${isYou ? 'text-white' : 'text-bt-navy'}`} />
@@ -216,6 +302,21 @@ export default function GroupPage() {
                   <p className="text-[11px] text-gray-400">
                     Period streak {d.streak} · joined {fmt(d.joined)}{d.email ? ` · ${d.email}` : ''}
                   </p>
+                  {!isYou && (
+                    <div className="pt-3 border-t border-gray-100 space-y-2">
+                      <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Nudge {member.full_name?.split(' ')[0]}</p>
+                      <textarea value={nudgeText} onChange={e => setNudgeText(e.target.value)} rows={2} maxLength={500}
+                        placeholder="e.g. Missed you on your habit this week. Want to talk it through?"
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-base text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                      <button onClick={() => nudgeMember(member.id, member.full_name || '')} disabled={nudging || !nudgeText.trim()}
+                        className="w-full bg-bt-blue text-white py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40">
+                        {nudging ? 'Sending...' : `👋 Send to ${member.full_name?.split(' ')[0] || 'member'}`}
+                      </button>
+                      {nudgeNote && nudgeNote.id === member.id && (
+                        <p className={`text-xs ${nudgeNote.text.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{nudgeNote.text}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
