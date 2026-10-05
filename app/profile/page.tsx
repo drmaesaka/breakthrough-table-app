@@ -26,6 +26,7 @@ export default function ProfilePage() {
   const [graduatedHabits, setGraduatedHabits] = useState<any[]>([])
   /** Habit id currently being graduated, so only its own button shows a spinner. */
   const [graduating, setGraduating] = useState<string | null>(null)
+  const [restoring, setRestoring] = useState<string | null>(null)
   const [graduateError, setGraduateError] = useState(false)
   const [showGradHistory, setShowGradHistory] = useState(false)
   const [userId, setUserId] = useState('')
@@ -168,6 +169,23 @@ export default function ProfilePage() {
     setGraduatedHabits(history || [])
     setHabits(prev => prev.filter(h => h.id !== habit.id))
     setGraduating(null)
+  }
+
+  /** Unmaster: bring a graduated habit back, with its history and streak. */
+  async function restoreHabit(h: { id: string; habit_name: string }) {
+    if (!confirm(`Bring “${h.habit_name}” back into your daily habits?`)) return
+    setRestoring(h.id)
+    const { data: { session } } = await createClient().auth.getSession()
+    const res = await fetch('/api/habits/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+      body: JSON.stringify({ history_id: h.id }),
+    })
+    const json = await res.json().catch(() => ({}))
+    setRestoring(null)
+    if (!res.ok) { alert(json.error || 'Could not bring that habit back'); return }
+    setGraduatedHabits(prev => prev.filter(x => x.id !== h.id))
+    if (json.habit) setHabits(prev => [...prev, json.habit])
   }
 
   async function saveDirectory() {
@@ -365,10 +383,14 @@ export default function ProfilePage() {
                 {graduatedHabits.map((h: any) => (
                   <div key={h.id} className="flex items-center gap-3 px-3 py-2.5 bg-bt-pale rounded-xl">
                     <span className="text-lg">🏅</span>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-800">{h.habit_name}</p>
                       <p className="text-xs text-gray-400">Installed {formatDate(h.graduated_at)}</p>
                     </div>
+                    <button onClick={() => restoreHabit(h)} disabled={restoring === h.id}
+                      className="text-xs font-semibold text-bt-blue flex-shrink-0 disabled:opacity-40">
+                      {restoring === h.id ? '...' : 'Bring back'}
+                    </button>
                   </div>
                 ))}
               </div>
