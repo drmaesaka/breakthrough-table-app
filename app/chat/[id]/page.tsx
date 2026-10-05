@@ -27,6 +27,8 @@ export default function RoomPage() {
   const [adding, setAdding] = useState(false)
   const [toAdd, setToAdd] = useState<Set<string>>(new Set())
   const [error, setError] = useState('')
+  const [nameDraft, setNameDraft] = useState('')
+  const [renaming, setRenaming] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastIdRef = useRef<string | null>(null)
   const newestSeenRef = useRef<string | null>(null)
@@ -98,6 +100,21 @@ export default function RoomPage() {
     fetchMessages()
   }
 
+  async function rename() {
+    const name = nameDraft.trim()
+    if (!name || name === room?.name) return
+    setRenaming(true); setError('')
+    const res = await fetch('/api/rooms', { method: 'PATCH', headers: await headers(), body: JSON.stringify({ room_id: roomId, name }) })
+    setRenaming(false)
+    if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j.error || 'Could not rename'); return }
+    setRoom(r => r ? { ...r, name } : r)
+  }
+
+  function togglePanel() {
+    if (!showPeople) setNameDraft(room?.name || '')
+    setShowPeople(v => !v)
+  }
+
   async function leave() {
     if (!confirm(`Leave "${room?.name}"? You can be added back by anyone still in it.`)) return
     await fetch('/api/rooms', { method: 'DELETE', headers: await headers(), body: JSON.stringify({ room_id: roomId }) })
@@ -118,9 +135,9 @@ export default function RoomPage() {
             <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
           </Link>
           <div className="flex-1 min-w-0">
-            <p className="text-white font-bold leading-tight truncate">👥 {room?.name}</p>
-            <button onClick={() => setShowPeople(v => !v)} className="text-bt-light/70 text-xs text-left truncate w-full">
-              {members.map(m => m.full_name.split(' ')[0]).join(', ')} · {showPeople ? 'hide' : 'add people'}
+            <button onClick={togglePanel} className="text-white font-bold leading-tight truncate block w-full text-left">👥 {room?.name}</button>
+            <button onClick={togglePanel} className="text-bt-light/70 text-xs text-left truncate w-full">
+              {members.map(m => m.full_name.split(' ')[0]).join(', ')} · {showPeople ? 'hide' : 'rename · add people'}
             </button>
           </div>
           <button onClick={leave} className="text-white/60 text-xs font-semibold">Leave</button>
@@ -130,7 +147,16 @@ export default function RoomPage() {
 
       {showPeople && (
         <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 flex-shrink-0">
-          <p className="text-xs text-gray-400 font-medium">Add people to this group</p>
+          <p className="text-xs text-gray-400 font-medium">Group name</p>
+          <div className="flex gap-2">
+            <input type="text" value={nameDraft} onChange={e => setNameDraft(e.target.value)} maxLength={60}
+              className="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+            <button onClick={rename} disabled={renaming || !nameDraft.trim() || nameDraft.trim() === room?.name}
+              className="bg-bt-navy text-white px-4 rounded-xl text-sm font-semibold disabled:opacity-40">
+              {renaming ? 'Saving...' : 'Rename'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 font-medium pt-1">Add people to this group</p>
           <PeoplePicker exclude={members.map(m => m.user_id)} selected={toAdd} onChange={setToAdd} />
           {error && <p className="text-xs text-red-600">{error}</p>}
           <button onClick={addPeople} disabled={adding || !toAdd.size}

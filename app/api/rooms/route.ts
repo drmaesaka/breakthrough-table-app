@@ -67,14 +67,20 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ room })
 }
 
-/** Add people to a room I am in. */
+/** Add people to, or rename, a room I am in. Anyone in it may do either. */
 export async function PATCH(req: NextRequest) {
   const auth = await requireUser(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
-  const { room_id, add } = await req.json().catch(() => ({}))
-  if (!room_id || !Array.isArray(add) || !add.length) return NextResponse.json({ error: 'room_id and add are required' }, { status: 400 })
+  const { room_id, add, name } = await req.json().catch(() => ({}))
+  const rename = typeof name === 'string' ? name.trim().slice(0, 60) : ''
+  if (!room_id || (!rename && (!Array.isArray(add) || !add.length))) return NextResponse.json({ error: 'room_id and add or name are required' }, { status: 400 })
   const admin = adminClient()
   if (!(await isMember(admin, room_id, auth.userId))) return NextResponse.json({ error: 'Not in this group' }, { status: 403 })
+  if (rename) {
+    const { error } = await admin.from('chat_rooms').update({ name: rename }).eq('id', room_id)
+    if (error) return NextResponse.json({ error: 'Could not rename', detail: error.message }, { status: 500 })
+    if (!Array.isArray(add) || !add.length) return NextResponse.json({ name: rename })
+  }
   const { data: valid } = await admin.from('profiles').select('id').in('id', add)
   const rows = (valid || []).map(p => ({ room_id, user_id: p.id, added_by: auth.userId }))
   if (rows.length) {
