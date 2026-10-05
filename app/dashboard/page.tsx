@@ -9,6 +9,7 @@ import WelcomeScreen from '@/components/WelcomeScreen'
 import { myTables, type MyTable } from '@/lib/other-tables'
 import { freqOf, doneInPeriod, type Frequency } from '@/lib/habits'
 import { localDay } from '@/lib/dates'
+import { linkify } from '@/lib/linkify'
 import { MEETING_PLANS, resolveMeetingPlans, type StoredMeetingPlan } from '@/lib/meeting-plans'
 
 export default function DashboardPage() {
@@ -22,7 +23,7 @@ export default function DashboardPage() {
    * and read as failure. See sql/2026-09-03-attendance.sql.
    */
   const [journey, setJourney] = useState<{
-    meetings: { number: number; title: string }[]
+    meetings: { number: number; title: string; resources: string[]; challenges: string[] }[]
     attended: Set<number>
     current: number | null
     /** Meeting the table should be on, from its programme start date at one meeting per fortnight. */
@@ -45,6 +46,28 @@ export default function DashboardPage() {
     attended: number
   } | null>(null)
   const router = useRouter()
+
+  // The member's own goal, pinned on Home: the reason they came, and the
+  // strongest reason to stay. profiles.goal (sql/2026-10-05-member-goal.sql).
+  const [editingGoal, setEditingGoal] = useState(false)
+  const [goalDraft, setGoalDraft] = useState('')
+  const [goalSaving, setGoalSaving] = useState(false)
+  const [goalError, setGoalError] = useState('')
+
+  async function saveGoal() {
+    const goal = goalDraft.trim()
+    if (!profile) return
+    setGoalSaving(true); setGoalError('')
+    // .select() so an update RLS filters to nothing is caught, not reported as saved.
+    const { data, error } = await createClient().from('profiles').update({ goal: goal || null }).eq('id', profile.id).select('goal')
+    setGoalSaving(false)
+    if (error || !data?.length) {
+      setGoalError(error && /goal/.test(error.message) ? "Goals aren't switched on yet. Try again later." : "Couldn't save. Try again.")
+      return
+    }
+    setProfile((p: any) => ({ ...p, goal: goal || null }))
+    setEditingGoal(false)
+  }
 
   async function loadWeek(userId: string, t: MyTable) {
     const supabase = createClient()
@@ -83,7 +106,7 @@ export default function DashboardPage() {
     const supabase = createClient()
     const plansPromise = t.home
       // RLS hands back the BT defaults plus this table's overrides.
-      ? supabase.from('meeting_plans').select('group_id, number, title').order('number', { ascending: true }).then(r => r.data)
+      ? supabase.from('meeting_plans').select('group_id, number, title, resources, challenges').order('number', { ascending: true }).then(r => r.data)
       // A table I lead but do not sit at: RLS will not show its overrides.
       : (async () => {
           const { data: { session } } = await supabase.auth.getSession()
@@ -113,7 +136,7 @@ export default function DashboardPage() {
       expected = Math.max(1, Math.min(last, Math.floor(days / 14) + 1))
     }
     setJourney({
-      meetings: resolved.map(m => ({ number: m.number, title: m.title })),
+      meetings: resolved.map(m => ({ number: m.number, title: m.title, resources: m.resources || [], challenges: m.challenges || [] })),
       attended: new Set((attendedRows || []).map((r: any) => r.meeting_number as number)),
       current: t.current_meeting_number ?? null,
       expected,
@@ -232,25 +255,107 @@ export default function DashboardPage() {
                 ? numbered.filter(m => m.number < here && !journey.attended.has(m.number)).slice(-1)[0]
                 : undefined
               const row = 'flex items-start gap-3 py-2.5'
+              const challenges = upcoming?.challenges || []
+              const resources = upcoming?.resources || []
+              const readingLeft = week.readingLeft || []
+              const hasPrep = resources.length > 0 || readingLeft.length > 0 || !!week.prompt
+              const dateLine = nextDate
+                ? isToday ? 'Your table meets today' : nextDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+                : null
               return (
-                <div className="bg-white rounded-2xl p-5 shadow-sm">
-                  <p className="text-gray-400 text-sm font-medium">This week · {groupName}</p>
-
-                  <div className="mt-2 divide-y divide-gray-100">
-                    <Link href="/meetings" className={row}>
-                      <span className="text-xl">🗓</span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-bt-navy">
-                          {nextDate
-                            ? isToday ? 'Table meets today' : `Next table: ${nextDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
-                            : 'Your next table'}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-0.5">{upcoming ? upcoming.title : 'See the meeting outline'} <span className="text-bt-blue">→</span></p>
+                <>
+                {/* Your goal — personal, so it shows whichever table is picked. */}
+                <div className="bg-bt-navy rounded-2xl p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <p className="text-bt-light/70 text-xs font-bold uppercase tracking-wide">🎯 Your goal</p>
+                    {profile?.goal && !editingGoal && (
+                      <button onClick={() => { setGoalDraft(profile.goal); setEditingGoal(true); setGoalError('') }} className="text-bt-light/70 text-xs font-semibold">Edit</button>
+                    )}
+                  </div>
+                  {editingGoal || !profile?.goal ? (
+                    editingGoal ? (
+                      <div className="mt-2 space-y-2">
+                        <textarea autoFocus value={goalDraft} onChange={e => setGoalDraft(e.target.value)} rows={3} maxLength={300}
+                          placeholder="e.g. Grow my business to $1M while being home for dinner every night"
+                          className="w-full rounded-xl px-3 py-2 text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-bt-light" />
+                        <div className="flex gap-2">
+                          <button onClick={saveGoal} disabled={goalSaving}
+                            className="flex-1 bg-white text-bt-navy py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40">
+                            {goalSaving ? 'Saving...' : 'Save goal'}
+                          </button>
+                          <button onClick={() => { setEditingGoal(false); setGoalError('') }} className="px-4 text-bt-light/70 text-sm">Cancel</button>
+                        </div>
+                        {goalError && <p className="text-xs text-red-300">{goalError}</p>}
                       </div>
-                    </Link>
+                    ) : (
+                      <button onClick={() => { setGoalDraft(''); setEditingGoal(true) }} className="mt-1 text-left">
+                        <p className="text-white font-semibold">What are you here for?</p>
+                        <p className="text-bt-light/70 text-sm mt-0.5">Write the goal from your goal card. It stays pinned here. <span className="text-white">Add it →</span></p>
+                      </button>
+                    )
+                  ) : (
+                    <p className="text-white text-lg font-semibold mt-1 leading-snug">{profile.goal}</p>
+                  )}
+                </div>
 
+                <div className="bg-white rounded-2xl p-5 shadow-sm">
+                  <p className="text-gray-400 text-xs font-medium">{groupName}</p>
+                  <Link href="/meetings" className="block mt-0.5">
+                    <p className="text-2xl font-bold text-bt-navy leading-tight">
+                      {upcoming ? `Meeting ${upcoming.number}` : 'Your next meeting'}
+                      {upcoming && <span className="text-gray-400 font-semibold"> · {upcoming.title}</span>}
+                    </p>
+                    {dateLine && <p className="text-sm text-gray-500 mt-1">🗓 {dateLine}</p>}
+                  </Link>
+
+                  {challenges.length > 0 && (
+                    <div className="mt-4 bg-bt-pale rounded-xl p-3">
+                      <p className="text-xs font-bold text-bt-navy uppercase tracking-wide">🎯 Your challenge</p>
+                      <ul className="mt-1.5 space-y-1">
+                        {challenges.slice(0, 3).map((c, i) => <li key={i} className="text-sm text-gray-800 leading-snug">• {linkify(c)}</li>)}
+                      </ul>
+                      {challenges.length > 3 && <Link href="/meetings" className="text-xs text-bt-blue font-medium mt-1.5 block">+{challenges.length - 3} more in the outline →</Link>}
+                    </div>
+                  )}
+
+                  {hasPrep && (
+                    <div className="mt-4">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Before your next meeting</p>
+                      <div className="mt-1 divide-y divide-gray-100">
+                        {resources.slice(0, 3).map((r, i) => (
+                          <div key={i} className={row}>
+                            <span className="text-lg">📎</span>
+                            <p className="text-sm text-gray-800 leading-snug break-words">{linkify(r)}</p>
+                          </div>
+                        ))}
+                        {resources.length > 3 && (
+                          <Link href="/meetings" className="block py-2 text-xs text-bt-blue font-medium">+{resources.length - 3} more resources in the outline →</Link>
+                        )}
+                        {readingLeft.length > 0 && (
+                          <Link href="/group" className={row}>
+                            <span className="text-lg">📖</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-bt-navy">{readingLeft.length} to read</p>
+                              <p className="text-xs text-gray-500 mt-0.5 truncate">{readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p>
+                            </div>
+                          </Link>
+                        )}
+                        {week.prompt && (
+                          <Link href="/journal" className={row}>
+                            <span className="text-lg">🪞</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-bt-navy">Answer the reflection</p>
+                              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p>
+                            </div>
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-3 divide-y divide-gray-100 border-t border-gray-100">
                     <Link href="/group" className={row}>
-                      <span className="text-xl">✅</span>
+                      <span className="text-lg">✅</span>
                       <div className="min-w-0 flex-1">
                         {week.habits.length === 0 ? (
                           <p className="text-sm font-semibold text-bt-navy">Pick a habit to work on <span className="text-bt-blue">→</span></p>
@@ -261,37 +366,10 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </Link>
-
-                    {week.readingLeft && week.readingTotal > 0 && (
-                      <Link href="/group" className={row}>
-                        <span className="text-xl">📖</span>
-                        <div className="min-w-0">
-                          {week.readingLeft.length === 0 ? (
-                            <p className="text-sm text-gray-400">✓ Reading all caught up</p>
-                          ) : (
-                            <>
-                              <p className="text-sm font-semibold text-bt-navy">{week.readingLeft.length} to read</p>
-                              <p className="text-xs text-gray-500 mt-0.5 truncate">{week.readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p>
-                            </>
-                          )}
-                        </div>
-                      </Link>
-                    )}
-
-                    {week.prompt && (
-                      <Link href="/journal" className={row}>
-                        <span className="text-xl">🪞</span>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-bt-navy">Reflect before the table</p>
-                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p>
-                        </div>
-                      </Link>
-                    )}
-
                     {missed && (
                       <Link href="/meetings" className={row}>
-                        <span className="text-xl">↩️</span>
-                        <p className="text-xs text-gray-500">Missed {missed.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span></p>
+                        <span className="text-lg">↩️</span>
+                        <p className="text-xs text-gray-500">Missed Meeting {missed.number} · {missed.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span></p>
                       </Link>
                     )}
                   </div>
@@ -306,6 +384,7 @@ export default function DashboardPage() {
                     </p>
                   )}
                 </div>
+                </>
               )
             })()}
 
