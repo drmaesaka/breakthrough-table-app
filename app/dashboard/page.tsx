@@ -7,6 +7,8 @@ import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
 import { myTables, type MyTable } from '@/lib/other-tables'
+import { freqOf, doneInPeriod, type Frequency } from '@/lib/habits'
+import { localDay } from '@/lib/dates'
 import { MEETING_PLANS, resolveMeetingPlans, type StoredMeetingPlan } from '@/lib/meeting-plans'
 
 export default function DashboardPage() {
@@ -27,7 +29,54 @@ export default function DashboardPage() {
     expected: number | null
     startDate: string | null
   } | null>(null)
+  /**
+   * "This week": what is in front of the member right now. Replaced the
+   * 12-meeting progress bar (2026-10-05): a bar that fills up says "done",
+   * and the programme wants people staying well past six months. Nothing
+   * here ever reaches 100%; the counts at the bottom only go up.
+   */
+  const [week, setWeek] = useState<{
+    habits: { id: string; name: string; freq: Frequency; done: boolean }[]
+    /** null on a table the TC leads but does not sit at: not theirs to do. */
+    readingLeft: { id: string; title: string }[] | null
+    readingTotal: number
+    prompt: { id: string; prompt: string } | null
+    reflections: number
+    attended: number
+  } | null>(null)
   const router = useRouter()
+
+  async function loadWeek(userId: string, t: MyTable) {
+    const supabase = createClient()
+    const fiveWeeksAgo = localDay(new Date(Date.now() - 35 * 86400000))
+    const [{ data: habits }, { data: hc }, { count: reflections }, { count: attended }, tasksRes, doneRes, promptsRes, myRespRes] = await Promise.all([
+      supabase.from('habits').select('id, name, frequency').eq('user_id', userId).is('archived_at', null).order('created_at', { ascending: true }),
+      supabase.from('habit_completions').select('habit_id, completed_date').eq('user_id', userId).gte('completed_date', fiveWeeksAgo),
+      supabase.from('journal_responses').select('prompt_id', { count: 'exact', head: true }).eq('user_id', userId),
+      supabase.from('meeting_attendance').select('user_id', { count: 'exact', head: true }).eq('user_id', userId),
+      t.home ? supabase.from('tasks').select('id, title').eq('group_id', t.id).eq('archived', false).order('created_at', { ascending: true }) : Promise.resolve({ data: null }),
+      t.home ? supabase.from('task_completions').select('task_id').eq('user_id', userId) : Promise.resolve({ data: null }),
+      t.home ? supabase.from('journal_prompts').select('id, prompt').eq('group_id', t.id).order('created_at', { ascending: false }).limit(10) : Promise.resolve({ data: null }),
+      t.home ? supabase.from('journal_responses').select('prompt_id').eq('user_id', userId) : Promise.resolve({ data: null }),
+    ])
+    const today = localDay()
+    const dates = new Map<string, Set<string>>()
+    for (const c of hc || []) {
+      if (!c.habit_id) continue
+      dates.set(c.habit_id, (dates.get(c.habit_id) ?? new Set<string>()).add(c.completed_date))
+    }
+    const doneIds = new Set((doneRes.data || []).map((r: any) => r.task_id))
+    const answered = new Set((myRespRes.data || []).map((r: any) => r.prompt_id))
+    const tasks = (tasksRes.data || []) as { id: string; title: string }[]
+    setWeek({
+      habits: (habits || []).map((h: any) => ({ id: h.id, name: h.name, freq: freqOf(h), done: doneInPeriod(dates.get(h.id) ?? new Set(), freqOf(h), today) })),
+      readingLeft: t.home ? tasks.filter(x => !doneIds.has(x.id)) : null,
+      readingTotal: tasks.length,
+      prompt: ((promptsRes.data || []) as { id: string; prompt: string }[]).find(p => !answered.has(p.id)) || null,
+      reflections: reflections || 0,
+      attended: attended || 0,
+    })
+  }
 
   /** The journey for one table: its meetings, where it is, and which ones I attended there. */
   async function loadJourney(userId: string, t: MyTable) {
@@ -76,7 +125,7 @@ export default function DashboardPage() {
     const t = tables.find(x => x.id === id)
     if (!t || !profile) return
     setTableId(id); setGroupName(t.name)
-    await loadJourney(profile.id, t)
+    await Promise.all([loadJourney(profile.id, t), loadWeek(profile.id, t)])
   }
 
   useEffect(() => {
@@ -93,7 +142,7 @@ export default function DashboardPage() {
       if (prof?.group_id) {
         const home = { id: prof.group_id, name: prof.groups?.name || 'My table', current_meeting_number: prof.groups?.current_meeting_number ?? null, program_start_date: prof.groups?.program_start_date ?? null }
         setTableId(home.id)
-        await loadJourney(user.id, { ...home, home: true })
+        await Promise.all([loadJourney(user.id, { ...home, home: true }), loadWeek(user.id, { ...home, home: true })])
         if (prof.role === 'leader') myTables(home, true).then(setTables)
       }
     }
@@ -157,84 +206,105 @@ export default function DashboardPage() {
         {/* Journey card + quick links - only show if in a group */}
         {profile?.group_id && (
           <>
-            {/* Your BT Journey — the table's meetings, this member's attended
-                ones filled in. No percentage: nothing here starts at zero. */}
-            {journey && (() => {
-              // On a table I lead but do not sit at, "missed" is not mine to catch up on.
+            {journey && week && (() => {
               const onHome = !tableId || tableId === profile?.group_id
-              const numbered = journey.meetings.filter(m => m.number >= 1)
-              const total = numbered.length || 12
               const maxAttended = Math.max(0, ...[...journey.attended])
-              // Where the table is. If the TC has not marked a current meeting,
-              // the furthest one this member attended stands in.
+              // Where the table is: the TC's marked meeting, the furthest one
+              // attended, or the programme start date at one per fortnight.
               const candidates = [journey.current ?? 0, maxAttended, journey.expected ?? 0].filter(n => n > 0)
               const here = candidates.length ? Math.max(...candidates) : null
-              const current = here !== null ? journey.meetings.find(m => m.number === here) || null : null
-              const next = here === null
-                ? numbered[0] || null
-                : numbered.find(m => m.number > here) || null
-              const missed = numbered.filter(m => here !== null && m.number < here && !journey.attended.has(m.number))
-              const status = (n: number) => {
-                if (n === 0) return 'done'                       // onboarding: they are here, they did it
-                if (journey.attended.has(n)) return 'done'
-                if (here !== null && n === here) return 'current'
-                if (here !== null && n < here) return 'missed'
-                return 'ahead'
+              const numbered = journey.meetings.filter(m => m.number >= 1)
+              // The next one to sit: the current meeting until attended, then the one after.
+              const upcoming = here === null ? numbered[0]
+                : !journey.attended.has(here) ? numbered.find(m => m.number === here)
+                : numbered.find(m => m.number > here)
+              // Next table date from the start date and the fortnightly rhythm.
+              let nextDate: Date | null = null
+              if (journey.startDate) {
+                const start = new Date(journey.startDate + 'T12:00:00')
+                const today = new Date(); today.setHours(12, 0, 0, 0)
+                const days = Math.round((today.getTime() - start.getTime()) / 86400000)
+                nextDate = new Date(start)
+                nextDate.setDate(start.getDate() + Math.max(0, Math.ceil(days / 14)) * 14)
               }
+              const isToday = nextDate && localDay(nextDate) === localDay()
+              const missed = onHome && here !== null
+                ? numbered.filter(m => m.number < here && !journey.attended.has(m.number)).slice(-1)[0]
+                : undefined
+              const row = 'flex items-start gap-3 py-2.5'
               return (
                 <div className="bg-white rounded-2xl p-5 shadow-sm">
-                  <p className="text-gray-400 text-sm font-medium">{onHome ? 'Your BT Journey' : 'Table journey'} · {groupName}</p>
-                  {current && current.number >= 1 ? (
-                    <>
-                      <p className="text-3xl font-bold text-bt-navy mt-1">Meeting {current.number} <span className="text-gray-300 text-xl font-semibold">of {total}</span></p>
-                      <p className="text-gray-500 text-sm mt-0.5">
-                        {current.title}
-                        {journey.startDate && <span className="text-gray-300"> · since {new Date(journey.startDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span>}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-3xl font-bold text-bt-navy mt-1">Your journey begins</p>
-                      <p className="text-gray-500 text-sm mt-0.5">Onboarding ✓ · {total} meetings ahead</p>
-                    </>
-                  )}
+                  <p className="text-gray-400 text-sm font-medium">This week · {groupName}</p>
 
-                  {/* Timeline: onboarding + the numbered meetings */}
-                  <div className="mt-4 relative">
-                    <div className="absolute left-2 right-2 top-1/2 -translate-y-1/2 h-0.5 bg-gray-100" />
-                    <div className="relative flex justify-between">
-                      {journey.meetings.map(m => {
-                        const st = status(m.number)
-                        return (
-                          <div key={m.number} title={`${m.number === 0 ? 'Onboarding' : `Meeting ${m.number}`} · ${m.title}`}
-                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold border-2 ${
-                              st === 'done' ? 'bg-bt-navy border-bt-navy text-white'
-                              : st === 'current' ? 'bg-white border-bt-blue text-bt-blue ring-4 ring-bt-blue/15'
-                              : st === 'missed' ? 'bg-white border-gray-300 text-gray-400'
-                              : 'bg-bt-pale border-bt-pale text-gray-300'
-                            }`}>
-                            {st === 'done' ? '✓' : m.number === 0 ? 'O' : m.number}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
+                  <div className="mt-2 divide-y divide-gray-100">
+                    <Link href="/meetings" className={row}>
+                      <span className="text-xl">🗓</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-bt-navy">
+                          {nextDate
+                            ? isToday ? 'Table meets today' : `Next table: ${nextDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+                            : 'Your next table'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">{upcoming ? upcoming.title : 'See the meeting outline'} <span className="text-bt-blue">→</span></p>
+                      </div>
+                    </Link>
 
-                  <div className="mt-4 pt-3 border-t border-gray-100 space-y-1.5">
-                    {next ? (
-                      <p className="text-sm text-gray-700"><span className="font-semibold">Next:</span> Meeting {next.number} · {next.title}</p>
-                    ) : (
-                      <p className="text-sm text-gray-700 font-semibold">Final meeting — you made it 🎉</p>
-                    )}
-                    {onHome && missed.map(m => (
-                      <Link key={m.number} href="/meetings" className="block text-xs text-gray-400">
-                        Missed Meeting {m.number} · {m.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span>
+                    <Link href="/tasks" className={row}>
+                      <span className="text-xl">✅</span>
+                      <div className="min-w-0 flex-1">
+                        {week.habits.length === 0 ? (
+                          <p className="text-sm font-semibold text-bt-navy">Pick a habit to work on <span className="text-bt-blue">→</span></p>
+                        ) : week.habits.map(h => (
+                          <p key={h.id} className={`text-sm ${h.done ? 'text-gray-400' : 'font-semibold text-bt-navy'}`}>
+                            {h.done ? '✓' : '○'} {h.name} <span className="text-xs font-normal text-gray-400">{h.done ? 'done' : h.freq === 'daily' ? 'today' : h.freq === 'weekly' ? 'this week' : 'this month'}</span>
+                          </p>
+                        ))}
+                      </div>
+                    </Link>
+
+                    {week.readingLeft && week.readingTotal > 0 && (
+                      <Link href="/tasks" className={row}>
+                        <span className="text-xl">📖</span>
+                        <div className="min-w-0">
+                          {week.readingLeft.length === 0 ? (
+                            <p className="text-sm text-gray-400">✓ Reading all caught up</p>
+                          ) : (
+                            <>
+                              <p className="text-sm font-semibold text-bt-navy">{week.readingLeft.length} to read</p>
+                              <p className="text-xs text-gray-500 mt-0.5 truncate">{week.readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p>
+                            </>
+                          )}
+                        </div>
                       </Link>
-                    ))}
-                    {profile?.streak > 0 && (
-                      <p className="text-xs text-gray-400">🔥 {profile.streak} period streak</p>
+                    )}
+
+                    {week.prompt && (
+                      <Link href="/journal" className={row}>
+                        <span className="text-xl">🪞</span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-bt-navy">Reflect before the table</p>
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p>
+                        </div>
+                      </Link>
+                    )}
+
+                    {missed && (
+                      <Link href="/meetings" className={row}>
+                        <span className="text-xl">↩️</span>
+                        <p className="text-xs text-gray-500">Missed {missed.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span></p>
+                      </Link>
                     )}
                   </div>
+
+                  {(profile?.streak > 0 || week.attended > 0 || week.reflections > 0) && (
+                    <p className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400">
+                      {[
+                        profile?.streak > 0 && `🔥 ${profile.streak} period streak`,
+                        week.attended > 0 && `🪑 ${week.attended} table${week.attended === 1 ? '' : 's'} attended`,
+                        week.reflections > 0 && `🪞 ${week.reflections} reflection${week.reflections === 1 ? '' : 's'} written`,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
                 </div>
               )
             })()}
