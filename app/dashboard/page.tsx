@@ -6,13 +6,14 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
-import { otherLedTableCount } from '@/lib/other-tables'
+import { myTables, type MyTable } from '@/lib/other-tables'
 import { MEETING_PLANS, resolveMeetingPlans, type StoredMeetingPlan } from '@/lib/meeting-plans'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
   const [groupName, setGroupName] = useState('')
-  const [otherTables, setOtherTables] = useState(0)
+  const [tables, setTables] = useState<MyTable[]>([])
+  const [tableId, setTableId] = useState<string | null>(null)
   /**
    * "Your BT Journey": the table's meetings and which ones this member was
    * at. Replaces the adherence percentage, which started every period at 0
@@ -28,6 +29,56 @@ export default function DashboardPage() {
   } | null>(null)
   const router = useRouter()
 
+  /** The journey for one table: its meetings, where it is, and which ones I attended there. */
+  async function loadJourney(userId: string, t: MyTable) {
+    const supabase = createClient()
+    const plansPromise = t.home
+      // RLS hands back the BT defaults plus this table's overrides.
+      ? supabase.from('meeting_plans').select('group_id, number, title').order('number', { ascending: true }).then(r => r.data)
+      // A table I lead but do not sit at: RLS will not show its overrides.
+      : (async () => {
+          const { data: { session } } = await supabase.auth.getSession()
+          const res = await fetch(`/api/admin/meeting-plans?group_id=${encodeURIComponent(t.id)}`, { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } })
+          if (!res.ok) return null
+          const j = await res.json()
+          return [...(j.defaults || []), ...(j.overrides || [])]
+        })()
+    const [planRows, { data: attendedRows, error: attendanceError }] = await Promise.all([
+      plansPromise,
+      supabase.from('meeting_attendance').select('meeting_number').eq('user_id', userId).eq('group_id', t.id),
+    ])
+    // Before the attendance migration the table does not exist; the
+    // journey still renders, with nothing filled in yet.
+    if (attendanceError) console.error('attendance fetch failed:', attendanceError.message)
+    const resolved = planRows && planRows.length
+      ? resolveMeetingPlans(planRows as StoredMeetingPlan[])
+      : (MEETING_PLANS as StoredMeetingPlan[])
+    // Tables join the app months into the programme. The TC's start date
+    // plus the fortnightly cadence says where the table really is; a
+    // marked current meeting or attendance can only move that forward.
+    const startDate: string | null = t.program_start_date || null
+    let expected: number | null = null
+    if (startDate) {
+      const days = Math.floor((Date.now() - new Date(startDate + 'T12:00:00').getTime()) / 86400000)
+      const last = resolved.filter(m => m.number >= 1).slice(-1)[0]?.number ?? 12
+      expected = Math.max(1, Math.min(last, Math.floor(days / 14) + 1))
+    }
+    setJourney({
+      meetings: resolved.map(m => ({ number: m.number, title: m.title })),
+      attended: new Set((attendedRows || []).map((r: any) => r.meeting_number as number)),
+      current: t.current_meeting_number ?? null,
+      expected,
+      startDate,
+    })
+  }
+
+  async function switchTable(id: string) {
+    const t = tables.find(x => x.id === id)
+    if (!t || !profile) return
+    setTableId(id); setGroupName(t.name)
+    await loadJourney(profile.id, t)
+  }
+
   useEffect(() => {
     async function load() {
       const supabase = createClient()
@@ -38,38 +89,12 @@ export default function DashboardPage() {
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
-        if (prof.role === 'leader') otherLedTableCount(prof.group_id).then(setOtherTables)
       }
-
       if (prof?.group_id) {
-        const [{ data: planRows }, { data: attendedRows, error: attendanceError }] = await Promise.all([
-          // RLS hands back the BT defaults plus this table's overrides.
-          supabase.from('meeting_plans').select('group_id, number, title').order('number', { ascending: true }),
-          supabase.from('meeting_attendance').select('meeting_number').eq('user_id', user.id).eq('group_id', prof.group_id),
-        ])
-        // Before the attendance migration the table does not exist; the
-        // journey still renders, with nothing filled in yet.
-        if (attendanceError) console.error('attendance fetch failed:', attendanceError.message)
-        const resolved = planRows && planRows.length
-          ? resolveMeetingPlans(planRows as StoredMeetingPlan[])
-          : (MEETING_PLANS as StoredMeetingPlan[])
-        // Tables join the app months into the programme. The TC's start date
-        // plus the fortnightly cadence says where the table really is; a
-        // marked current meeting or attendance can only move that forward.
-        const startDate: string | null = prof.groups?.program_start_date || null
-        let expected: number | null = null
-        if (startDate) {
-          const days = Math.floor((Date.now() - new Date(startDate + 'T12:00:00').getTime()) / 86400000)
-          const last = resolved.filter(m => m.number >= 1).slice(-1)[0]?.number ?? 12
-          expected = Math.max(1, Math.min(last, Math.floor(days / 14) + 1))
-        }
-        setJourney({
-          meetings: resolved.map(m => ({ number: m.number, title: m.title })),
-          attended: new Set((attendedRows || []).map((r: any) => r.meeting_number as number)),
-          current: prof.groups?.current_meeting_number ?? null,
-          expected,
-          startDate,
-        })
+        const home = { id: prof.group_id, name: prof.groups?.name || 'My table', current_meeting_number: prof.groups?.current_meeting_number ?? null, program_start_date: prof.groups?.program_start_date ?? null }
+        setTableId(home.id)
+        await loadJourney(user.id, { ...home, home: true })
+        if (prof.role === 'leader') myTables(home, true).then(setTables)
       }
     }
     load()
@@ -85,10 +110,12 @@ export default function DashboardPage() {
           <div>
             <p className="text-bt-light text-sm font-medium">Welcome back,</p>
             <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
-            {groupName && <p className="text-bt-light/70 text-sm mt-1">🪑 Your table: <span className="text-white font-semibold">{groupName}</span></p>}
-            {groupName && otherTables > 0 && (
-              <p className="text-bt-light/60 text-xs mt-1">You also run {otherTables} other table{otherTables === 1 ? '' : 's'}. See them on <Link href="/group" className="underline text-white">My Table</Link>.</p>
-            )}
+            {tables.length > 1 ? (
+              <select value={tableId || ''} onChange={e => switchTable(e.target.value)}
+                className="mt-2 max-w-full bg-white/15 text-white text-sm font-semibold rounded-xl px-3 py-1.5 border border-white/25 focus:outline-none">
+                {tables.map(t => <option key={t.id} value={t.id} className="text-gray-900">🪑 {t.name}{t.home ? ' (your table)' : ''}</option>)}
+              </select>
+            ) : groupName && <p className="text-bt-light/70 text-sm mt-1">🪑 Your table: <span className="text-white font-semibold">{groupName}</span></p>}
           </div>
           <Link href="/profile"
             className="mt-1 w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
@@ -133,6 +160,8 @@ export default function DashboardPage() {
             {/* Your BT Journey — the table's meetings, this member's attended
                 ones filled in. No percentage: nothing here starts at zero. */}
             {journey && (() => {
+              // On a table I lead but do not sit at, "missed" is not mine to catch up on.
+              const onHome = !tableId || tableId === profile?.group_id
               const numbered = journey.meetings.filter(m => m.number >= 1)
               const total = numbered.length || 12
               const maxAttended = Math.max(0, ...[...journey.attended])
@@ -154,7 +183,7 @@ export default function DashboardPage() {
               }
               return (
                 <div className="bg-white rounded-2xl p-5 shadow-sm">
-                  <p className="text-gray-400 text-sm font-medium">Your BT Journey · {groupName}</p>
+                  <p className="text-gray-400 text-sm font-medium">{onHome ? 'Your BT Journey' : 'Table journey'} · {groupName}</p>
                   {current && current.number >= 1 ? (
                     <>
                       <p className="text-3xl font-bold text-bt-navy mt-1">Meeting {current.number} <span className="text-gray-300 text-xl font-semibold">of {total}</span></p>
@@ -197,7 +226,7 @@ export default function DashboardPage() {
                     ) : (
                       <p className="text-sm text-gray-700 font-semibold">Final meeting — you made it 🎉</p>
                     )}
-                    {missed.map(m => (
+                    {onHome && missed.map(m => (
                       <Link key={m.number} href="/meetings" className="block text-xs text-gray-400">
                         Missed Meeting {m.number} · {m.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span>
                       </Link>

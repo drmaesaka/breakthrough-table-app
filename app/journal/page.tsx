@@ -3,8 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
-import Link from 'next/link'
-import { otherLedTableCount } from '@/lib/other-tables'
+import { myTables, type MyTable } from '@/lib/other-tables'
 
 export default function JournalPage() {
   const [prompts, setPrompts] = useState<any[]>([])
@@ -19,7 +18,9 @@ export default function JournalPage() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [otherTables, setOtherTables] = useState(0)
+  const [tables, setTables] = useState<MyTable[]>([])
+  const [tableId, setTableId] = useState<string | null>(null)
+  const onHome = !tables.length || tables.find(t => t.id === tableId)?.home !== false
   const router = useRouter()
 
   useEffect(() => { load() }, [])
@@ -39,7 +40,8 @@ export default function JournalPage() {
     setMyName(prof?.full_name || 'You')
     if (!prof?.group_id) { setLoading(false); return }
     setGroupName((prof.groups as any)?.name || '')
-    if (prof.role === 'leader') otherLedTableCount(prof.group_id).then(setOtherTables)
+    setTableId(prof.group_id)
+    if (prof.role === 'leader') myTables({ id: prof.group_id, name: (prof.groups as any)?.name || 'My table' }, true).then(setTables)
 
     const [{ data: promptData }, { data: myResponses }] = await Promise.all([
       supabase.from('journal_prompts')
@@ -66,17 +68,49 @@ export default function JournalPage() {
     setLoading(false)
   }
 
+  async function authHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await createClient().auth.getSession()
+    return { Authorization: `Bearer ${session?.access_token ?? ''}`, 'Content-Type': 'application/json' }
+  }
+
+  /** Show another table's prompts. A table I lead but do not sit at is read through the server. */
+  async function switchTable(id: string) {
+    const t = tables.find(x => x.id === id)
+    if (!t) return
+    if (t.home) { setTableId(id); setGroupResponses({}); setLoading(true); await load(); return }
+    setTableId(id); setGroupName(t.name)
+    const res = await fetch(`/api/admin/journal?group_id=${encodeURIComponent(id)}`, { headers: await authHeaders() })
+    const j = await res.json().catch(() => ({}))
+    const list = res.ok ? (j.prompts || []) : []
+    const mineMap: Record<string, string> = {}
+    const byPrompt: Record<string, any[]> = {}
+    for (const p of list) {
+      byPrompt[p.id] = (p.responses || []).map((r: any) => ({ response: r.response, user_id: r.user_id, profiles: { full_name: r.name } }))
+      const me = (p.responses || []).find((r: any) => r.user_id === userId)
+      if (me) mineMap[p.id] = me.response
+    }
+    setPrompts(list)
+    setGroupResponses(byPrompt)
+    setResponses(mineMap)
+    setSavedResponses(mineMap)
+    setSaveError({})
+    setExpandedPrompt(list[0]?.id ?? null)
+  }
+
   async function saveResponse(promptId: string) {
     const text = responses[promptId]?.trim()
     if (!text) return
     setSaving(s => ({ ...s, [promptId]: true }))
     const supabase = createClient()
 
-    const { error } = await supabase.from('journal_responses').upsert({
-      prompt_id: promptId,
-      user_id: userId,
-      response: text,
-    }, { onConflict: 'prompt_id,user_id' })
+    const { error } = onHome
+      ? await supabase.from('journal_responses').upsert({
+          prompt_id: promptId,
+          user_id: userId,
+          response: text,
+        }, { onConflict: 'prompt_id,user_id' })
+      : await fetch('/api/admin/journal', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ prompt_id: promptId, response: text }) })
+          .then(async r => (r.ok ? { error: null } : { error: { message: (await r.json().catch(() => ({}))).error || String(r.status), code: String(r.status) } }))
 
     setSaving(s => ({ ...s, [promptId]: false }))
 
@@ -105,7 +139,7 @@ export default function JournalPage() {
   }
 
   async function loadGroupResponses(promptId: string) {
-    if (groupResponses[promptId]) return // already loaded
+    if (groupResponses[promptId] || !onHome) return // already loaded (other tables load with their prompts)
     const supabase = createClient()
     const { data } = await supabase
       .from('journal_responses')
@@ -128,11 +162,13 @@ export default function JournalPage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
         <h1 className="text-white text-2xl font-bold">Reflection Prompts</h1>
-        <p className="text-bt-light/70 text-sm mt-0.5">Prompts for <span className="text-white font-semibold">{groupName}</span> · Think before the table</p>
-        {otherTables > 0 && (
-          <p className="text-bt-light/60 text-xs mt-2">
-            These are your own table&apos;s prompts. To post to or read answers from the {otherTables} other table{otherTables === 1 ? '' : 's'} you run, use <Link href="/admin" className="underline text-white">Admin → Prompts</Link>.
-          </p>
+        {tables.length > 1 ? (
+          <select value={tableId || ''} onChange={e => switchTable(e.target.value)}
+            className="mt-2 max-w-full bg-white/15 text-white text-sm font-semibold rounded-xl px-3 py-1.5 border border-white/25 focus:outline-none">
+            {tables.map(t => <option key={t.id} value={t.id} className="text-gray-900">🪑 {t.name}{t.home ? ' (your table)' : ''}</option>)}
+          </select>
+        ) : (
+          <p className="text-bt-light/70 text-sm mt-0.5">Prompts for <span className="text-white font-semibold">{groupName}</span> · Think before the table</p>
         )}
       </div>
 

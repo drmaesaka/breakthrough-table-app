@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { adminClient, requireLeader, requireGroupOwnership } from '@/lib/api-auth'
+import { adminClient, requireLeader, requireGroupOwnership, leaderGroupIds } from '@/lib/api-auth'
 
 // Every prompt for the group with every member's response attached. Runs with
 // the service key because a leader is not necessarily *in* the group they lead:
@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
   for (const r of responses || []) {
     byPrompt.set(r.prompt_id, [...(byPrompt.get(r.prompt_id) || []), {
       name: (r.profiles as any)?.full_name || r.user_id,
+      user_id: r.user_id,
       response: r.response,
     }])
   }
@@ -54,4 +55,30 @@ export async function GET(req: NextRequest) {
       responses: byPrompt.get(p.id) || [],
     })),
   })
+}
+
+/**
+ * A leader's own reflection on a prompt at a table they lead but may not sit
+ * at (Reflections' table switcher). The journal RLS policies are written for
+ * a table's members, so the browser write could be refused or, worse,
+ * filtered to nothing while reporting success.
+ */
+export async function POST(req: NextRequest) {
+  const auth = await requireLeader(req)
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
+
+  const { prompt_id, response } = await req.json().catch(() => ({}))
+  const text = typeof response === 'string' ? response.trim() : ''
+  if (!prompt_id || !text) return NextResponse.json({ error: 'prompt_id and response are required' }, { status: 400 })
+
+  const supabase = adminClient()
+  const { data: prompt } = await supabase.from('journal_prompts').select('id, group_id').eq('id', prompt_id).maybeSingle()
+  if (!prompt) return NextResponse.json({ error: 'Prompt not found' }, { status: 404 })
+  const mine = await leaderGroupIds(auth.userId)
+  if (!mine.includes(prompt.group_id)) return NextResponse.json({ error: 'Not a table you lead' }, { status: 403 })
+
+  const { error } = await supabase.from('journal_responses')
+    .upsert({ prompt_id, user_id: auth.userId, response: text }, { onConflict: 'prompt_id,user_id' })
+  if (error) return NextResponse.json({ error: 'Could not save', detail: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
 }
