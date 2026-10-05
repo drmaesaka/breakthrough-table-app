@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import Link from 'next/link'
 import Avatar from '@/components/Avatar'
+import MyTasks from '@/components/MyTasks'
 import { notifyAbout } from '@/lib/notify-client'
 
 type Detail = {
@@ -15,7 +16,9 @@ type Detail = {
   prompts_answered: number; push_enabled: boolean
 }
 
-// My Table. Members see the table's progress. A TC sees the same list with
+// My Table: "You" (your habits and reading — the old Tasks tab, merged in
+// 2026-10-05) then "Your table" (who is there). No percentages or medals for
+// members: nothing here should look finished. A TC also gets the send card,
 // every member expandable into their habits, reading, attendance, prompts
 // and whether notifications reach them (leader feedback 2026-09-29), and a
 // picker if they lead more than one table.
@@ -50,7 +53,7 @@ export default function GroupPage() {
     const supabase = createClient()
     const [{ data: g }, { data: memberData }] = await Promise.all([
       supabase.from('groups').select('name').eq('id', gid).maybeSingle(),
-      supabase.from('profiles').select('id, full_name, adherence_percent, role, avatar_url').eq('group_id', gid).order('adherence_percent', { ascending: false }),
+      supabase.from('profiles').select('id, full_name, adherence_percent, streak, role, avatar_url').eq('group_id', gid).order('full_name', { ascending: true }),
     ])
     if (g?.name) setGroupName(g.name)
     setMembers(memberData || [])
@@ -149,19 +152,6 @@ export default function GroupPage() {
     await loadTable(gid, isLeader)
   }
 
-  const avg = members.length > 0
-    ? Math.round(members.reduce((s, m) => s + (m.adherence_percent || 0), 0) / members.length) : 0
-
-  function medal(index: number, pct: number) {
-    if (pct === 0) return ''
-    return index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : ''
-  }
-  function barColor(pct: number) {
-    if (pct === 100) return '#22c55e'
-    if (pct >= 75) return '#5B9BD5'
-    if (pct > 0) return '#f59e0b'
-    return '#e5e7eb'
-  }
   function fmt(d: string | null) {
     if (!d) return '—'
     const [y, m, dd] = d.slice(0, 10).split('-').map(Number)
@@ -182,7 +172,7 @@ export default function GroupPage() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-white text-2xl font-bold truncate">{groupName}</h1>
-            <p className="text-bt-light/60 text-sm mt-0.5">Group progress this period</p>
+            <p className="text-bt-light/60 text-sm mt-0.5">{members.length} {members.length === 1 ? 'person' : 'people'} at the table</p>
           </div>
           {isLeader && (
             <Link href="/analytics" className="flex-shrink-0 bg-white/15 text-white text-xs font-semibold px-3 py-2 rounded-xl mt-1">
@@ -196,22 +186,21 @@ export default function GroupPage() {
             {tables.map(t => <option key={t.id} value={t.id} className="text-gray-900">{t.name}{t.id === homeGroupId ? ' (your table)' : ''}</option>)}
           </select>
         )}
-        <div className="mt-4 bg-white/10 rounded-2xl px-4 py-3 flex items-center justify-between">
-          <div>
-            <p className="text-bt-light/70 text-xs font-medium">Group Average</p>
-            <p className="text-white text-2xl font-bold mt-0.5">{avg}%</p>
-          </div>
-          <div className="text-right">
-            <p className="text-bt-light/70 text-xs font-medium">Members</p>
-            <p className="text-white text-2xl font-bold mt-0.5">{members.length}</p>
-          </div>
-        </div>
         {isLeader && detail && (
           <p className="text-bt-light/60 text-[11px] mt-2">TC view: tap a member for their habits, reading, attendance and more.</p>
         )}
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-3">
+        {/* You — only on the table you sit at: your reading belongs to it. */}
+        {groupId === homeGroupId && (
+          <>
+            <p className="text-sm font-bold text-bt-navy px-1">You</p>
+            <MyTasks />
+            <p className="text-sm font-bold text-bt-navy px-1 pt-4">Your table</p>
+          </>
+        )}
+
         {isLeader && detail && (
           <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
             <h3 className="font-bold text-bt-navy text-sm">Send to {groupName}</h3>
@@ -243,8 +232,7 @@ export default function GroupPage() {
           </div>
         )}
 
-        {members.map((member, i) => {
-          const pct = member.adherence_percent || 0
+        {members.map(member => {
           const isYou = member.id === currentUserId
           const d = detailById.get(member.id)
           const expanded = open === member.id
@@ -260,15 +248,10 @@ export default function GroupPage() {
                     <p className="font-semibold text-gray-900 text-sm">
                       {member.full_name}{isYou ? ' (you)' : ''}
                     </p>
-                    {medal(i, pct) && <span>{medal(i, pct)}</span>}
                     {member.role === 'leader' && (
                       <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
                     )}
                     {d && !d.push_enabled && <span className="text-xs" title="No notifications">🔕</span>}
-                  </div>
-                  <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: barColor(pct) }} />
                   </div>
                   {d && (
                     <p className="text-[11px] text-gray-400 mt-1.5">
@@ -276,9 +259,10 @@ export default function GroupPage() {
                     </p>
                   )}
                 </div>
-                <span className={`flex-shrink-0 text-lg font-bold ${
-                  pct === 100 ? 'text-green-500' : pct >= 75 ? 'text-bt-blue' : 'text-gray-400'
-                }`}>{pct}%</span>
+{(member.streak || 0) > 0 && (
+                  <span className="flex-shrink-0 text-sm font-semibold text-orange-500">🔥 {member.streak}</span>
+                )}
+                {d && <span className={`flex-shrink-0 text-gray-300 text-sm transition-transform ${expanded ? 'rotate-90' : ''}`}>›</span>}
               </div>
 
               {d && expanded && (

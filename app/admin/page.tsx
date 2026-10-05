@@ -1425,7 +1425,7 @@ export default function AdminPage() {
             </div>
 
             {/* Add reading / resources. Members see these under
-                "Reading & Resources" on My Tasks and tick them off; each one
+                "Reading & Resources" on My Table and tick them off; each one
                 counts toward their adherence like a habit does. */}
             {(() => {
               const tableName = groups.find(g => g.id === selectedGroup)?.name || 'this table'
@@ -1435,7 +1435,7 @@ export default function AdminPage() {
                   <h3 className="font-bold text-bt-navy">Add Reading or Resources</h3>
                   <p className="text-gray-400 text-xs">
                     Members of <span className="font-semibold text-bt-navy">{tableName}</span> see this under
-                    “Reading &amp; Resources” on their My Tasks screen and check it off when it’s done.
+                    “Reading &amp; Resources” on their My Table screen and check it off when it’s done.
                     To post to a different table, change the table at the top of this page.
                   </p>
                   <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)}

@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
             const result = dryRun ? 'would-send' : await sendPush(sub, {
               title: 'Breakthrough Table',
               body,
-              url: '/tasks',
+              url: '/group',
             })
             if (result === 'expired') {
               // By endpoint, not user_id — one stale device used to unsubscribe
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
         subject: 'Time to check in',
         body,
         ctaLabel: 'Check in',
-        ctaPath: '/tasks',
+        ctaPath: '/group',
         // The body already opens "Hey <name> —".
         greeting: false,
       })

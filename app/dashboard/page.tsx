@@ -249,7 +249,7 @@ export default function DashboardPage() {
                       </div>
                     </Link>
 
-                    <Link href="/tasks" className={row}>
+                    <Link href="/group" className={row}>
                       <span className="text-xl">✅</span>
                       <div className="min-w-0 flex-1">
                         {week.habits.length === 0 ? (
@@ -263,7 +263,7 @@ export default function DashboardPage() {
                     </Link>
 
                     {week.readingLeft && week.readingTotal > 0 && (
-                      <Link href="/tasks" className={row}>
+                      <Link href="/group" className={row}>
                         <span className="text-xl">📖</span>
                         <div className="min-w-0">
                           {week.readingLeft.length === 0 ? (
@@ -311,7 +311,7 @@ export default function DashboardPage() {
 
             <div className="grid grid-cols-2 gap-3">
               {[
-                { href: '/tasks', emoji: '✅', title: 'My Tasks', sub: 'Track & complete' },
+                { href: '/group', emoji: '✅', title: 'My Table', sub: 'Habits, reading & your table' },
                 // /journal had no inbound link anywhere, so reflection prompts
                 // were only reachable by typing the URL.
                 { href: '/journal', emoji: '📓', title: 'Reflections', sub: "Your table's prompts" },

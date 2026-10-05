@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
 
   const text = String((row as any)[textCol] || '').slice(0, 140)
   const copy: Record<Exclude<NotifyKind, 'chat' | 'tc' | 'room' | 'dm' | 'broadcast'>, { title: string; url: string; cta: string }> = {
-    task: { title: '📚 New reading & resources', url: '/tasks', cta: 'See it on My Tasks' },
+    task: { title: '📚 New reading & resources', url: '/group', cta: 'See it on My Table' },
     prompt: { title: '✍️ New reflection prompt', url: '/journal', cta: 'Write your reflection' },
     content: { title: '📖 New in the Library', url: '/library', cta: 'Open the Library' },
   }

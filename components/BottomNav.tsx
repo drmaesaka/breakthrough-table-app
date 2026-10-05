@@ -25,10 +25,10 @@ export default function BottomNav() {
   // Home is the first tab. Tapping the logo top-right also went home, but
   // nobody guessed that (leader feedback 2026-09-21). Leaders lose the Stats
   // tab to make room — Stats is a card on the dashboard instead.
+  // Tasks merged into My Table (2026-10-05): one place for "me and my table".
   const tabs = isLeader
     ? [
         { href: '/dashboard', label: 'Home', icon: <HomeIcon /> },
-        { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
         { href: '/group', label: 'My Table', icon: <GroupIcon /> },
         { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
         { href: '/leaders', label: 'TC Room', icon: <LeaderIcon /> },
@@ -37,7 +37,6 @@ export default function BottomNav() {
       ]
     : [
         { href: '/dashboard', label: 'Home', icon: <HomeIcon /> },
-        { href: '/tasks', label: 'Tasks', icon: <TaskIcon /> },
         { href: '/group', label: 'My Table', icon: <GroupIcon /> },
         { href: '/messages', label: 'Chat', icon: <ChatIcon /> },
         { href: '/library', label: 'Library', icon: <LibraryIcon /> },
@@ -77,13 +76,6 @@ export default function BottomNav() {
   )
 }
 
-function TaskIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
-    </svg>
-  )
-}
 function HomeIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
