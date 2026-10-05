@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
@@ -46,28 +46,6 @@ export default function DashboardPage() {
     attended: number
   } | null>(null)
   const router = useRouter()
-
-  // The member's own goal, pinned on Home: the reason they came, and the
-  // strongest reason to stay. profiles.goal (sql/2026-10-05-member-goal.sql).
-  const [editingGoal, setEditingGoal] = useState(false)
-  const [goalDraft, setGoalDraft] = useState('')
-  const [goalSaving, setGoalSaving] = useState(false)
-  const [goalError, setGoalError] = useState('')
-
-  async function saveGoal() {
-    const goal = goalDraft.trim()
-    if (!profile) return
-    setGoalSaving(true); setGoalError('')
-    // .select() so an update RLS filters to nothing is caught, not reported as saved.
-    const { data, error } = await createClient().from('profiles').update({ goal: goal || null }).eq('id', profile.id).select('goal')
-    setGoalSaving(false)
-    if (error || !data?.length) {
-      setGoalError(error && /goal/.test(error.message) ? "Goals aren't switched on yet. Try again later." : "Couldn't save. Try again.")
-      return
-    }
-    setProfile((p: any) => ({ ...p, goal: goal || null }))
-    setEditingGoal(false)
-  }
 
   async function loadWeek(userId: string, t: MyTable) {
     const supabase = createClient()
@@ -258,46 +236,17 @@ export default function DashboardPage() {
               const challenges = upcoming?.challenges || []
               const resources = upcoming?.resources || []
               const readingLeft = week.readingLeft || []
-              const hasPrep = resources.length > 0 || readingLeft.length > 0 || !!week.prompt
+              // Everything to do before the meeting, most personal first; Home shows two.
+              const prep: { key: string; icon: string; href?: string; body: ReactNode }[] = [
+                ...(week.prompt ? [{ key: 'prompt', icon: '🪞', href: '/journal', body: <><p className="text-sm font-semibold text-bt-navy">Answer the reflection</p><p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p></> }] : []),
+                ...(readingLeft.length ? [{ key: 'reading', icon: '📖', href: '/group', body: <><p className="text-sm font-semibold text-bt-navy">{readingLeft.length} to read</p><p className="text-xs text-gray-500 mt-0.5 truncate">{readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p></> }] : []),
+                ...resources.map((r, i) => ({ key: `res-${i}`, icon: '📎', body: <p className="text-sm text-gray-800 leading-snug break-words">{linkify(r)}</p> })),
+              ]
               const dateLine = nextDate
                 ? isToday ? 'Your table meets today' : nextDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
                 : null
               return (
                 <>
-                {/* Your goal — personal, so it shows whichever table is picked. */}
-                <div className="bg-bt-navy rounded-2xl p-5 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <p className="text-bt-light/70 text-xs font-bold uppercase tracking-wide">🎯 Your goal</p>
-                    {profile?.goal && !editingGoal && (
-                      <button onClick={() => { setGoalDraft(profile.goal); setEditingGoal(true); setGoalError('') }} className="text-bt-light/70 text-xs font-semibold">Edit</button>
-                    )}
-                  </div>
-                  {editingGoal || !profile?.goal ? (
-                    editingGoal ? (
-                      <div className="mt-2 space-y-2">
-                        <textarea autoFocus value={goalDraft} onChange={e => setGoalDraft(e.target.value)} rows={3} maxLength={300}
-                          placeholder="e.g. Grow my business to $1M while being home for dinner every night"
-                          className="w-full rounded-xl px-3 py-2 text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-bt-light" />
-                        <div className="flex gap-2">
-                          <button onClick={saveGoal} disabled={goalSaving}
-                            className="flex-1 bg-white text-bt-navy py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40">
-                            {goalSaving ? 'Saving...' : 'Save goal'}
-                          </button>
-                          <button onClick={() => { setEditingGoal(false); setGoalError('') }} className="px-4 text-bt-light/70 text-sm">Cancel</button>
-                        </div>
-                        {goalError && <p className="text-xs text-red-300">{goalError}</p>}
-                      </div>
-                    ) : (
-                      <button onClick={() => { setGoalDraft(''); setEditingGoal(true) }} className="mt-1 text-left">
-                        <p className="text-white font-semibold">What are you here for?</p>
-                        <p className="text-bt-light/70 text-sm mt-0.5">Write the goal from your goal card. It stays pinned here. <span className="text-white">Add it →</span></p>
-                      </button>
-                    )
-                  ) : (
-                    <p className="text-white text-lg font-semibold mt-1 leading-snug">{profile.goal}</p>
-                  )}
-                </div>
-
                 <div className="bg-white rounded-2xl p-5 shadow-sm">
                   <p className="text-gray-400 text-xs font-medium">{groupName}</p>
                   <Link href="/meetings" className="block mt-0.5">
@@ -318,61 +267,47 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  {hasPrep && (
+                  {prep.length > 0 && (
                     <div className="mt-4">
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Before your next meeting</p>
                       <div className="mt-1 divide-y divide-gray-100">
-                        {resources.slice(0, 3).map((r, i) => (
-                          <div key={i} className={row}>
-                            <span className="text-lg">📎</span>
-                            <p className="text-sm text-gray-800 leading-snug break-words">{linkify(r)}</p>
+                        {prep.slice(0, 2).map(item => item.href ? (
+                          <Link key={item.key} href={item.href} className={row}>
+                            <span className="text-lg">{item.icon}</span>
+                            <div className="min-w-0">{item.body}</div>
+                          </Link>
+                        ) : (
+                          <div key={item.key} className={row}>
+                            <span className="text-lg">{item.icon}</span>
+                            <div className="min-w-0">{item.body}</div>
                           </div>
                         ))}
-                        {resources.length > 3 && (
-                          <Link href="/meetings" className="block py-2 text-xs text-bt-blue font-medium">+{resources.length - 3} more resources in the outline →</Link>
-                        )}
-                        {readingLeft.length > 0 && (
-                          <Link href="/group" className={row}>
-                            <span className="text-lg">📖</span>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-bt-navy">{readingLeft.length} to read</p>
-                              <p className="text-xs text-gray-500 mt-0.5 truncate">{readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p>
-                            </div>
-                          </Link>
-                        )}
-                        {week.prompt && (
-                          <Link href="/journal" className={row}>
-                            <span className="text-lg">🪞</span>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-bt-navy">Answer the reflection</p>
-                              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p>
-                            </div>
-                          </Link>
-                        )}
                       </div>
+                      {prep.length > 2 && (
+                        <Link href="/meetings" className="block pt-1 text-xs text-bt-blue font-medium">See {prep.length - 2} more for this meeting →</Link>
+                      )}
                     </div>
                   )}
 
-                  <div className="mt-3 divide-y divide-gray-100 border-t border-gray-100">
-                    <Link href="/group" className={row}>
+                  {(week.habits.length > 0 || missed) && <div className="mt-3 divide-y divide-gray-100 border-t border-gray-100">
+                    {/* No "pick a habit" prompt: habits come much later in the programme. */}
+                    {week.habits.length > 0 && <Link href="/group" className={row}>
                       <span className="text-lg">✅</span>
                       <div className="min-w-0 flex-1">
-                        {week.habits.length === 0 ? (
-                          <p className="text-sm font-semibold text-bt-navy">Pick a habit to work on <span className="text-bt-blue">→</span></p>
-                        ) : week.habits.map(h => (
+                        {week.habits.map(h => (
                           <p key={h.id} className={`text-sm ${h.done ? 'text-gray-400' : 'font-semibold text-bt-navy'}`}>
                             {h.done ? '✓' : '○'} {h.name} <span className="text-xs font-normal text-gray-400">{h.done ? 'done' : h.freq === 'daily' ? 'today' : h.freq === 'weekly' ? 'this week' : 'this month'}</span>
                           </p>
                         ))}
                       </div>
-                    </Link>
+                    </Link>}
                     {missed && (
                       <Link href="/meetings" className={row}>
                         <span className="text-lg">↩️</span>
                         <p className="text-xs text-gray-500">Missed Meeting {missed.number} · {missed.title}. <span className="text-bt-blue font-medium">Ask your TC to catch up →</span></p>
                       </Link>
                     )}
-                  </div>
+                  </div>}
 
                   {(profile?.streak > 0 || week.attended > 0 || week.reflections > 0) && (
                     <p className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400">
