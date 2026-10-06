@@ -245,12 +245,15 @@ export default function AnalyticsPage() {
                               <span className={`text-xs font-medium ${member.habitDone ? 'text-green-500' : 'text-gray-300'}`}>
                                 {member.habitDone ? '✓ habit' : '○ habit'}
                               </span>
-                              <span className="text-gray-200">·</span>
-                              <span className={`text-xs font-medium ${member.readingDone ? 'text-green-500' : 'text-gray-300'}`}>
-                                {member.readingCount === 0
-                                  ? '– no reading set'
-                                  : member.readingDone ? `✓ reading ${member.readingDoneCount}/${member.readingCount}` : `○ reading ${member.readingDoneCount}/${member.readingCount}`}
-                              </span>
+                              {/* No reading posted: say nothing (it once showed a false ✓). */}
+                              {member.readingCount > 0 && (
+                                <>
+                                  <span className="text-gray-200">·</span>
+                                  <span className={`text-xs font-medium ${member.readingDone ? 'text-green-500' : 'text-gray-300'}`}>
+                                    {member.readingDone ? '✓' : '○'} reading {member.readingDoneCount}/{member.readingCount}
+                                  </span>
+                                </>
+                              )}
                               {member.habitNames?.length > 0 && (
                                 <>
                                   <span className="text-gray-200">·</span>
