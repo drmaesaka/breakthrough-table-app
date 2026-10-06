@@ -14,7 +14,7 @@ const EDITABLE: Record<string, string[]> = {
   // that table only. Changing it is allowed only to null or to one of the
   // caller's own tables (checked below), so an event cannot be handed to
   // another TC's table.
-  events: ['title', 'description', 'event_date', 'event_type', 'location', 'virtual_link',
+  events: ['title', 'description', 'event_date', 'end_date', 'event_type', 'location', 'virtual_link',
            'notifications_enabled', 'followup_message', 'group_id'],
   journal_prompts: ['prompt'],
   // A table's name was fixed at creation, so a typo lived forever. Name only:

@@ -24,8 +24,9 @@ export async function POST(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
   const body = await req.json().catch(() => ({}))
-  const { title, description, event_date, event_type, location, virtual_link, group_id } = body
+  const { title, description, event_date, end_date, event_type, location, virtual_link, group_id } = body
   if (!title?.trim() || !event_date) return NextResponse.json({ error: 'title and event_date are required' }, { status: 400 })
+  if (end_date && !(new Date(end_date) > new Date(event_date))) return NextResponse.json({ error: 'The end time has to be after the start' }, { status: 400 })
   if (group_id) {
     const mine = await leaderGroupIds(auth.userId)
     if (!mine.includes(group_id)) return NextResponse.json({ error: 'You can only limit an event to a table you lead' }, { status: 403 })
@@ -34,6 +35,8 @@ export async function POST(req: NextRequest) {
     title: String(title).trim(),
     description: description || null,
     event_date,
+    // Only sent when set, so the insert works before the end-time migration.
+    ...(end_date ? { end_date } : {}),
     event_type: event_type === 'virtual' ? 'virtual' : 'in_person',
     location: location || null,
     virtual_link: virtual_link || null,

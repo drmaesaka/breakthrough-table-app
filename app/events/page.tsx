@@ -119,7 +119,7 @@ export default function EventsPage() {
                       )}
                     </div>
                     <h3 className="font-bold text-gray-900 text-base leading-tight">{event.title}</h3>
-                    <p className="text-gray-400 text-xs mt-1">{formatDate(event.event_date)} · {formatTime(event.event_date)}</p>
+                    <p className="text-gray-400 text-xs mt-1">{formatDate(event.event_date)} · {formatTime(event.event_date)}{event.end_date ? ` – ${formatTime(event.end_date)}` : ''}</p>
                     {event.location && !isVirtual && (
                       <p className="text-gray-500 text-sm mt-1">📍 {event.location}</p>
                     )}

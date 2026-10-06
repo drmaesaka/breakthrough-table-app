@@ -1,3 +1,4 @@
+import { eventWhen } from '@/lib/event-time'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendPush } from '@/lib/send-push'
@@ -25,6 +26,7 @@ type EventRow = {
   id: string
   title: string
   event_date: string
+  end_date?: string | null
   group_id: string | null
   event_type: string | null
   location: string | null
@@ -61,7 +63,8 @@ export async function POST(req: NextRequest) {
     'send-event-notices: events',
     () => supabase
       .from('events')
-      .select('id, title, event_date, group_id, event_type, location, notifications_enabled, announced_at, reminder_24h_sent_at, reminder_1h_sent_at, followup_sent_at, followup_message')
+      // '*' so end_date is picked up when present, without failing before its migration.
+      .select('*')
       .gte('event_date', new Date(now - 36 * HOUR).toISOString())
       .order('event_date', { ascending: true })
   )
@@ -199,11 +202,7 @@ export async function POST(req: NextRequest) {
   }
 
   function when(event: EventRow) {
-    return new Date(event.event_date).toLocaleString('en-US', {
-      timeZone: 'America/Chicago',
-      weekday: 'short', month: 'short', day: 'numeric',
-      hour: 'numeric', minute: '2-digit',
-    })
+    return eventWhen(event.event_date, event.end_date, 'America/Chicago')
   }
 
   for (const event of live) {

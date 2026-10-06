@@ -1,4 +1,5 @@
 'use client'
+import { eventWhen, endFromTime } from '@/lib/event-time'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -340,6 +341,7 @@ export default function AdminPage() {
   const [eventTitle, setEventTitle] = useState('')
   const [eventDesc, setEventDesc] = useState('')
   const [eventDate, setEventDate] = useState('')
+  const [eventEnd, setEventEnd] = useState('')
   const [eventType, setEventType] = useState('in_person')
   /** Who sees the event: everyone in BT (the default) or the selected table only. */
   const [eventAudience, setEventAudience] = useState<'all' | 'table'>('all')
@@ -829,6 +831,8 @@ export default function AdminPage() {
 
   async function addEvent() {
     if (!eventTitle.trim() || !eventDate) return
+    const end = endFromTime(eventDate, eventEnd)
+    if (end && end <= new Date(eventDate)) { alert('The end time has to be after the start.'); return }
     setEventSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -839,6 +843,7 @@ export default function AdminPage() {
       // UTC and every viewer saw the wrong hour. Convert to a real instant in
       // the leader's timezone at save time.
       event_date: new Date(eventDate).toISOString(),
+      ...(end ? { end_date: end.toISOString() } : {}),
       event_type: eventType,
       location: eventType === 'in_person' ? eventLocation.trim() || null : null,
       virtual_link: eventType === 'virtual' ? eventLink.trim() || null : null,
@@ -851,7 +856,7 @@ export default function AdminPage() {
     const json = await res.json().catch(() => ({}))
     setEventSaving(false)
     if (!res.ok) { alert(`Could not add the event: ${json.error || res.status}`); return }
-    setEventTitle(''); setEventDesc(''); setEventDate(''); setEventLocation(''); setEventLink('')
+    setEventTitle(''); setEventDesc(''); setEventDate(''); setEventEnd(''); setEventLocation(''); setEventLink('')
     loadEvents()
   }
 
@@ -860,9 +865,19 @@ export default function AdminPage() {
     setEditSaving(true)
     // The event date input holds a local datetime-local string; store it as a
     // real UTC instant, same as addEvent.
-    const payload = editing.table === 'events' && editing.fields.event_date
-      ? { ...editing, fields: { ...editing.fields, event_date: new Date(editing.fields.event_date).toISOString() } }
-      : editing
+    let payload: any = editing
+    if (editing.table === 'events' && editing.fields.event_date) {
+      // end_time is the form's "HH:MM"; the row stores end_date. Left out
+      // entirely when there was none and still is none.
+      const { end_time, had_end, ...rest } = editing.fields
+      const end = endFromTime(editing.fields.event_date, end_time || '')
+      if (end && end <= new Date(editing.fields.event_date)) { setEditSaving(false); alert('The end time has to be after the start.'); return }
+      payload = { ...editing, fields: {
+        ...rest,
+        event_date: new Date(editing.fields.event_date).toISOString(),
+        ...(end || had_end ? { end_date: end ? end.toISOString() : null } : {}),
+      } }
+    }
     const res = await fetch('/api/admin/edit-item', {
       method: 'PATCH',
       headers: await authHeaders(),
@@ -2324,8 +2339,18 @@ export default function AdminPage() {
               <textarea value={eventDesc} onChange={e => setEventDesc(e.target.value)}
                 placeholder="Description (optional)" rows={2}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue resize-none" />
-              <input type="datetime-local" value={eventDate} onChange={e => setEventDate(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+              <div className="flex gap-2 items-end">
+                <label className="flex-[2] min-w-0">
+                  <span className="text-xs text-gray-400 font-medium">Starts</span>
+                  <input type="datetime-local" value={eventDate} onChange={e => setEventDate(e.target.value)}
+                    className="w-full px-3 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                </label>
+                <label className="flex-1 min-w-0">
+                  <span className="text-xs text-gray-400 font-medium">Ends (optional)</span>
+                  <input type="time" value={eventEnd} onChange={e => setEventEnd(e.target.value)}
+                    className="w-full px-3 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                </label>
+              </div>
               <div className="flex gap-2">
                 {['in_person', 'virtual'].map(t => (
                   <button key={t} onClick={() => setEventType(t)}
@@ -2370,9 +2395,20 @@ export default function AdminPage() {
                     <textarea value={editing.fields.description || ''} rows={2}
                       onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, description: e.target.value } }))}
                       className={`${inputClass} resize-none`} placeholder="Description" />
-                    <input type="datetime-local" value={editing.fields.event_date || ''}
-                      onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, event_date: e.target.value } }))}
-                      className={inputClass} />
+                    <div className="flex gap-2 items-end">
+                      <label className="flex-[2] min-w-0">
+                        <span className="text-xs text-gray-400 font-medium">Starts</span>
+                        <input type="datetime-local" value={editing.fields.event_date || ''}
+                          onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, event_date: e.target.value } }))}
+                          className={inputClass} />
+                      </label>
+                      <label className="flex-1 min-w-0">
+                        <span className="text-xs text-gray-400 font-medium">Ends (optional)</span>
+                        <input type="time" value={editing.fields.end_time || ''}
+                          onChange={e => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, end_time: e.target.value } }))}
+                          className={inputClass} />
+                      </label>
+                    </div>
                     <div className="flex gap-2">
                       {['in_person', 'virtual'].map(t => (
                         <button key={t} onClick={() => setEditing(ed => ed && ({ ...ed, fields: { ...ed.fields, event_type: t } }))}
@@ -2420,7 +2456,7 @@ export default function AdminPage() {
                       <span className="text-xs font-medium text-gray-400">{event.event_type === 'virtual' ? '💻' : '📍'}</span>
                       <p className="font-semibold text-gray-900 text-sm">{event.title}</p>
                     </div>
-                    <p className="text-xs text-gray-400">{new Date(event.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
+                    <p className="text-xs text-gray-400">{eventWhen(event.event_date, event.end_date)}</p>
                     {event.location && <p className="text-xs text-gray-400 mt-0.5">📍 {event.location}</p>}
                     {event.virtual_link && <p className="text-xs text-bt-blue mt-0.5 truncate">{event.virtual_link}</p>}
                     {/* Who signed up. Leaders asked; the tab showed events
@@ -2488,6 +2524,7 @@ export default function AdminPage() {
                   </div>
                   <button onClick={() => setEditing({ table: 'events', id: event.id, fields: {
                     title: event.title, description: event.description || '', event_date: toLocalInput(event.event_date),
+                    end_time: event.end_date ? toLocalInput(event.end_date).slice(11) : '', had_end: !!event.end_date,
                     event_type: event.event_type, location: event.location || '', virtual_link: event.virtual_link || '',
                     notifications_enabled: event.notifications_enabled !== false,
                     followup_message: event.followup_message || '',
