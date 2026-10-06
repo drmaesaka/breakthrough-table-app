@@ -169,7 +169,8 @@ export default function GroupPage() {
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
-        <div className="flex items-start justify-between gap-3">
+        {/* pr-10: the top-right corner belongs to the notifications bell. */}
+        <div className="flex items-start justify-between gap-3 pr-10">
           <div className="min-w-0">
             <h1 className="text-white text-2xl font-bold truncate">{groupName}</h1>
             <p className="text-bt-light/60 text-sm mt-0.5">{members.length} {members.length === 1 ? 'person' : 'people'} at the table</p>

@@ -130,7 +130,8 @@ export default function RoomPage() {
   return (
     <div style={{ height: '100dvh' }} className="bg-bt-pale flex flex-col">
       <div className="bg-bt-navy px-5 pt-14 pb-4 flex-shrink-0">
-        <div className="flex items-center gap-3">
+        {/* pr-10: the top-right corner belongs to the notifications bell. */}
+        <div className="flex items-center gap-3 pr-10">
           <Link href="/messages" className="text-white/70 active:text-white p-1 -ml-1">
             <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
           </Link>

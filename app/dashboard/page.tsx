@@ -156,7 +156,8 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-bt-pale">
       {profile && <WelcomeScreen userId={profile.id} firstName={firstName} />}
       <div className="bg-bt-navy px-5 pt-16 pb-8">
-        <div className="flex items-start justify-between">
+        {/* The top-right corner belongs to the notifications bell. */}
+        <div className="flex items-start justify-between pr-10">
           <div>
             <p className="text-bt-light text-sm font-medium">Welcome back,</p>
             <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
@@ -167,12 +168,6 @@ export default function DashboardPage() {
               </select>
             ) : groupName && <p className="text-bt-light/70 text-sm mt-1">🪑 Your table: <span className="text-white font-semibold">{groupName}</span></p>}
           </div>
-          <Link href="/profile"
-            className="mt-1 w-9 h-9 rounded-full bg-white/15 flex items-center justify-center">
-            <span className="text-white text-xs font-bold">
-              {(() => { const parts = (profile?.full_name || '').trim().split(' '); return parts.length >= 2 ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase() : firstName.slice(0,2).toUpperCase() })()}
-            </span>
-          </Link>
         </div>
       </div>
 

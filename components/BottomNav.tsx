@@ -69,7 +69,9 @@ export default function BottomNav() {
           first tab. Hidden on the inbox itself. */}
       {pathname !== '/notifications' && (
         <Link href="/notifications" aria-label={unread ? `${unread} unread notifications` : 'Notifications'}
-          className="fixed top-4 right-4 z-50 w-9 h-9 bg-bt-navy/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform">
+          // Below the status bar: at a fixed top-4 it sat on the battery icon.
+          style={{ top: 'max(1rem, calc(env(safe-area-inset-top) + 0.5rem))' }}
+          className="fixed right-4 z-50 w-9 h-9 bg-bt-navy/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform">
           <BellIcon />
           {unread > 0 && (
             <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
