@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase'
 export default function BottomNav() {
   const pathname = usePathname()
   const [isLeader, setIsLeader] = useState(false)
+  const [unread, setUnread] = useState(0)
 
   useEffect(() => {
     async function checkRole() {
@@ -18,6 +19,24 @@ export default function BottomNav() {
     }
     checkRole()
   }, [])
+
+  // Unread count for the bell: on every screen change and when the app comes
+  // back to the foreground (an installed PWA resumes without reloading).
+  useEffect(() => {
+    let alive = true
+    async function refresh() {
+      try {
+        const { data: { session } } = await createClient().auth.getSession()
+        if (!session?.access_token) return
+        const res = await fetch('/api/notifications?count=1', { headers: { Authorization: `Bearer ${session.access_token}` } })
+        if (res.ok && alive) setUnread((await res.json()).unread || 0)
+      } catch { /* the bell just shows no number */ }
+    }
+    refresh()
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { alive = false; document.removeEventListener('visibilitychange', onVisible) }
+  }, [pathname])
 
   // Leaders get My Table too. Without it a TC had no way to see their own
   // table the way their members see it, and no way to check what a member
@@ -45,14 +64,18 @@ export default function BottomNav() {
 
   return (
     <>
-      {/* Floating home button — hidden on dashboard itself */}
-      {pathname !== '/dashboard' && (
-        <Link href="/dashboard"
-          className="fixed top-4 right-4 z-50 bg-bt-navy/90 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-lg flex flex-col active:scale-95 transition-transform">
-          <div>
-            <span className="text-white text-xs font-normal">break</span><span className="text-white text-xs font-bold">through</span>
-          </div>
-          <div className="text-bt-light text-xs font-normal text-right -mt-0.5">table</div>
+      {/* Notifications bell, top right. It replaced a "breakthrough table"
+          logo that went Home, which nobody guessed (2026-10-06); Home is the
+          first tab. Hidden on the inbox itself. */}
+      {pathname !== '/notifications' && (
+        <Link href="/notifications" aria-label={unread ? `${unread} unread notifications` : 'Notifications'}
+          className="fixed top-4 right-4 z-50 w-9 h-9 bg-bt-navy/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center active:scale-95 transition-transform">
+          <BellIcon />
+          {unread > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+              {unread > 99 ? '99+' : unread}
+            </span>
+          )}
         </Link>
       )}
 
@@ -150,6 +173,13 @@ function AdminIcon() {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="3"/>
       <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+    </svg>
+  )
+}
+function BellIcon() {
+  return (
+    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
     </svg>
   )
 }

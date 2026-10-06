@@ -64,6 +64,14 @@ export async function notifyMembers(admin: any, args: {
   const skipped = recipients.length - wanted.length
   if (!wanted.length) return { pushed: 0, emailed: 0, skipped }
 
+  // The in-app inbox gets everything that would ping, push or not — it is
+  // how members without push see what they missed. Before the 2026-10-06
+  // migration the table is missing: log and carry on delivering.
+  const { error: inboxError } = await admin.from('notifications').insert(
+    wanted.map(user_id => ({ user_id, kind: args.kind, title: args.title, body: args.body.slice(0, 500), url: args.url }))
+  )
+  if (inboxError) console.error('notify: inbox write failed:', inboxError.message)
+
   const { data: subs } = await admin.from('push_subscriptions').select('*').in('user_id', wanted)
   const subsByUser = new Map<string, any[]>()
   for (const s of subs || []) subsByUser.set(s.user_id, [...(subsByUser.get(s.user_id) || []), s])
