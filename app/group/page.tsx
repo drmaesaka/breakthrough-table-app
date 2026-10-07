@@ -6,6 +6,7 @@ import BottomNav from '@/components/BottomNav'
 import Link from 'next/link'
 import Avatar from '@/components/Avatar'
 import MyTasks from '@/components/MyTasks'
+import TableChat from '@/components/TableChat'
 import { notifyAbout } from '@/lib/notify-client'
 
 type Detail = {
@@ -16,8 +17,9 @@ type Detail = {
   prompts_answered: number; push_enabled: boolean
 }
 
-// My Table: "You" (your habits and reading — the old Tasks tab, merged in
-// 2026-10-05) then "Your table" (who is there). No percentages or medals for
+// My Table, the table's home page, in three tabs: Chat (table chat, moved
+// here from the Chat tab 2026-10-07), You (your habits and reading — the old
+// Tasks tab, merged in 2026-10-05) and People (who is there). No percentages or medals for
 // members: nothing here should look finished. A TC also gets the send card,
 // every member expandable into their habits, reading, attendance, prompts
 // and whether notifications reach them (leader feedback 2026-09-29), and a
@@ -33,6 +35,7 @@ export default function GroupPage() {
   const [homeGroupId, setHomeGroupId] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ members: Detail[]; tasks_total: number; prompts_total: number } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'you' | 'people'>('chat')
   // TC quick-send: a prompt or a message to the selected table, and a
   // personal nudge to one member — without a trip to Admin.
   const [sendMode, setSendMode] = useState<'prompt' | 'message' | null>(null)
@@ -75,6 +78,9 @@ export default function GroupPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
       setCurrentUserId(user.id)
+      // Links can open a tab directly: /group?tab=you from a habit nudge.
+      const want = new URLSearchParams(window.location.search).get('tab')
+      if (want === 'you' || want === 'people' || want === 'chat') setView(want)
 
       const { data: prof } = await supabase
         .from('profiles').select('group_id, role, groups(name)').eq('id', user.id).single()
@@ -91,9 +97,14 @@ export default function GroupPage() {
         all = [...all, ...led.filter((g: any) => g.id !== home).map((g: any) => ({ id: g.id, name: g.name }))]
       }
       setTables(all)
-      const first = all[0]?.id || null
+      // ?table=<id> from a chat notification opens that table, if it is one of mine.
+      const wantTable = new URLSearchParams(window.location.search).get('table')
+      const first = (wantTable && all.find(t => t.id === wantTable)?.id) || all[0]?.id || null
       if (!first) { router.push('/dashboard'); return }
       setGroupId(first)
+      const firstName = all.find(t => t.id === first)?.name
+      if (firstName) setGroupName(firstName)
+      if (first !== home) setView(v => v === 'you' ? 'chat' : v)
       await loadTable(first, leader)
       setLoading(false)
     }
@@ -147,6 +158,7 @@ export default function GroupPage() {
 
   async function switchTable(gid: string) {
     setGroupId(gid); setDetail(null); setOpen(null)
+    if (gid !== homeGroupId) setView(v => v === 'you' ? 'chat' : v)
     setSendMode(null); setSendText(''); setSendNote(''); setNudgeText(''); setNudgeNote(null)
     const t = tables.find(x => x.id === gid); if (t) setGroupName(t.name)
     await loadTable(gid, isLeader)
@@ -166,9 +178,12 @@ export default function GroupPage() {
 
   const detailById = new Map((detail?.members || []).map(m => [m.id, m]))
 
+  const onHome = groupId === homeGroupId
+  const tabs = ([['chat', '💬 Chat'], ['you', '✅ You'], ['people', '👥 People']] as const).filter(([k]) => k !== 'you' || onHome)
+
   return (
-    <div className="min-h-screen bg-bt-pale">
-      <div className="bg-bt-navy px-5 pt-16 pb-6">
+    <div style={{ height: '100dvh' }} className="bg-bt-pale flex flex-col">
+      <div className="bg-bt-navy px-5 pt-16 pb-0 flex-shrink-0">
         {/* pr-10: the top-right corner belongs to the notifications bell. */}
         <div className="flex items-start justify-between gap-3 pr-10">
           <div className="min-w-0">
@@ -187,19 +202,33 @@ export default function GroupPage() {
             {tables.map(t => <option key={t.id} value={t.id} className="text-gray-900">{t.name}{t.id === homeGroupId ? ' (your table)' : ''}</option>)}
           </select>
         )}
-        {isLeader && detail && (
-          <p className="text-bt-light/60 text-[11px] mt-2">TC view: tap a member for their habits, reading, attendance and more.</p>
-        )}
+        <div className="flex gap-1 mt-4">
+          {tabs.map(([k, label]) => (
+            <button key={k} onClick={() => setView(k)}
+              className={`px-3.5 py-2 rounded-t-xl text-sm font-semibold transition-colors ${
+                view === k ? 'bg-bt-pale text-bt-navy' : 'text-white/60 hover:text-white/80'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-3">
-        {/* You — only on the table you sit at: your reading belongs to it. */}
-        {groupId === homeGroupId && (
-          <>
-            <p className="text-sm font-bold text-bt-navy px-1">You</p>
-            <MyTasks />
-            <p className="text-sm font-bold text-bt-navy px-1 pt-4">Your table</p>
-          </>
+      {view === 'chat' && groupId && (
+        <TableChat groupId={groupId} groupName={groupName} homeGroupId={homeGroupId} userId={currentUserId} />
+      )}
+
+      {/* You — only on the table you sit at: your reading belongs to it. */}
+      {view === 'you' && onHome && (
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-28">
+          <MyTasks />
+        </div>
+      )}
+
+      {view === 'people' && (
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-28 space-y-3">
+        {isLeader && detail && (
+          <p className="text-gray-400 text-xs px-1">TC view: tap a member for their habits, reading, attendance and more.</p>
         )}
 
         {isLeader && detail && (
@@ -312,6 +341,7 @@ export default function GroupPage() {
           <p className="text-center text-gray-400 text-sm py-8">No members in this group yet.</p>
         )}
       </div>
+      )}
       <BottomNav />
     </div>
   )

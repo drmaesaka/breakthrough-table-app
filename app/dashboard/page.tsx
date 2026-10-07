@@ -234,7 +234,7 @@ export default function DashboardPage() {
               // Everything to do before the meeting, most personal first; Home shows two.
               const prep: { key: string; icon: string; href?: string; body: ReactNode }[] = [
                 ...(week.prompt ? [{ key: 'prompt', icon: '🪞', href: '/journal', body: <><p className="text-sm font-semibold text-bt-navy">Answer the reflection</p><p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p></> }] : []),
-                ...(readingLeft.length ? [{ key: 'reading', icon: '📖', href: '/group', body: <><p className="text-sm font-semibold text-bt-navy">{readingLeft.length} to read</p><p className="text-xs text-gray-500 mt-0.5 truncate">{readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p></> }] : []),
+                ...(readingLeft.length ? [{ key: 'reading', icon: '📖', href: '/group?tab=you', body: <><p className="text-sm font-semibold text-bt-navy">{readingLeft.length} to read</p><p className="text-xs text-gray-500 mt-0.5 truncate">{readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p></> }] : []),
                 ...resources.map((r, i) => ({ key: `res-${i}`, icon: '📎', body: <p className="text-sm text-gray-800 leading-snug break-words">{linkify(r)}</p> })),
               ]
               const dateLine = nextDate
@@ -286,7 +286,7 @@ export default function DashboardPage() {
 
                   {(week.habits.length > 0 || missed) && <div className="mt-3 divide-y divide-gray-100 border-t border-gray-100">
                     {/* No "pick a habit" prompt: habits come much later in the programme. */}
-                    {week.habits.length > 0 && <Link href="/group" className={row}>
+                    {week.habits.length > 0 && <Link href="/group?tab=you" className={row}>
                       <span className="text-lg">✅</span>
                       <div className="min-w-0 flex-1">
                         {week.habits.map(h => (
@@ -320,7 +320,7 @@ export default function DashboardPage() {
 
             <div className="grid grid-cols-2 gap-3">
               {[
-                { href: '/group', emoji: '✅', title: 'My Table', sub: 'Habits, reading & your table' },
+                { href: '/group', emoji: '✅', title: 'My Table', sub: 'Chat, habits & reading' },
                 // /journal had no inbound link anywhere, so reflection prompts
                 // were only reachable by typing the URL.
                 { href: '/journal', emoji: '📓', title: 'Reflections', sub: "Your table's prompts" },

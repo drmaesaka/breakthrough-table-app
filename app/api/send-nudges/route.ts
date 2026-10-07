@@ -381,7 +381,7 @@ export async function POST(req: NextRequest) {
             subject: 'Your Breakthrough Table nudge',
             body: message,
             ctaLabel: 'Open your tasks',
-            ctaPath: '/group',
+            ctaPath: '/group?tab=you',
             greeting: false,
           })
           const res = dryRun ? null : await sendEmail({ to, ...msg })
@@ -399,7 +399,7 @@ export async function POST(req: NextRequest) {
           subs.map(async sub => {
             const res = dryRun
               ? 'would-send'
-              : await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/group' })
+              : await sendPush(sub, { title: 'Breakthrough Table', body: message, url: '/group?tab=you' })
             if (res === 'expired') {
               // Drop the one dead device. Deleting by user_id unsubscribed the
               // member entirely because one of their devices went stale.
