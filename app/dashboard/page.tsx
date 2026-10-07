@@ -41,8 +41,6 @@ export default function DashboardPage() {
     /** null on a table the TC leads but does not sit at: not theirs to do. */
     readingLeft: { id: string; title: string }[] | null
     readingTotal: number
-    prompt: { id: string; prompt: string } | null
-    reflections: number
     attended: number
   } | null>(null)
   const router = useRouter()
@@ -50,15 +48,12 @@ export default function DashboardPage() {
   async function loadWeek(userId: string, t: MyTable) {
     const supabase = createClient()
     const fiveWeeksAgo = localDay(new Date(Date.now() - 35 * 86400000))
-    const [{ data: habits }, { data: hc }, { count: reflections }, { count: attended }, tasksRes, doneRes, promptsRes, myRespRes] = await Promise.all([
+    const [{ data: habits }, { data: hc }, { count: attended }, tasksRes, doneRes] = await Promise.all([
       supabase.from('habits').select('id, name, frequency').eq('user_id', userId).is('archived_at', null).order('created_at', { ascending: true }),
       supabase.from('habit_completions').select('habit_id, completed_date').eq('user_id', userId).gte('completed_date', fiveWeeksAgo),
-      supabase.from('journal_responses').select('prompt_id', { count: 'exact', head: true }).eq('user_id', userId),
       supabase.from('meeting_attendance').select('user_id', { count: 'exact', head: true }).eq('user_id', userId),
       t.home ? supabase.from('tasks').select('id, title').eq('group_id', t.id).eq('archived', false).order('created_at', { ascending: true }) : Promise.resolve({ data: null }),
       t.home ? supabase.from('task_completions').select('task_id').eq('user_id', userId) : Promise.resolve({ data: null }),
-      t.home ? supabase.from('journal_prompts').select('id, prompt').eq('group_id', t.id).order('created_at', { ascending: false }).limit(10) : Promise.resolve({ data: null }),
-      t.home ? supabase.from('journal_responses').select('prompt_id').eq('user_id', userId) : Promise.resolve({ data: null }),
     ])
     const today = localDay()
     const dates = new Map<string, Set<string>>()
@@ -67,14 +62,11 @@ export default function DashboardPage() {
       dates.set(c.habit_id, (dates.get(c.habit_id) ?? new Set<string>()).add(c.completed_date))
     }
     const doneIds = new Set((doneRes.data || []).map((r: any) => r.task_id))
-    const answered = new Set((myRespRes.data || []).map((r: any) => r.prompt_id))
     const tasks = (tasksRes.data || []) as { id: string; title: string }[]
     setWeek({
       habits: (habits || []).map((h: any) => ({ id: h.id, name: h.name, freq: freqOf(h), done: doneInPeriod(dates.get(h.id) ?? new Set(), freqOf(h), today) })),
       readingLeft: t.home ? tasks.filter(x => !doneIds.has(x.id)) : null,
       readingTotal: tasks.length,
-      prompt: ((promptsRes.data || []) as { id: string; prompt: string }[]).find(p => !answered.has(p.id)) || null,
-      reflections: reflections || 0,
       attended: attended || 0,
     })
   }
@@ -233,7 +225,6 @@ export default function DashboardPage() {
               const readingLeft = week.readingLeft || []
               // Everything to do before the meeting, most personal first; Home shows two.
               const prep: { key: string; icon: string; href?: string; body: ReactNode }[] = [
-                ...(week.prompt ? [{ key: 'prompt', icon: '🪞', href: '/journal', body: <><p className="text-sm font-semibold text-bt-navy">Answer the reflection</p><p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{week.prompt.prompt}</p></> }] : []),
                 ...(readingLeft.length ? [{ key: 'reading', icon: '📖', href: '/group?tab=you', body: <><p className="text-sm font-semibold text-bt-navy">{readingLeft.length} to read</p><p className="text-xs text-gray-500 mt-0.5 truncate">{readingLeft.slice(0, 2).map(r => r.title).join(' · ')}</p></> }] : []),
                 ...resources.map((r, i) => ({ key: `res-${i}`, icon: '📎', body: <p className="text-sm text-gray-800 leading-snug break-words">{linkify(r)}</p> })),
               ]
@@ -304,12 +295,11 @@ export default function DashboardPage() {
                     )}
                   </div>}
 
-                  {(profile?.streak > 0 || week.attended > 0 || week.reflections > 0) && (
+                  {(profile?.streak > 0 || week.attended > 0) && (
                     <p className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400">
                       {[
                         profile?.streak > 0 && `🔥 ${profile.streak} period streak`,
                         week.attended > 0 && `🪑 ${week.attended} table${week.attended === 1 ? '' : 's'} attended`,
-                        week.reflections > 0 && `🪞 ${week.reflections} reflection${week.reflections === 1 ? '' : 's'} written`,
                       ].filter(Boolean).join(' · ')}
                     </p>
                   )}
@@ -321,9 +311,6 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { href: '/group', emoji: '✅', title: 'My Table', sub: 'Chat, habits & reading' },
-                // /journal had no inbound link anywhere, so reflection prompts
-                // were only reachable by typing the URL.
-                { href: '/journal', emoji: '📓', title: 'Reflections', sub: "Your table's prompts" },
                 { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
                 { href: '/meetings', emoji: '🗒️', title: 'Meetings', sub: "This meeting's outline" },
                 { href: '/sessions', emoji: '🪑', title: 'Sign-Ups', sub: 'Alumni & drop-in tables' },

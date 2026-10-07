@@ -1387,7 +1387,8 @@ export default function AdminPage() {
           </select>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {(['tasks', 'content', 'prompts', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings', 'sessions'] as Tab[]).map(t => (
+          {// 'prompts' hidden: Reflections were removed 2026-10-07.
+            (['tasks', 'content', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings', 'sessions'] as Tab[]).map(t => (
             <button key={t} onClick={() => {
               setTab(t)
               if (t === 'events') loadEvents()

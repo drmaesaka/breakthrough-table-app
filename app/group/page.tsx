@@ -21,7 +21,7 @@ type Detail = {
 // here from the Chat tab 2026-10-07), You (your habits and reading — the old
 // Tasks tab, merged in 2026-10-05) and People (who is there). No percentages or medals for
 // members: nothing here should look finished. A TC also gets the send card,
-// every member expandable into their habits, reading, attendance, prompts
+// every member expandable into their habits, reading, attendance
 // and whether notifications reach them (leader feedback 2026-09-29), and a
 // picker if they lead more than one table.
 export default function GroupPage() {
@@ -36,9 +36,9 @@ export default function GroupPage() {
   const [detail, setDetail] = useState<{ members: Detail[]; tasks_total: number; prompts_total: number } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [view, setView] = useState<'chat' | 'you' | 'people'>('you')
-  // TC quick-send: a prompt or a message to the selected table, and a
+  // TC quick-send: reading or a message to the selected table, and a
   // personal nudge to one member — without a trip to Admin.
-  const [sendMode, setSendMode] = useState<'prompt' | 'message' | 'reading' | null>(null)
+  const [sendMode, setSendMode] = useState<'message' | 'reading' | null>(null)
   const [sendText, setSendText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendNote, setSendNote] = useState('')
@@ -129,13 +129,6 @@ export default function GroupPage() {
         if (!res.ok) { setSendNote(`Could not post: ${r.detail || r.error || res.status}`); return }
         for (const row of r.items || []) notifyAbout('task', row.id)
         setSendNote(`✓ Added to ${groupName}'s Reading & Resources.`)
-      } else if (sendMode === 'prompt') {
-        const res = await fetch('/api/admin/post-item', { method: 'POST', headers: h,
-          body: JSON.stringify({ table: 'journal_prompts', rows: [{ group_id: groupId, prompt: text }] }) })
-        const r = await res.json().catch(() => ({}))
-        if (!res.ok) { setSendNote(`Could not post: ${r.detail || r.error || res.status}`); return }
-        for (const row of r.items || []) notifyAbout('prompt', row.id)
-        setSendNote(`✓ Prompt posted to ${groupName}. Members will see it in Reflections.`)
       } else {
         const res = await fetch('/api/send-broadcast', { method: 'POST', headers: h,
           body: JSON.stringify({ group_id: groupId, message: text, scope: 'table' }) })
@@ -248,8 +241,8 @@ export default function GroupPage() {
         {isLeader && detail && (
           <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
             <h3 className="font-bold text-bt-navy text-sm">Send to {groupName}</h3>
-            <div className="grid grid-cols-3 gap-2">
-              {([['reading', '📚 Reading'], ['prompt', '✍️ Prompt'], ['message', '📣 Message']] as const).map(([k, label]) => (
+            <div className="grid grid-cols-2 gap-2">
+              {([['reading', '📚 Reading'], ['message', '📣 Message']] as const).map(([k, label]) => (
                 <button key={k} type="button" onClick={() => { setSendMode(sendMode === k ? null : k); setSendNote('') }}
                   className={`py-2.5 rounded-xl text-sm font-semibold border ${sendMode === k ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-bt-navy border-gray-200'}`}>
                   {label}
@@ -261,16 +254,14 @@ export default function GroupPage() {
                 <p className="text-gray-400 text-xs">
                   {sendMode === 'reading'
                     ? 'Added to Reading & Resources on everyone\'s You tab, with a notification. First line is the title; put a link or note on the next line.'
-                    : sendMode === 'prompt'
-                    ? 'Members see this in their Reflections tab and get a notification.'
                     : 'Goes to everyone at this table now: by push, or by email if their notifications are off.'}
                 </p>
                 <textarea value={sendText} onChange={e => setSendText(e.target.value)} rows={3}
-                  placeholder={sendMode === 'reading' ? 'e.g. Read chapter 2 of As a Man Thinketh\nhttps://…' : sendMode === 'prompt' ? "e.g. What's one belief you're ready to let go of?" : 'Type your message...'}
+                  placeholder={sendMode === 'reading' ? 'e.g. Read chapter 2 of As a Man Thinketh\nhttps://…' : 'Type your message...'}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base text-gray-900 resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-bt-blue" />
                 <button onClick={sendToTable} disabled={sending || !sendText.trim()}
                   className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                  {sending ? 'Sending...' : sendMode === 'reading' ? 'Add Reading' : sendMode === 'prompt' ? 'Post Prompt' : 'Send to Table Now'}
+                  {sending ? 'Sending...' : sendMode === 'reading' ? 'Add Reading' : 'Send to Table Now'}
                 </button>
               </>
             )}
@@ -326,7 +317,6 @@ export default function GroupPage() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Reading &amp; Resources</p><p className="font-bold text-bt-navy text-base">{d.tasks_done} <span className="text-gray-400 font-normal">of {detail?.tasks_total ?? 0}</span></p></div>
                     <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Meetings attended</p><p className="font-bold text-bt-navy text-base">{d.meetings_attended} <span className="text-gray-400 font-normal">last {fmt(d.last_meeting)}</span></p></div>
-                    <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Prompts answered</p><p className="font-bold text-bt-navy text-base">{d.prompts_answered} <span className="text-gray-400 font-normal">of {detail?.prompts_total ?? 0}</span></p></div>
                     <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Notifications</p><p className={`font-bold text-base ${d.push_enabled ? 'text-green-600' : 'text-amber-600'}`}>{d.push_enabled ? 'On' : 'Off'}</p></div>
                   </div>
                   <p className="text-[11px] text-gray-400">
