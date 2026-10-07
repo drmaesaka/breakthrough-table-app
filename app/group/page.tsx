@@ -35,7 +35,7 @@ export default function GroupPage() {
   const [homeGroupId, setHomeGroupId] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ members: Detail[]; tasks_total: number; prompts_total: number } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
-  const [view, setView] = useState<'chat' | 'you' | 'people'>('chat')
+  const [view, setView] = useState<'chat' | 'you' | 'people'>('you')
   // TC quick-send: a prompt or a message to the selected table, and a
   // personal nudge to one member — without a trip to Admin.
   const [sendMode, setSendMode] = useState<'prompt' | 'message' | null>(null)
@@ -80,11 +80,11 @@ export default function GroupPage() {
       setCurrentUserId(user.id)
       // Links can open a tab directly: /group?tab=you from a habit nudge.
       const want = new URLSearchParams(window.location.search).get('tab')
-      if (want === 'you' || want === 'people' || want === 'chat') setView(want)
 
       const { data: prof } = await supabase
         .from('profiles').select('group_id, role, groups(name)').eq('id', user.id).single()
       const leader = prof?.role === 'leader'
+      if (want === 'you' || want === 'chat' || (want === 'people' && prof?.role === 'leader')) setView(want)
       setIsLeader(leader)
       const home = prof?.group_id || null
       setHomeGroupId(home)
@@ -99,6 +99,7 @@ export default function GroupPage() {
       setTables(all)
       // ?table=<id> from a chat notification opens that table, if it is one of mine.
       const wantTable = new URLSearchParams(window.location.search).get('table')
+      if (wantTable && !want) setView('chat')
       const first = (wantTable && all.find(t => t.id === wantTable)?.id) || all[0]?.id || null
       if (!first) { router.push('/dashboard'); return }
       setGroupId(first)
@@ -179,7 +180,11 @@ export default function GroupPage() {
   const detailById = new Map((detail?.members || []).map(m => [m.id, m]))
 
   const onHome = groupId === homeGroupId
-  const tabs = ([['chat', '💬 Chat'], ['you', '✅ You'], ['people', '👥 People']] as const).filter(([k]) => k !== 'you' || onHome)
+  // Members: You · Chat. The Table tab (who is at the table, the TC send
+  // card, member detail) is TC-only — members do not need a view of everyone
+  // else's progress (2026-10-07).
+  const tabs = ([['you', '✅ You'], ['people', '👥 Table'], ['chat', '💬 Chat']] as const)
+    .filter(([k]) => (k !== 'you' || onHome) && (k !== 'people' || isLeader))
 
   return (
     <div style={{ height: '100dvh' }} className="bg-bt-pale flex flex-col">
