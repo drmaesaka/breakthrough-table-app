@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, leaderGroupIds } from '@/lib/api-auth'
+import { fetchLoginEmails } from '@/lib/member-emails'
 
 // `role = 'leader'` is app-wide, not per-table, so every handler here narrows to
 // the caller's own groups. Without that narrowing any leader could read, reassign
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, group_id, role, adherence_percent, streak')
+    .select('id, full_name, group_id, role, adherence_percent, streak, contact_email')
     .or(scopeFilter)
     .order('full_name', { ascending: true })
 
@@ -38,7 +39,9 @@ export async function GET(req: NextRequest) {
     : { data: [] as { user_id: string }[] }
   const subscribed = new Set((subs || []).map((s: any) => s.user_id))
 
-  const members = (data || []).map(m => ({ ...m, push_enabled: subscribed.has(m.id) }))
+  // Sign-in addresses, so a TC can see who has none and fix it (2026-10-07).
+  const logins = await fetchLoginEmails(supabase, memberIds)
+  const members = (data || []).map(m => ({ ...m, push_enabled: subscribed.has(m.id), login_email: logins.get(m.id) || null }))
   return NextResponse.json({ members, group_ids: myGroups })
 }
 
@@ -46,7 +49,7 @@ export async function PATCH(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { userId, groupId, role } = await req.json()
+  const { userId, groupId, role, fullName, contactEmail, loginEmail } = await req.json()
   if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 })
 
   if (role !== undefined && role !== 'leader' && role !== 'participant') {
@@ -69,15 +72,42 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Not the leader of that group' }, { status: 403 })
   }
 
+  const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   const updates: Record<string, unknown> = {}
   if (groupId !== undefined) updates.group_id = groupId || null
   if (role !== undefined) updates.role = role
-  if (Object.keys(updates).length === 0) {
+  if (fullName !== undefined) {
+    const name = String(fullName).trim()
+    if (!name) return NextResponse.json({ error: 'A name is required' }, { status: 400 })
+    updates.full_name = name.slice(0, 100)
+  }
+  if (contactEmail !== undefined) {
+    const c = String(contactEmail || '').trim()
+    if (c && !EMAIL.test(c)) return NextResponse.json({ error: "That contact email doesn't look right" }, { status: 400 })
+    updates.contact_email = c || null
+  }
+  const newLogin = loginEmail !== undefined ? String(loginEmail || '').trim().toLowerCase() : ''
+  if (loginEmail !== undefined && !EMAIL.test(newLogin)) {
+    return NextResponse.json({ error: "That sign-in email doesn't look right" }, { status: 400 })
+  }
+  if (Object.keys(updates).length === 0 && loginEmail === undefined) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
   }
 
-  const { error } = await supabase.from('profiles').update(updates).eq('id', userId)
-  if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 })
+  // The sign-in address lives in Supabase auth, not profiles. Changed first:
+  // it is the one most likely to be refused (already used by another account).
+  if (loginEmail !== undefined) {
+    const { error: authError } = await supabase.auth.admin.updateUserById(userId, { email: newLogin, email_confirm: true })
+    if (authError) {
+      const taken = /already|registered|exists/i.test(authError.message)
+      return NextResponse.json({ error: taken ? 'Another account already uses that email' : `Could not change the sign-in email: ${authError.message}` }, { status: taken ? 409 : 500 })
+    }
+  }
+
+  if (Object.keys(updates).length) {
+    const { data: changed, error } = await supabase.from('profiles').update(updates).eq('id', userId).select('id')
+    if (error || !changed?.length) return NextResponse.json({ error: 'Update failed' }, { status: 500 })
+  }
   return NextResponse.json({ success: true })
 }
 

@@ -290,6 +290,10 @@ export default function AdminPage() {
   const [tasks, setTasks] = useState<any[]>([])
   const [content, setContent] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
+  // Editing one member's name and emails (Members → Edit).
+  const [memberEdit, setMemberEdit] = useState<{ id: string; fullName: string; loginEmail: string; contactEmail: string } | null>(null)
+  const [memberEditBusy, setMemberEditBusy] = useState(false)
+  const [memberEditError, setMemberEditError] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
   const [loading, setLoading] = useState(true)
   const [taskTitle, setTaskTitle] = useState('')
@@ -1391,6 +1395,32 @@ export default function AdminPage() {
 
   if (loading) return <div className="min-h-screen bg-bt-pale flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>
 
+  async function saveMemberEdit() {
+    if (!memberEdit) return
+    const u = users.find(x => x.id === memberEdit.id)
+    const body: Record<string, string> = { userId: memberEdit.id }
+    if (memberEdit.fullName.trim() !== (u?.full_name || '')) body.fullName = memberEdit.fullName
+    if (memberEdit.contactEmail.trim() !== (u?.contact_email || '')) body.contactEmail = memberEdit.contactEmail
+    const login = memberEdit.loginEmail.trim().toLowerCase()
+    if (login && login !== (u?.login_email || '').toLowerCase()) {
+      if (u?.login_email && !confirm(`Change ${u.full_name}'s sign-in email from ${u.login_email} to ${login}? They will sign in with the new one from now on.`)) return
+      body.loginEmail = login
+    }
+    if (Object.keys(body).length === 1) { setMemberEdit(null); return }
+    setMemberEditBusy(true); setMemberEditError('')
+    const res = await fetch('/api/admin/members', { method: 'PATCH', headers: await authHeaders(), body: JSON.stringify(body) })
+    const j = await res.json().catch(() => ({}))
+    setMemberEditBusy(false)
+    if (!res.ok) { setMemberEditError(j.error || 'Could not save'); return }
+    setUsers(prev => prev.map(x => x.id === memberEdit.id ? {
+      ...x,
+      full_name: body.fullName !== undefined ? memberEdit.fullName.trim() : x.full_name,
+      contact_email: body.contactEmail !== undefined ? (memberEdit.contactEmail.trim() || null) : x.contact_email,
+      login_email: body.loginEmail || x.login_email,
+    } : x))
+    setMemberEdit(null)
+  }
+
   /** Opens a section, loading what it needs (was the tab rail's onClick). */
   function openTab(t: Tab) {
     setTab(t)
@@ -2144,8 +2174,35 @@ export default function AdminPage() {
                         )}
                       </div>
                       <p className="text-gray-400 text-xs">{groupForUser?.name || 'Unassigned'}</p>
+                      <p className={`text-xs truncate ${u.login_email ? 'text-gray-400' : 'text-amber-700 font-medium'}`}>
+                        {u.login_email || 'No sign-in email'}{u.contact_email && u.contact_email !== u.login_email ? ` · contact ${u.contact_email}` : ''}
+                      </p>
                     </div>
+                    <button onClick={() => { setMemberEditError(''); setMemberEdit(memberEdit?.id === u.id ? null : { id: u.id, fullName: u.full_name || '', loginEmail: u.login_email || '', contactEmail: u.contact_email || '' }) }}
+                      className="text-xs font-semibold text-bt-blue flex-shrink-0">{memberEdit?.id === u.id ? 'Close' : 'Edit'}</button>
                   </div>
+                  {memberEdit && memberEdit.id === u.id && (
+                    <div className="bg-bt-pale rounded-xl p-3 space-y-2">
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-gray-500">Name</span>
+                        <input value={memberEdit.fullName} onChange={e => setMemberEdit(m => m && ({ ...m, fullName: e.target.value }))} className={inputClass} />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-gray-500">Sign-in email</span>
+                        <input type="email" value={memberEdit.loginEmail} onChange={e => setMemberEdit(m => m && ({ ...m, loginEmail: e.target.value }))} placeholder="name@example.com" className={inputClass} />
+                        <span className="text-[11px] text-gray-400">What they log in with. Reminders and notices go here.</span>
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-gray-500">Contact email (optional)</span>
+                        <input type="email" value={memberEdit.contactEmail} onChange={e => setMemberEdit(m => m && ({ ...m, contactEmail: e.target.value }))} placeholder="Shown in the Directory" className={inputClass} />
+                      </label>
+                      {memberEditError && <p className="text-xs text-red-600">{memberEditError}</p>}
+                      <button onClick={saveMemberEdit} disabled={memberEditBusy}
+                        className="w-full bg-bt-navy text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40">
+                        {memberEditBusy ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  )}
                   {/* Inline group assignment */}
                   <select
                     value={u.group_id || ''}

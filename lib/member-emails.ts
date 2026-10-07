@@ -83,3 +83,18 @@ export async function fetchMemberEmails(
 
   return out
 }
+
+/** userId → the account's own sign-in email (auth), for the given ids only. */
+export async function fetchLoginEmails(admin: any, userIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const wanted = new Set(userIds)
+  if (!wanted.size) return out
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: PER_PAGE })
+    if (error) { console.error('fetchLoginEmails: listUsers failed:', error.message); break }
+    const users = data?.users ?? []
+    for (const u of users) if (u?.id && u?.email && wanted.has(u.id)) out.set(u.id, u.email)
+    if (users.length < PER_PAGE) break
+  }
+  return out
+}
