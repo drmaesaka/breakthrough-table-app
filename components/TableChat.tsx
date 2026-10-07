@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
 import Avatar from '@/components/Avatar'
+import { shrinkImage } from '@/lib/image'
 
 /**
  * One table's chat: the message list and the send box. Lived on the Chat
@@ -23,6 +24,11 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
+  // A photo waiting to go with the next message, already uploaded.
+  const [photo, setPhoto] = useState<string | null>(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoError, setPhotoError] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const groupIdRef = useRef(groupId)
   const lastIdRef = useRef<string | null>(null)
@@ -127,9 +133,23 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  /** Shrinks to 1600px and uploads to the member's own chat-photos folder. */
+  async function pickPhoto(file: File) {
+    setPhotoError(''); setPhotoBusy(true)
+    const blob = await shrinkImage(file, 1600, 0.82)
+    const path = `${userId}/${crypto.randomUUID()}.jpg`
+    const { error } = await supabase.storage.from('chat-photos').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false })
+    setPhotoBusy(false)
+    if (error) {
+      setPhotoError(/bucket not found/i.test(error.message) ? "Photos aren't switched on yet." : "Couldn't add the photo. Try again.")
+      return
+    }
+    setPhoto(supabase.storage.from('chat-photos').getPublicUrl(path).data.publicUrl)
+  }
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault()
-    if (!newMessage.trim() || sending) return
+    if ((!newMessage.trim() && !photo) || sending || photoBusy) return
     const text = newMessage.trim()
     setSending(true)
     let error: { message: string } | null = null
@@ -137,11 +157,11 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: await authHeaders(),
-        body: JSON.stringify({ group_id: groupId, content: text }),
+        body: JSON.stringify({ group_id: groupId, content: text, ...(photo ? { image_url: photo } : {}) }),
       })
       if (!res.ok) error = { message: `send failed (${res.status})` }
     } else {
-      const r = await supabase.from('messages').insert({ group_id: groupId, user_id: userId, content: text }).select('id').single()
+      const r = await supabase.from('messages').insert({ group_id: groupId, user_id: userId, content: text, ...(photo ? { image_url: photo } : {}) }).select('id').single()
       error = r.error
       if (!r.error) notifyAbout('chat', r.data?.id)
     }
@@ -154,6 +174,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
     }
     setSendError(false)
     setNewMessage('')
+    setPhoto(null)
     fetchMessages(groupId)
   }
 
@@ -180,11 +201,19 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
               )}
               <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
-                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                  isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
-                }`}>
-                  {msg.content}
-                </div>
+                {msg.image_url && (
+                  <a href={msg.image_url} target="_blank" rel="noreferrer" className="block mb-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={msg.image_url} alt="Photo" loading="lazy" className="rounded-2xl max-h-72 w-auto object-cover border border-gray-100" />
+                  </a>
+                )}
+                {msg.content && (
+                  <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                    isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
+                  }`}>
+                    {msg.content}
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -192,9 +221,32 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
         <div ref={bottomRef} />
       </div>
 
+      {(photo || photoBusy || photoError) && (
+        <div className="flex-shrink-0 px-4 pt-3 bg-white border-t border-gray-100 flex items-center gap-3">
+          {photoBusy && <p className="text-xs text-gray-400">Adding photo...</p>}
+          {photo && (
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photo} alt="" className="h-16 w-16 rounded-xl object-cover" />
+              <button type="button" onClick={() => setPhoto(null)} aria-label="Remove photo"
+                className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-gray-800 text-white text-xs font-bold">×</button>
+            </div>
+          )}
+          {photoError && <p className="text-xs text-red-600">{photoError}</p>}
+        </div>
+      )}
       <form onSubmit={sendMessage}
-        className="flex-shrink-0 px-4 py-3 bg-white border-t border-gray-100 flex items-center gap-3"
+        className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${photo || photoBusy || photoError ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + 60px)' }}>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pickPhoto(f) }} />
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={photoBusy} aria-label="Add a photo"
+          className="w-10 h-10 rounded-full bg-bt-pale text-bt-navy flex items-center justify-center flex-shrink-0 disabled:opacity-40">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.66-.9l.82-1.2A2 2 0 0110.07 4h3.86a2 2 0 011.66.9l.82 1.2a2 2 0 001.66.9H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
         <input
           type="text"
           value={newMessage}
@@ -202,7 +254,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
           placeholder={isHome ? 'Message your table...' : `Message ${groupName}...`}
           className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
         />
-        <button type="submit" disabled={!newMessage.trim() || sending}
+        <button type="submit" disabled={(!newMessage.trim() && !photo) || sending || photoBusy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">

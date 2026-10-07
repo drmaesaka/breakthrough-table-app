@@ -47,9 +47,13 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { group_id, content } = await req.json().catch(() => ({}))
+  const { group_id, content, image_url } = await req.json().catch(() => ({}))
   const text = typeof content === 'string' ? content.trim() : ''
-  if (!group_id || !text) return NextResponse.json({ error: 'group_id and content are required' }, { status: 400 })
+  // A photo must be one of ours (the chat-photos bucket), never any URL.
+  const photo = typeof image_url === 'string' && image_url.startsWith(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/chat-photos/${auth.userId}/`)
+    ? image_url : null
+  if (image_url && !photo) return NextResponse.json({ error: 'Bad photo' }, { status: 400 })
+  if (!group_id || (!text && !photo)) return NextResponse.json({ error: 'group_id and content are required' }, { status: 400 })
   if (!(await allowed(auth.userId, group_id))) {
     return NextResponse.json({ error: 'Not your table' }, { status: 403 })
   }
@@ -58,7 +62,7 @@ export async function POST(req: NextRequest) {
   const admin = adminClient()
   const { data: row, error } = await admin
     .from('messages')
-    .insert({ group_id, user_id: auth.userId, content: text })
+    .insert({ group_id, user_id: auth.userId, content: text, ...(photo ? { image_url: photo } : {}) })
     .select('id, group_id, user_id, content, created_at')
     .single()
   if (error) return NextResponse.json({ error: 'Could not send', detail: error.message }, { status: 500 })

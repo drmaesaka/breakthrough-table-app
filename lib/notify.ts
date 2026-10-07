@@ -200,7 +200,7 @@ export async function notifyTableChat(admin: any, message: { id: string; group_i
     kind: 'chat',
     recipientIds,
     title: `💬 ${group?.name || 'Table Chat'}`,
-    body: `${(sender?.full_name || 'Someone').split(' ')[0]}: ${message.content.slice(0, 140)}`,
+    body: `${(sender?.full_name || 'Someone').split(' ')[0]}: ${message.content ? message.content.slice(0, 140) : '📷 sent a photo'}`,
     // My Table opens on its chat; ?table= picks the right one for a TC with several.
     url: `/group?table=${message.group_id}`,
     emailFallback: false,
