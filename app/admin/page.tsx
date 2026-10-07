@@ -1840,7 +1840,7 @@ export default function AdminPage() {
                         {/* When the programme began. Tables join the app months
                             in; without this every member looked brand new. */}
                         <label className="flex items-center gap-2 mt-1.5 text-xs text-gray-500">
-                          <span className="font-medium">Programme started</span>
+                          <span className="font-medium">Table start date</span>
                           <input type="date" value={g.program_start_date || ''} max={new Date().toISOString().slice(0, 10)}
                             onChange={async e => {
                               const value = e.target.value || null
@@ -1859,7 +1859,7 @@ export default function AdminPage() {
                           })()}
                         </label>
                         {!g.program_start_date && (
-                          <p className="text-[11px] text-amber-600 mt-0.5">Set this so members’ journey bar shows where the table really is.</p>
+                          <p className="text-[11px] text-amber-600 mt-0.5">Set this so the app knows which meeting this table is on.</p>
                         )}
                         {/* Which Sunrise group's posts this table sees in Library. */}
                         <SunriseGroupPicker tableId={g.id} value={g.sunrise_group_id ?? null}
