@@ -235,7 +235,6 @@ export default function MyTasks() {
     if (!error && data?.length) setPersonal(prev => prev.filter(p => p.id !== id))
   }
 
-  const adherence = calcAdherence(completedIds.size, doneToday.size, tasks.length, habits.length)
   const allDone = tasks.length > 0 && completedIds.size === tasks.length
     && habits.length > 0 && doneToday.size === habits.length
 
