@@ -34,12 +34,24 @@ import { ledGroups } from '@/lib/leader-groups'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-type Tab = 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
+type Tab = 'menu' | 'tasks' | 'content' | 'prompts' | 'groups' | 'members' | 'scores' | 'notifications' | 'events' | 'rooms' | 'meetings' | 'sessions'
 
-// Members see what a leader adds under "tasks" as "Reading & Resources" on
-// My Tasks. Leaders could not connect the two names, so the tab now uses the
-// members' one. Everything else keeps its bare name.
-const TAB_LABEL: Partial<Record<Tab, string>> = { tasks: 'Reading & Resources' }
+// Admin opens on a grid of tiles like Home (2026-10-07; it was a sideways-
+// scrolling row of tab names that hid half the sections off-screen).
+const TILES: { tab: Tab | 'finances'; emoji: string; title: string; sub: string }[] = [
+  { tab: 'tasks', emoji: '📚', title: 'Reading & Resources', sub: 'Post reading for the table' },
+  { tab: 'content', emoji: '📖', title: 'Library', sub: 'Files, links, Sunrise videos' },
+  { tab: 'groups', emoji: '🪑', title: 'Tables', sub: 'Invites, leaders, attendance' },
+  { tab: 'members', emoji: '👥', title: 'Members', sub: 'Seat and manage people' },
+  { tab: 'scores', emoji: '📊', title: 'Scores', sub: 'Who is keeping up' },
+  { tab: 'notifications', emoji: '🔔', title: 'Notifications', sub: 'Check-ins and broadcasts' },
+  { tab: 'events', emoji: '📅', title: 'Events', sub: 'BT events and RSVPs' },
+  { tab: 'rooms', emoji: '🏢', title: 'Rooms', sub: 'Rooms, hours, bookings' },
+  { tab: 'meetings', emoji: '🗒️', title: 'Meetings', sub: 'Outlines, current meeting' },
+  { tab: 'sessions', emoji: '🎟️', title: 'Sign-Ups', sub: 'Alumni and drop-in tables' },
+  { tab: 'finances', emoji: '💰', title: 'Finances', sub: 'Payments from Cause Machine' },
+]
+
 
 /**
  * "Send to" chips for anything a leader posts to a table. The table picked at
@@ -270,7 +282,7 @@ function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
 }
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<Tab>('tasks')
+  const [tab, setTab] = useState<Tab>('menu')
   const [groups, setGroups] = useState<any[]>([])
   /** Which table is being renamed, and the in-progress value. */
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null)
@@ -1368,6 +1380,22 @@ export default function AdminPage() {
 
   if (loading) return <div className="min-h-screen bg-bt-pale flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>
 
+  /** Opens a section, loading what it needs (was the tab rail's onClick). */
+  function openTab(t: Tab) {
+    setTab(t)
+    if (t === 'events') loadEvents()
+    if (t === 'rooms') loadRooms()
+    if (t === 'sessions') loadSessions()
+    if (t === 'members') loadGroupLeaders(groups.map(g => g.id))
+    if (t === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans() }
+    if (t === 'groups') {
+      groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
+      loadGroupLeaders(groups.map(g => g.id))
+      loadLeaderCandidates()
+    }
+    window.scrollTo({ top: 0 })
+  }
+
   // Follow the "Working in" bar. A table this TC sits at but does not lead
   // is not in Admin's list; Admin stays where it is then.
   selectTableRef.current = (gid: string) => {
@@ -1400,42 +1428,34 @@ export default function AdminPage() {
             <span className="text-bt-light/50"> · switch in the bar at the bottom</span>
           </p>
         )}
-        <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
-          {// 'prompts' hidden: Reflections were removed 2026-10-07.
-            (['tasks', 'content', 'groups', 'members', 'scores', 'notifications', 'events', 'rooms', 'meetings', 'sessions'] as Tab[]).map(t => (
-            <button key={t} onClick={() => {
-              setTab(t)
-              if (t === 'events') loadEvents()
-              if (t === 'rooms') loadRooms()
-              if (t === 'sessions') loadSessions()
-              if (t === 'members') loadGroupLeaders(groups.map(g => g.id))
-              if (t === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans() }
-              if (t === 'prompts' && selectedGroup) loadJournalResponses(selectedGroup)
-              if (t === 'groups') {
-                groups.forEach(g => { if (!inviteLinks[g.id]) loadInviteLink(g.id) })
-                loadGroupLeaders(groups.map(g => g.id))
-                loadLeaderCandidates()
-              }
-            }}
-              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors ${
-                tab === t ? 'bg-white text-bt-navy' : 'text-white/60'
-              }`}>
-              {TAB_LABEL[t] || t}
-            </button>
-          ))}
-          {/* Sits in the same rail as the tabs so there is one place to look for
-              a section, but it stays a separate route rather than a twelfth tab:
-              it reads from Cause Machine instead of our own tables, and eight
-              paged API calls is too slow to sit behind a tab click. It is never
-              the active tab, so it always renders in the inactive style. */}
-          <Link href="/admin/finances"
-            className="flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium capitalize transition-colors text-white/60">
-            finances
-          </Link>
-        </div>
+        {tab !== 'menu' && (
+          <button onClick={() => setTab('menu')} className="mt-4 flex items-center gap-2 text-white">
+            <span className="text-lg leading-none">‹</span>
+            <span className="text-sm font-semibold">All tools</span>
+            <span className="text-bt-light/60 text-sm">· {TILES.find(x => x.tab === tab)?.title || tab}</span>
+          </button>
+        )}
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
+
+        {tab === 'menu' && (
+          <div className="grid grid-cols-2 gap-3">
+            {TILES.map(tile => {
+              const body = (
+                <>
+                  <div className="text-3xl mb-2">{tile.emoji}</div>
+                  <p className="font-semibold text-bt-navy text-sm">{tile.title}</p>
+                  <p className="text-gray-400 text-xs mt-0.5">{tile.sub}</p>
+                </>
+              )
+              const cls = 'bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block text-left'
+              return tile.tab === 'finances'
+                ? <Link key={tile.tab} href="/admin/finances" className={cls}>{body}</Link>
+                : <button key={tile.tab} onClick={() => openTab(tile.tab as Tab)} className={cls}>{body}</button>
+            })}
+          </div>
+        )}
 
         {tab === 'tasks' && (
           <>
