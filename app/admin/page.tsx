@@ -349,7 +349,9 @@ export default function AdminPage() {
   const [notifSaveError, setNotifSaveError] = useState(false)
   const [broadcastMessage, setBroadcastMessage] = useState('')
   /** Who a broadcast goes to: this table, every table I lead, or all of BT. */
-  const [broadcastScope, setBroadcastScope] = useState<'table' | 'mine' | 'all'>('table')
+  const [broadcastScope, setBroadcastScope] = useState<'tables' | 'all'>('tables')
+  /** Tables ticked for a broadcast; empty means "the table I'm working in". */
+  const [broadcastTables, setBroadcastTables] = useState<Set<string>>(new Set())
   const [broadcasting, setBroadcasting] = useState(false)
   const [broadcastSent, setBroadcastSent] = useState(false)
 
@@ -541,9 +543,13 @@ export default function AdminPage() {
   }
 
   async function sendBroadcast() {
-    if (!broadcastMessage.trim() || (broadcastScope === 'table' && !selectedGroup)) return
+    const picked = broadcastTables.size ? [...broadcastTables] : (selectedGroup ? [selectedGroup] : [])
+    if (!broadcastMessage.trim() || (broadcastScope === 'tables' && !picked.length)) return
     if (broadcastScope === 'all' && !confirm('Send this to EVERY Breakthrough Table member, at every table?')) return
-    if (broadcastScope === 'mine' && groups.length > 1 && !confirm(`Send this to everyone at all ${groups.length} of your tables?`)) return
+    if (broadcastScope === 'tables' && picked.length > 1) {
+      const names = picked.map(id => groups.find(g => g.id === id)?.name).filter(Boolean).join(', ')
+      if (!confirm(`Send this to everyone at ${picked.length} tables: ${names}?`)) return
+    }
     setBroadcasting(true)
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -553,7 +559,7 @@ export default function AdminPage() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session?.access_token}`,
       },
-      body: JSON.stringify({ group_id: selectedGroup, message: broadcastMessage.trim(), scope: broadcastScope }),
+      body: JSON.stringify({ group_ids: picked, message: broadcastMessage.trim(), scope: broadcastScope }),
     })
     const result = await res.json()
     setBroadcasting(false)
@@ -2391,30 +2397,41 @@ export default function AdminPage() {
                 <p className="text-gray-400 text-xs mt-0.5">One-time announcement. Push where they have it, email where not.</p>
               </div>
               {(() => {
-                const tableName = groups.find(g => g.id === selectedGroup)?.name || 'this table'
-                const options: { key: 'table' | 'mine' | 'all'; label: string }[] = [
-                  { key: 'table', label: tableName },
-                  ...(groups.length > 1 ? [{ key: 'mine' as const, label: `All my tables (${groups.length})` }] : []),
-                  { key: 'all', label: 'All BT members' },
-                ]
+                // Ticked tables; nothing ticked yet means the table I'm working in.
+                const picked = broadcastTables.size ? broadcastTables : new Set(selectedGroup ? [selectedGroup] : [])
+                const toggle = (id: string) => {
+                  setBroadcastScope('tables')
+                  setBroadcastTables(() => { const n = new Set(picked); if (n.has(id)) n.delete(id); else n.add(id); return n })
+                }
                 return (
                   <div>
-                    <p className="text-xs text-gray-400 font-medium mb-1.5">Send to</p>
-                    <div className="flex flex-wrap gap-2">
-                      {options.map(o => (
-                        <button key={o.key} type="button" onClick={() => setBroadcastScope(o.key)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                            broadcastScope === o.key
-                              ? o.key === 'all' ? 'bg-red-600 text-white border-red-600' : 'bg-bt-navy text-white border-bt-navy'
-                              : 'bg-white text-gray-500 border-gray-200'
-                          }`}>
-                          {broadcastScope === o.key ? '✓ ' : ''}{o.label}
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs text-gray-400 font-medium">Send to</p>
+                      {groups.length > 1 && broadcastScope === 'tables' && (
+                        <button type="button" onClick={() => setBroadcastTables(picked.size === groups.length ? new Set(selectedGroup ? [selectedGroup] : []) : new Set(groups.map(g => g.id)))}
+                          className="text-xs font-semibold text-bt-blue">
+                          {picked.size === groups.length ? 'Just this table' : `All my tables (${groups.length})`}
                         </button>
-                      ))}
+                      )}
                     </div>
-                    {broadcastScope === 'all' && (
-                      <p className="text-[11px] text-red-600 mt-1.5">Every member at every table, not just yours. You'll be asked to confirm.</p>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {groups.map(g => {
+                        const on = broadcastScope === 'tables' && picked.has(g.id)
+                        return (
+                          <button key={g.id} type="button" onClick={() => toggle(g.id)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${on ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-gray-500 border-gray-200'}`}>
+                            {on ? '✓ ' : ''}{g.name}
+                          </button>
+                        )
+                      })}
+                      <button type="button" onClick={() => setBroadcastScope(broadcastScope === 'all' ? 'tables' : 'all')}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${broadcastScope === 'all' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-500 border-gray-200'}`}>
+                        {broadcastScope === 'all' ? '✓ ' : ''}All BT members
+                      </button>
+                    </div>
+                    {broadcastScope === 'all'
+                      ? <p className="text-[11px] text-red-600 mt-1.5">Every member at every table, not just yours. You&apos;ll be asked to confirm.</p>
+                      : <p className="text-[11px] text-gray-400 mt-1.5">Tap tables to add or remove them. {picked.size} selected.</p>}
                   </div>
                 )
               })()}
@@ -2429,7 +2446,7 @@ export default function AdminPage() {
                 className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${broadcastScope === 'all' ? 'bg-red-600' : 'bg-bt-blue'}`}>
                 {broadcasting ? 'Sending...' : broadcastSent ? '✓ Sent!'
                   : broadcastScope === 'all' ? '📣 Send to All BT Members'
-                  : broadcastScope === 'mine' ? '📣 Send to All My Tables'
+                  : (broadcastTables.size || 1) > 1 ? `📣 Send to ${broadcastTables.size} Tables`
                   : '📣 Send to Table Now'}
               </button>
             </div>

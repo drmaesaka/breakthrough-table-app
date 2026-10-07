@@ -17,8 +17,8 @@ export async function POST(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { group_id, message, scope: rawScope } = await req.json().catch(() => ({}))
-  const scope: 'table' | 'mine' | 'all' = rawScope === 'all' || rawScope === 'mine' ? rawScope : 'table'
+  const { group_id, group_ids, message, scope: rawScope } = await req.json().catch(() => ({}))
+  const scope: 'table' | 'tables' | 'mine' | 'all' = rawScope === 'all' || rawScope === 'mine' || rawScope === 'tables' ? rawScope : 'table'
   if (!message?.trim()) return NextResponse.json({ error: 'message is required' }, { status: 400 })
 
   const supabase = adminClient()
@@ -31,6 +31,14 @@ export async function POST(req: NextRequest) {
     const owns = await requireGroupOwnership(auth.userId, group_id)
     if (!owns.ok) return NextResponse.json({ error: owns.error }, { status: owns.status })
     query = query.eq('group_id', group_id)
+  } else if (scope === 'tables') {
+    // Any chosen set of the caller's own tables (2026-10-07: it was one table
+    // or all of them, nothing in between).
+    const wanted: string[] = Array.isArray(group_ids) ? [...new Set(group_ids.filter((x: unknown): x is string => typeof x === 'string'))] : []
+    if (!wanted.length) return NextResponse.json({ error: 'Pick at least one table' }, { status: 400 })
+    const mine = await leaderGroupIds(auth.userId)
+    if (wanted.some(id => !mine.includes(id))) return NextResponse.json({ error: 'You can only send to tables you lead' }, { status: 403 })
+    query = query.in('group_id', wanted)
   } else if (scope === 'mine') {
     const mine = await leaderGroupIds(auth.userId)
     if (!mine.length) return NextResponse.json({ message: 'You lead no tables', sent: 0, emailed: 0, recipients: 0 })
