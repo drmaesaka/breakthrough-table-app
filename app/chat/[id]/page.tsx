@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 import Avatar from '@/components/Avatar'
+import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import PeoplePicker from '@/components/PeoplePicker'
 
 type Member = { user_id: string; full_name: string; avatar_url: string | null }
@@ -16,6 +17,7 @@ export default function RoomPage() {
   const router = useRouter()
   const supabase = createClient()
   const [user, setUser] = useState<any>(null)
+  const att = usePhotoAttach(user?.id)
   const [room, setRoom] = useState<{ id: string; name: string } | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [messages, setMessages] = useState<any[]>([])
@@ -80,12 +82,12 @@ export default function RoomPage() {
 
   async function send(e: React.FormEvent) {
     e.preventDefault()
-    if (!newMessage.trim() || sending) return
+    if ((!newMessage.trim() && !att.photo) || sending || att.busy) return
     setSending(true)
-    const res = await fetch('/api/rooms/messages', { method: 'POST', headers: await headers(), body: JSON.stringify({ room_id: roomId, content: newMessage.trim() }) })
+    const res = await fetch('/api/rooms/messages', { method: 'POST', headers: await headers(), body: JSON.stringify({ room_id: roomId, content: newMessage.trim(), ...(att.photo ? { image_url: att.photo } : {}) }) })
     setSending(false)
     if (!res.ok) { setSendError(true); return }
-    setSendError(false); setNewMessage('')
+    setSendError(false); setNewMessage(''); att.clear()
     fetchMessages()
   }
 
@@ -186,7 +188,8 @@ export default function RoomPage() {
               {!isMe && <Avatar src={p?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />}
               <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
-                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{msg.content}</div>
+                <MessagePhoto url={msg.image_url} />
+                {msg.content && <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{msg.content}</div>}
               </div>
             </div>
           )
@@ -194,11 +197,13 @@ export default function RoomPage() {
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={send} className="flex-shrink-0 px-4 py-3 bg-white border-t border-gray-100 flex items-center gap-3"
+      <PhotoPreview att={att} />
+      <form onSubmit={send} className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}>
+        <PhotoButton att={att} />
         <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder={`Message ${room?.name || 'the group'}...`}
           className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
-        <button type="submit" disabled={!newMessage.trim() || sending}
+        <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>

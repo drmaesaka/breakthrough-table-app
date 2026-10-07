@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
+import { isOwnChatPhoto } from '@/lib/chat-photo'
 import { notifyTableChat } from '@/lib/notify'
 
 // Table chat for a table the caller LEADS but does not sit at.
@@ -50,8 +51,7 @@ export async function POST(req: NextRequest) {
   const { group_id, content, image_url } = await req.json().catch(() => ({}))
   const text = typeof content === 'string' ? content.trim() : ''
   // A photo must be one of ours (the chat-photos bucket), never any URL.
-  const photo = typeof image_url === 'string' && image_url.startsWith(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/chat-photos/${auth.userId}/`)
-    ? image_url : null
+  const photo = isOwnChatPhoto(image_url, auth.userId) ? image_url : null
   if (image_url && !photo) return NextResponse.json({ error: 'Bad photo' }, { status: 400 })
   if (!group_id || (!text && !photo)) return NextResponse.json({ error: 'group_id and content are required' }, { status: 400 })
   if (!(await allowed(auth.userId, group_id))) {

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
 
@@ -27,6 +28,7 @@ export default function LeadersPage() {
   const [tab, setTab] = useState<'resources' | 'chat'>('resources')
   const [checking, setChecking] = useState(true)
   const [user, setUser] = useState<any>(null)
+  const att = usePhotoAttach(user?.id)
 
   // Chat
   const [messages, setMessages] = useState<any[]>([])
@@ -127,11 +129,11 @@ export default function LeadersPage() {
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault()
-    if (!newMessage.trim() || !user || sending) return
+    if ((!newMessage.trim() && !att.photo) || !user || sending || att.busy) return
     setSending(true)
     const { data: sent, error } = await supabase
       .from('leader_messages')
-      .insert({ user_id: user.id, content: newMessage.trim() })
+      .insert({ user_id: user.id, content: newMessage.trim(), ...(att.photo ? { image_url: att.photo } : {}) })
       .select('id').single()
     setSending(false)
     // Keep what they typed if the insert was rejected.
@@ -139,6 +141,7 @@ export default function LeadersPage() {
     notifyAbout('tc', sent?.id)
     setSendError(false)
     setNewMessage('')
+    att.clear()
     fetchMessages()
   }
 
@@ -287,11 +290,14 @@ export default function LeadersPage() {
                     {showName && (
                       <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>
                     )}
-                    <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                      isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
-                    }`}>
-                      {msg.content}
-                    </div>
+                    <MessagePhoto url={msg.image_url} />
+                    {msg.content && (
+                      <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                        isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
+                      }`}>
+                        {msg.content}
+                      </div>
+                    )}
                   </div>
                 </div>
               )
@@ -299,13 +305,15 @@ export default function LeadersPage() {
             <div ref={bottomRef} />
           </div>
 
+          <PhotoPreview att={att} />
           <form onSubmit={sendMessage}
-            className="flex-shrink-0 px-4 py-3 bg-white border-t border-gray-100 flex items-center gap-3"
+            className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
             style={{ paddingBottom: 'calc(0.75rem + 60px)' }}>
+            <PhotoButton att={att} />
             <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)}
               placeholder="Message the other TCs..."
               className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
-            <button type="submit" disabled={!newMessage.trim() || sending}
+            <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
               className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
               title={sendError ? "Didn't send — tap to try again" : 'Send'}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">

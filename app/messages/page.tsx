@@ -186,7 +186,7 @@ export default function MessagesPage() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-gray-900 text-sm truncate">{r.name}</p>
                   <p className="text-xs text-gray-400 truncate">
-                    {r.last_message ? r.last_message.content : r.members.map((m: any) => m.full_name.split(' ')[0]).join(', ')}
+                    {r.last_message ? (r.last_message.content || '📷 Photo') : r.members.map((m: any) => m.full_name.split(' ')[0]).join(', ')}
                   </p>
                 </div>
                 <span className="text-xs text-gray-300 flex-shrink-0">{r.members.length}</span>
@@ -234,7 +234,7 @@ export default function MessagesPage() {
                       <p className="font-semibold text-gray-900 text-sm">{name}</p>
                       {tableName && <p className="text-xs text-bt-blue">{tableName}</p>}
                       {convo.lastMsg && (
-                        <p className="text-xs text-gray-400 truncate mt-0.5">{convo.lastMsg.content}</p>
+                        <p className="text-xs text-gray-400 truncate mt-0.5">{convo.lastMsg.content || '📷 Photo'}</p>
                       )}
                     </div>
                     <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

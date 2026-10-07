@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
+import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -13,6 +14,7 @@ export default function DMPage() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
   const [user, setUser] = useState<any>(null)
+  const att = usePhotoAttach(user?.id)
   const [otherPerson, setOtherPerson] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -108,13 +110,14 @@ export default function DMPage() {
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault()
-    if (!newMessage.trim() || !user || sending) return
+    if ((!newMessage.trim() && !att.photo) || !user || sending || att.busy) return
     const text = newMessage.trim()
     setSending(true)
     const { data: sent, error } = await supabase.from('direct_messages').insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content: text,
+      ...(att.photo ? { image_url: att.photo } : {}),
     }).select('id').single()
     setSending(false)
     if (!error) notifyAbout('dm', sent?.id)
@@ -126,6 +129,7 @@ export default function DMPage() {
     }
     setSendError(false)
     setNewMessage('')
+    att.clear()
     fetchMessages()
   }
 
@@ -182,11 +186,14 @@ export default function DMPage() {
                 {showName && (
                   <span className="text-xs text-gray-400 font-medium mb-1 px-1">{otherName}</span>
                 )}
-                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                  isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
-                }`}>
-                  {msg.content}
-                </div>
+                <MessagePhoto url={msg.image_url} />
+                {msg.content && (
+                  <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                    isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
+                  }`}>
+                    {msg.content}
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -195,9 +202,11 @@ export default function DMPage() {
       </div>
 
       {/* Input */}
+      <PhotoPreview att={att} />
       <form onSubmit={sendMessage}
-        className="flex-shrink-0 px-4 py-3 bg-white border-t border-gray-100 flex items-center gap-3"
+        className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}>
+        <PhotoButton att={att} />
         <input
           type="text"
           value={newMessage}
@@ -205,7 +214,7 @@ export default function DMPage() {
           placeholder={`Message ${otherName.split(' ')[0]}...`}
           className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
         />
-        <button type="submit" disabled={!newMessage.trim() || sending}
+        <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">

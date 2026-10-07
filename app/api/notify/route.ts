@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       kind: 'dm',
       recipientIds: [other],
       title: `✉️ ${sender?.full_name || 'New message'}`,
-      body: m.content.slice(0, 140),
+      body: m.content ? m.content.slice(0, 140) : '📷 sent a photo',
       url: `/dm/${m.conversation_id}`,
       emailFallback: true,
       emailCta: 'Reply in the app',

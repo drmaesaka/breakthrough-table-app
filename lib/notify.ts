@@ -143,7 +143,7 @@ export async function notifyRoom(admin: any, message: { id: string; room_id: str
     kind: 'room',
     recipientIds: (members || []).map((m: any) => m.user_id).filter((id: string) => id !== message.user_id),
     title: `👥 ${room?.name || 'Group chat'}`,
-    body: `${(sender?.full_name || 'Someone').split(' ')[0]}: ${message.content.slice(0, 140)}`,
+    body: `${(sender?.full_name || 'Someone').split(' ')[0]}: ${message.content ? message.content.slice(0, 140) : '📷 sent a photo'}`,
     url: `/chat/${message.room_id}`,
     emailFallback: false,
   })
@@ -169,7 +169,7 @@ export async function notifyTcRoom(admin: any, message: { id: string; user_id: s
     kind: 'tc',
     recipientIds,
     title: '🧭 TC Room',
-    body: `${(sender?.full_name || 'A TC').split(' ')[0]}: ${message.content.slice(0, 140)}`,
+    body: `${(sender?.full_name || 'A TC').split(' ')[0]}: ${message.content ? message.content.slice(0, 140) : '📷 sent a photo'}`,
     url: '/leaders',
     emailFallback: false,
   })
