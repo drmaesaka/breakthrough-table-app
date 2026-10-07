@@ -82,7 +82,8 @@ export default function DashboardPage() {
               {[
                 { href: '/group', emoji: '✅', title: 'My Table', sub: 'Chat, habits & reading' },
                 { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
-                { href: '/meetings', emoji: '🗒️', title: 'Meetings', sub: "This meeting's outline" },
+                // Meeting outlines are for TCs only.
+                ...(profile?.role === 'leader' ? [{ href: '/meetings', emoji: '🗒️', title: 'Meetings', sub: "This meeting's outline" }] : []),
                 { href: '/sessions', emoji: '🪑', title: 'Sign-Ups', sub: 'Alumni & drop-in tables' },
                 { href: '/library', emoji: '📚', title: 'Library', sub: 'Resources & videos' },
                 { href: '/booking', emoji: '🏢', title: 'Book a Room', sub: 'Reserve your space' },

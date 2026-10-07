@@ -30,9 +30,11 @@ export default function MeetingsPage() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('group_id, groups(current_meeting_number)')
+        .select('group_id, role, groups(current_meeting_number)')
         .eq('id', user.id)
         .maybeSingle()
+      // Meeting outlines are the TC's script: TCs only (2026-10-07).
+      if (profile?.role !== 'leader') { router.replace('/dashboard'); return }
 
       const { data: rows, error } = await supabase
         .from('meeting_plans')
