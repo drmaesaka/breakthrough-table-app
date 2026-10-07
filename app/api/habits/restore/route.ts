@@ -35,7 +35,9 @@ export async function POST(req: NextRequest) {
     if (r.error) return NextResponse.json({ error: 'Could not restore', detail: r.error.message }, { status: 500 })
     habit = r.data
   }
-  const { error } = await admin.from('habit_history').delete().eq('id', row.id)
+  // Every badge for this habit name, not just the one tapped: a habit installed
+  // twice left the other badge saying "installed" while it was back in use.
+  const { error } = await admin.from('habit_history').delete().eq('user_id', auth.userId).eq('habit_name', row.habit_name)
   if (error) return NextResponse.json({ error: 'Restored, but the badge would not clear', detail: error.message }, { status: 500 })
   return NextResponse.json({ habit })
 }

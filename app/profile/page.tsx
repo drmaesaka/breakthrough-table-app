@@ -184,7 +184,8 @@ export default function ProfilePage() {
     const json = await res.json().catch(() => ({}))
     setRestoring(null)
     if (!res.ok) { alert(json.error || 'Could not bring that habit back'); return }
-    setGraduatedHabits(prev => prev.filter(x => x.id !== h.id))
+    // Every badge for this habit goes (it may have been installed more than once).
+    setGraduatedHabits(prev => prev.filter(x => x.habit_name !== h.habit_name))
     if (json.habit) setHabits(prev => [...prev, json.habit])
   }
 
@@ -328,9 +329,13 @@ export default function ProfilePage() {
                     {h.name}
                     <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-bt-blue">{h.frequency || 'daily'}</span>
                   </p>
-                  <button onClick={() => graduateHabit(h)} disabled={graduating === h.id}
-                    className="w-full bg-green-50 text-green-700 border-2 border-green-200 py-2 rounded-lg font-semibold text-xs disabled:opacity-50">
-                    {graduating === h.id ? 'Graduating...' : '🏅 I\'ve fully installed this one'}
+                  {/* An action, not a status: the old green "I've fully installed
+                      this one" read as if the habit already was — confusing
+                      right after bringing one back (2026-10-07). */}
+                  <button onClick={() => { if (confirm(`Mark “${h.name}” as fully installed? It moves to Installed Habits and stops showing on My Table.`)) graduateHabit(h) }}
+                    disabled={graduating === h.id}
+                    className="text-xs font-semibold text-green-700 disabled:opacity-50">
+                    {graduating === h.id ? 'Moving...' : '🏅 Mark as fully installed'}
                   </button>
                 </div>
               ))}
