@@ -40,6 +40,16 @@ export async function POST(req: NextRequest) {
   }
   // Attribution comes from the token, never the body.
   if (table === 'journal_prompts') for (const r of clean) r.posted_by = auth.userId
+  // Reading posted from My Table carries no period label: use the table's
+  // current one, as Admin does.
+  if (table === 'tasks') {
+    for (const r of clean) {
+      if (r.period_label) continue
+      const { data: last } = await adminClient().from('tasks').select('period_label')
+        .eq('group_id', r.group_id as string).order('created_at', { ascending: false }).limit(1).maybeSingle()
+      r.period_label = last?.period_label || 'Current'
+    }
+  }
 
   const { data, error } = await adminClient().from(table).insert(clean).select()
   if (error) return NextResponse.json({ error: 'Could not save', detail: error.message }, { status: 500 })

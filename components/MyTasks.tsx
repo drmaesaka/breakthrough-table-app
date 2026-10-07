@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import { linkify, hasLink } from '@/lib/linkify'
+import { notifyAbout } from '@/lib/notify-client'
 import { localDay } from '@/lib/dates'
 import { calcAdherence, datesByHabit, streakFor, doneInPeriod, periodKey, freqOf, FREQ_LABEL, type Habit, type Frequency } from '@/lib/habits'
 
@@ -33,6 +34,18 @@ export default function MyTasks() {
   const [streak, setStreak] = useState(0)
   /** Which habit just got ticked, for the streak flourish. */
   const [justDone, setJustDone] = useState<string | null>(null)
+  // "+" under Reading & Resources (2026-10-07): a TC posts to the whole table,
+  // anyone adds something just for themselves (personal_items — private, and
+  // never counted in Stats).
+  const [groupId, setGroupId] = useState<string | null>(null)
+  const [canPost, setCanPost] = useState(false)
+  const [personal, setPersonal] = useState<{ id: string; title: string; note: string | null; done_at: string | null }[]>([])
+  const [itemOpen, setItemOpen] = useState(false)
+  const [itemTitle, setItemTitle] = useState('')
+  const [itemNote, setItemNote] = useState('')
+  const [itemFor, setItemFor] = useState<'table' | 'me'>('me')
+  const [itemSaving, setItemSaving] = useState(false)
+  const [itemError, setItemError] = useState('')
   const router = useRouter()
 
   const today = localDay()
@@ -47,12 +60,25 @@ export default function MyTasks() {
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('group_id, streak')
+      .select('group_id, streak, role')
       .eq('id', user.id)
       .single()
 
     if (!prof?.group_id) { setLoading(false); return }
     setStreak(prof.streak || 0)
+    setGroupId(prof.group_id)
+
+    // Own items; before the 2026-10-07 migration the table is missing — none.
+    supabase.from('personal_items').select('id, title, note, done_at').eq('user_id', user.id).order('created_at', { ascending: true })
+      .then(({ data }) => setPersonal(data || []))
+    // A TC who leads this table can post reading to it from here.
+    if (prof.role === 'leader') {
+      const { data: { session } } = await supabase.auth.getSession()
+      fetch('/api/admin/my-groups', { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } })
+        .then(r => r.ok ? r.json() : { groups: [] })
+        .then(j => { if ((j.groups || []).some((g: any) => g.id === prof.group_id)) { setCanPost(true); setItemFor('table') } })
+        .catch(() => {})
+    }
 
     // 60 days of completions covers any streak worth displaying and is one
     // query instead of one per habit.
@@ -161,6 +187,52 @@ export default function MyTasks() {
     setDoneToday(nextDone)
     const adherence = calcAdherence(completedIds.size, nextDone.size, tasks.length, habits.length)
     await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
+  }
+
+  async function addItem() {
+    const title = itemTitle.trim()
+    if (!title || !groupId) return
+    setItemSaving(true); setItemError('')
+    const supabase = createClient()
+    if (itemFor === 'table' && canPost) {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin/post-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ table: 'tasks', rows: [{ group_id: groupId, title, description: itemNote.trim() }] }),
+      })
+      const r = await res.json().catch(() => ({}))
+      setItemSaving(false)
+      if (!res.ok) { setItemError(`Couldn't post: ${r.detail || r.error || res.status}`); return }
+      for (const row of r.items || []) notifyAbout('task', row.id)
+      setTasks(prev => [...(r.items || []), ...prev])
+    } else {
+      // .select() so a write the policies refuse is caught, not shown as saved.
+      const { data, error } = await supabase.from('personal_items')
+        .insert({ user_id: userId, title, note: itemNote.trim() || null }).select('id, title, note, done_at').single()
+      setItemSaving(false)
+      if (error || !data) {
+        setItemError(error && /personal_items/.test(error.message) ? "This isn't switched on yet." : "Couldn't save. Try again.")
+        return
+      }
+      setPersonal(prev => [...prev, data])
+    }
+    setItemTitle(''); setItemNote(''); setItemOpen(false)
+  }
+
+  async function togglePersonal(id: string) {
+    const item = personal.find(p => p.id === id)
+    if (!item) return
+    const done_at = item.done_at ? null : new Date().toISOString()
+    setPersonal(prev => prev.map(p => p.id === id ? { ...p, done_at } : p))
+    const { data, error } = await createClient().from('personal_items').update({ done_at }).eq('id', id).select('id')
+    if (error || !data?.length) setPersonal(prev => prev.map(p => p.id === id ? { ...p, done_at: item.done_at } : p))
+  }
+
+  async function removePersonal(id: string) {
+    if (!confirm('Remove this item?')) return
+    const { data, error } = await createClient().from('personal_items').delete().eq('id', id).select('id')
+    if (!error && data?.length) setPersonal(prev => prev.filter(p => p.id !== id))
   }
 
   const adherence = calcAdherence(completedIds.size, doneToday.size, tasks.length, habits.length)
@@ -359,14 +431,52 @@ export default function MyTasks() {
 
             {/* Reading Section */}
             <div>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 px-1">Reading & Resources</p>
-              {tasks.length === 0 ? (
+              <div className="flex items-center justify-between mb-2 px-1">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Reading & Resources</p>
+                <button onClick={() => { setItemOpen(v => !v); setItemError('') }} aria-label="Add reading or a resource"
+                  className="w-7 h-7 rounded-full bg-bt-navy text-white text-lg leading-none font-bold flex items-center justify-center">
+                  {itemOpen ? '×' : '+'}
+                </button>
+              </div>
+
+              {itemOpen && (
+                <div className="bg-white rounded-2xl p-4 shadow-sm mb-3 space-y-2">
+                  {canPost && (
+                    <div className="flex gap-2">
+                      {([['table', '🪑 Whole table'], ['me', '🙋 Just me']] as const).map(([k, label]) => (
+                        <button key={k} type="button" onClick={() => setItemFor(k)}
+                          className={`flex-1 py-2 rounded-xl text-xs font-semibold border-2 ${itemFor === k ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input autoFocus value={itemTitle} onChange={e => setItemTitle(e.target.value)}
+                    placeholder={itemFor === 'table' && canPost ? 'e.g. Read chapter 2 of As a Man Thinketh' : 'e.g. Finish Atomic Habits'}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                  <textarea value={itemNote} onChange={e => setItemNote(e.target.value)} rows={2}
+                    placeholder="Link or note (optional)"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                  <p className="text-[11px] text-gray-400">
+                    {itemFor === 'table' && canPost
+                      ? 'Everyone at your table sees this and gets a notification.'
+                      : 'Only you can see this.'}
+                  </p>
+                  {itemError && <p className="text-xs text-red-600">{itemError}</p>}
+                  <button onClick={addItem} disabled={itemSaving || !itemTitle.trim()}
+                    className="w-full py-3 rounded-xl bg-bt-navy text-white text-sm font-semibold disabled:opacity-40">
+                    {itemSaving ? 'Saving...' : itemFor === 'table' && canPost ? 'Post to the table' : 'Add for me'}
+                  </button>
+                </div>
+              )}
+
+              {tasks.length === 0 && personal.length === 0 ? (
                 <div className="text-center py-10">
                   <p className="text-4xl mb-3">📚</p>
-                  <p className="text-gray-500 font-medium">No reading assigned yet</p>
-                  <p className="text-gray-400 text-sm mt-1">Your leader will post material here</p>
+                  <p className="text-gray-500 font-medium">Nothing here yet</p>
+                  <p className="text-gray-400 text-sm mt-1">Your TC posts reading here. Tap + to add something just for you.</p>
                 </div>
-              ) : (
+              ) : tasks.length === 0 ? null : (
                 <div className="space-y-3">
                   {tasks.map(task => {
                     const done = completedIds.has(task.id)
@@ -391,6 +501,31 @@ export default function MyTasks() {
                             <p className="text-[11px] text-gray-300 mt-1">Tap the link to open it · tap anywhere else to mark done</p>
                           )}
                         </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {personal.length > 0 && (
+                <div className="mt-4 space-y-3">
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide px-1">Just for you 🔒</p>
+                  {personal.map(item => {
+                    const done = !!item.done_at
+                    return (
+                      <div key={item.id} onClick={() => togglePersonal(item.id)} role="button"
+                        className={`w-full bg-white rounded-2xl p-4 shadow-sm flex items-start gap-4 text-left transition-opacity cursor-pointer ${done ? 'opacity-60' : ''}`}>
+                        <div className={`mt-0.5 w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${done ? 'bg-bt-blue border-bt-blue' : 'border-gray-300'}`}>
+                          {done && (
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5"><path d="M20 6L9 17l-5-5"/></svg>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-semibold text-gray-900 break-words ${done ? 'line-through text-gray-400' : ''}`}>{linkify(item.title)}</p>
+                          {item.note && <p className="text-gray-400 text-sm mt-1 leading-relaxed break-words">{linkify(item.note)}</p>}
+                        </div>
+                        <button onClick={e => { e.stopPropagation(); removePersonal(item.id) }} aria-label="Remove"
+                          className="text-gray-300 text-lg leading-none px-1">×</button>
                       </div>
                     )
                   })}

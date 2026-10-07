@@ -38,7 +38,7 @@ export default function GroupPage() {
   const [view, setView] = useState<'chat' | 'you' | 'people'>('you')
   // TC quick-send: a prompt or a message to the selected table, and a
   // personal nudge to one member — without a trip to Admin.
-  const [sendMode, setSendMode] = useState<'prompt' | 'message' | null>(null)
+  const [sendMode, setSendMode] = useState<'prompt' | 'message' | 'reading' | null>(null)
   const [sendText, setSendText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendNote, setSendNote] = useState('')
@@ -120,7 +120,16 @@ export default function GroupPage() {
     setSending(true); setSendNote('')
     const h = { ...(await headers()), 'Content-Type': 'application/json' }
     try {
-      if (sendMode === 'prompt') {
+      if (sendMode === 'reading') {
+        // First line is the title, anything after it the description.
+        const [title, ...rest] = text.split('\n')
+        const res = await fetch('/api/admin/post-item', { method: 'POST', headers: h,
+          body: JSON.stringify({ table: 'tasks', rows: [{ group_id: groupId, title: title.trim(), description: rest.join('\n').trim() }] }) })
+        const r = await res.json().catch(() => ({}))
+        if (!res.ok) { setSendNote(`Could not post: ${r.detail || r.error || res.status}`); return }
+        for (const row of r.items || []) notifyAbout('task', row.id)
+        setSendNote(`✓ Added to ${groupName}'s Reading & Resources.`)
+      } else if (sendMode === 'prompt') {
         const res = await fetch('/api/admin/post-item', { method: 'POST', headers: h,
           body: JSON.stringify({ table: 'journal_prompts', rows: [{ group_id: groupId, prompt: text }] }) })
         const r = await res.json().catch(() => ({}))
@@ -239,8 +248,8 @@ export default function GroupPage() {
         {isLeader && detail && (
           <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
             <h3 className="font-bold text-bt-navy text-sm">Send to {groupName}</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {([['prompt', '✍️ Post a prompt'], ['message', '📣 Send a message']] as const).map(([k, label]) => (
+            <div className="grid grid-cols-3 gap-2">
+              {([['reading', '📚 Reading'], ['prompt', '✍️ Prompt'], ['message', '📣 Message']] as const).map(([k, label]) => (
                 <button key={k} type="button" onClick={() => { setSendMode(sendMode === k ? null : k); setSendNote('') }}
                   className={`py-2.5 rounded-xl text-sm font-semibold border ${sendMode === k ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-bt-navy border-gray-200'}`}>
                   {label}
@@ -250,16 +259,18 @@ export default function GroupPage() {
             {sendMode && (
               <>
                 <p className="text-gray-400 text-xs">
-                  {sendMode === 'prompt'
+                  {sendMode === 'reading'
+                    ? 'Added to Reading & Resources on everyone\'s You tab, with a notification. First line is the title; put a link or note on the next line.'
+                    : sendMode === 'prompt'
                     ? 'Members see this in their Reflections tab and get a notification.'
                     : 'Goes to everyone at this table now: by push, or by email if their notifications are off.'}
                 </p>
                 <textarea value={sendText} onChange={e => setSendText(e.target.value)} rows={3}
-                  placeholder={sendMode === 'prompt' ? "e.g. What's one belief you're ready to let go of?" : 'Type your message...'}
+                  placeholder={sendMode === 'reading' ? 'e.g. Read chapter 2 of As a Man Thinketh\nhttps://…' : sendMode === 'prompt' ? "e.g. What's one belief you're ready to let go of?" : 'Type your message...'}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base text-gray-900 resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-bt-blue" />
                 <button onClick={sendToTable} disabled={sending || !sendText.trim()}
                   className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                  {sending ? 'Sending...' : sendMode === 'prompt' ? 'Post Prompt' : 'Send to Table Now'}
+                  {sending ? 'Sending...' : sendMode === 'reading' ? 'Add Reading' : sendMode === 'prompt' ? 'Post Prompt' : 'Send to Table Now'}
                 </button>
               </>
             )}
