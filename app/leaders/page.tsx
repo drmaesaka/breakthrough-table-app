@@ -165,8 +165,17 @@ export default function LeadersPage() {
 
   async function deleteResource(id: string) {
     if (!confirm('Remove this resource for every TC?')) return
-    const { error } = await supabase.from('leader_resources').delete().eq('id', id)
-    if (error) { setResError(error.message); return }
+    // .select() so a delete the database quietly refuses (zero rows, no
+    // error) is reported instead of the item vanishing and coming back.
+    const { data, error } = await supabase.from('leader_resources').delete().eq('id', id).select('id')
+    if (error || !data?.length) {
+      // Fall back to the server, which checks the caller is a TC itself.
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/leaders/resources', { method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ id }) }).catch(() => null)
+      if (!res || !res.ok) { setResError("Couldn't remove that resource. Try again, or ask Thompson."); return }
+    }
     setResources(p => p.filter(r => r.id !== id))
   }
 

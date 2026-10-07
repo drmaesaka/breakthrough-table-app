@@ -60,26 +60,46 @@ export async function DELETE(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { table, id } = await req.json().catch(() => ({}))
+  // count: true → only report the copies (no delete). all: true → remove every copy.
+  const { table, id, count, all } = await req.json().catch(() => ({}))
   if (!TABLES[table as string] || !id) return NextResponse.json({ error: 'table and id are required' }, { status: 400 })
 
   const supabase = adminClient()
-  const { data: row } = await supabase.from(table).select('id, group_id').eq('id', id).maybeSingle()
+  const { data: row } = await supabase.from(table).select('*').eq('id', id).maybeSingle()
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const mine = await leaderGroupIds(auth.userId)
   if (row.group_id && !mine.includes(row.group_id)) {
     return NextResponse.json({ error: 'That item belongs to another table' }, { status: 403 })
   }
 
+  // Posting to several tables at once writes one row per table. Removing it in
+  // Admin removed only the open table's copy, so it "came back" — it was still
+  // on the others (TC report 2026-10-07). Copies = same title (and link, for
+  // the library) posted within a few minutes, at a table this TC leads.
+  let ids: string[] = [id]
+  if ((count || all) && table !== 'journal_prompts' && row.group_id) {
+    const t = new Date(row.created_at).getTime()
+    let q = supabase.from(table).select('id, group_id').in('group_id', mine).eq('title', row.title)
+      .gte('created_at', new Date(t - 5 * 60000).toISOString()).lte('created_at', new Date(t + 5 * 60000).toISOString())
+    if (table === 'content') q = q.eq('url', row.url)
+    const { data: copies } = await q
+    const copyIds = (copies || []).map((c: any) => c.id as string)
+    if (count) {
+      const { data: names } = await supabase.from('groups').select('name').in('id', (copies || []).map((c: any) => c.group_id))
+      return NextResponse.json({ copies: copyIds.length, tables: (names || []).map((g: any) => g.name) })
+    }
+    if (copyIds.length) ids = copyIds
+  }
+
   if (table === 'tasks') {
-    const { error } = await supabase.from('task_completions').delete().eq('task_id', id)
+    const { error } = await supabase.from('task_completions').delete().in('task_id', ids)
     if (error) return NextResponse.json({ error: 'Could not remove', detail: error.message }, { status: 500 })
   }
   if (table === 'journal_prompts') {
     const { error } = await supabase.from('journal_responses').delete().eq('prompt_id', id)
     if (error) return NextResponse.json({ error: 'Could not remove', detail: error.message }, { status: 500 })
   }
-  const { error } = await supabase.from(table).delete().eq('id', id)
+  const { data: gone, error } = await supabase.from(table).delete().in('id', ids).select('id')
   if (error) return NextResponse.json({ error: 'Could not remove', detail: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, removed: (gone || []).length })
 }

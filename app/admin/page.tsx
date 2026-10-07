@@ -1009,7 +1009,18 @@ export default function AdminPage() {
   }
 
   async function deleteItem(table: 'tasks' | 'content' | 'journal_prompts', id: string) {
-    const res = await fetch('/api/admin/post-item', { method: 'DELETE', headers: await authHeaders(), body: JSON.stringify({ table, id }) })
+    // Posted to several tables at once? Offer to remove every copy, or it
+    // stays on the other tables and looks like the remove did not work.
+    let all = false
+    if (table !== 'journal_prompts') {
+      const pre = await fetch('/api/admin/post-item', { method: 'DELETE', headers: await authHeaders(), body: JSON.stringify({ table, id, count: true }) })
+      const info = await pre.json().catch(() => ({}))
+      if (pre.ok && info.copies > 1) {
+        if (confirm(`This was posted to ${info.copies} tables (${(info.tables || []).join(', ')}). Remove it from all of them?`)) all = true
+        else if (!confirm('Remove it from just this table, then?')) return false
+      }
+    }
+    const res = await fetch('/api/admin/post-item', { method: 'DELETE', headers: await authHeaders(), body: JSON.stringify({ table, id, all }) })
     if (!res.ok) {
       const json = await res.json().catch(() => ({}))
       alert(json.error || `Could not remove (${res.status})`)
