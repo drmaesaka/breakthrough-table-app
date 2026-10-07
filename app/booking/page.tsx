@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import FloorPlan, { planForSuite } from '@/components/FloorPlan'
 import { localDay } from '@/lib/dates'
 import {
   DEFAULT_SETTINGS,
@@ -38,6 +39,8 @@ export default function BookingPage() {
   const [bookings, setBookings] = useState<any[]>([])
   const [myBookings, setMyBookings] = useState<any[]>([])
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
+  /** Suites whose floor plan is open. */
+  const [mapsOpen, setMapsOpen] = useState<Set<string>>(new Set())
   const [selectedStart, setSelectedStart] = useState<number | null>(null)
   const [duration, setDuration] = useState<number>(0)
   const [notes, setNotes] = useState('')
@@ -201,6 +204,24 @@ export default function BookingPage() {
   const isClosed = !dayHours || dayHours.is_closed
   const nowMins = selectedDate === today ? nowMinutes() : null
 
+  /** Whether a room has any start time left on the chosen day (same rule as the list). */
+  function roomOpen(room: any): boolean {
+    const taken = takenFor(room.id)
+    return daySlots.some(s => (nowMins === null || s >= nowMins) && maxDurationAt(s, taken, hours, settings, selectedDate) > 0)
+  }
+
+  function pickFromMap(room: any) {
+    setSelectedRoom(room)
+    setSelectedStart(null)
+    setBookingError('')
+    // Bring its time picker into view below the map.
+    setTimeout(() => document.getElementById(`room-${room.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
+
+  function toggleMap(suite: string) {
+    setMapsOpen(prev => { const n = new Set(prev); if (n.has(suite)) n.delete(suite); else n.add(suite); return n })
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
       <p className="text-gray-400">Loading...</p>
@@ -306,7 +327,20 @@ export default function BookingPage() {
           if (suiteRooms.length === 0) return null
           return (
             <div key={suite}>
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1">{suite}</p>
+              <div className="flex items-center justify-between mb-2 px-1">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{suite}</p>
+                {planForSuite(suite) && (
+                  <button onClick={() => toggleMap(suite)} className="text-xs font-semibold text-bt-blue">
+                    {mapsOpen.has(suite) ? 'Hide floor plan' : '🗺 See the floor plan'}
+                  </button>
+                )}
+              </div>
+              {mapsOpen.has(suite) && (
+                <div className="mb-3">
+                  <FloorPlan suite={suite} rooms={suiteRooms} status={r => roomOpen(r) ? 'open' : 'full'}
+                    selectedId={selectedRoom?.id ?? null} onPick={pickFromMap} />
+                </div>
+              )}
               <div className="space-y-2">
                 {suiteRooms.map(room => {
                   const taken = takenFor(room.id)
@@ -322,7 +356,7 @@ export default function BookingPage() {
                   const available = openStarts.length > 0
 
                   return (
-                    <div key={room.id} className="bg-white rounded-2xl shadow-sm overflow-hidden transition-all">
+                    <div key={room.id} id={`room-${room.id}`} className="bg-white rounded-2xl shadow-sm overflow-hidden transition-all scroll-mt-4">
                       <button
                         onClick={() => {
                           setSelectedRoom(isSelected ? null : room)
@@ -350,6 +384,9 @@ export default function BookingPage() {
 
                       {isSelected && (
                         <div className="px-5 pb-5 border-t border-gray-50 pt-4 space-y-4">
+                          {planForSuite(suite) && !mapsOpen.has(suite) && (
+                            <button onClick={() => toggleMap(suite)} className="text-xs font-semibold text-bt-blue">📍 Where is {room.name}? See it on the floor plan</button>
+                          )}
                           <div>
                             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Pick a start time</p>
                             <div className="grid grid-cols-3 gap-2">
