@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import FloorPlan, { planForSuite } from '@/components/FloorPlan'
-import { localDay } from '@/lib/dates'
 import {
   DEFAULT_SETTINGS,
   addDays,
@@ -15,6 +14,8 @@ import {
   maxDurationAt,
   nowMinutes,
   parseTime,
+  slotHasPassed,
+  venueToday,
   slotsForDate,
   toIntervals,
   toTimeString,
@@ -35,7 +36,7 @@ export default function BookingPage() {
   const [rooms, setRooms] = useState<any[]>([])
   const [hours, setHours] = useState<VenueHours[]>([])
   const [settings, setSettings] = useState<VenueSettings>(DEFAULT_SETTINGS)
-  const [selectedDate, setSelectedDate] = useState(localDay())
+  const [selectedDate, setSelectedDate] = useState(venueToday())
   const [bookings, setBookings] = useState<any[]>([])
   const [myBookings, setMyBookings] = useState<any[]>([])
   const [selectedRoom, setSelectedRoom] = useState<any>(null)
@@ -52,7 +53,8 @@ export default function BookingPage() {
   const [noGroup, setNoGroup] = useState(false)
   const router = useRouter()
 
-  const today = localDay()
+  // The venue's day, not the phone's: someone travelling still books Minnesota time.
+  const today = venueToday()
 
   async function authHeaders(): Promise<Record<string, string>> {
     const { data: { session } } = await createClient().auth.getSession()
@@ -207,7 +209,7 @@ export default function BookingPage() {
   /** Whether a room has any start time left on the chosen day (same rule as the list). */
   function roomOpen(room: any): boolean {
     const taken = takenFor(room.id)
-    return daySlots.some(s => (nowMins === null || s >= nowMins) && maxDurationAt(s, taken, hours, settings, selectedDate) > 0)
+    return daySlots.some(s => (nowMins === null || !slotHasPassed(s, nowMins, settings)) && maxDurationAt(s, taken, hours, settings, selectedDate) > 0)
   }
 
   function pickFromMap(room: any) {
@@ -350,7 +352,7 @@ export default function BookingPage() {
                   // in it, which is not the same as "nothing starts here" once
                   // bookings can run long.
                   const openStarts = daySlots.filter(s =>
-                    (nowMins === null || s >= nowMins) &&
+                    (nowMins === null || !slotHasPassed(s, nowMins, settings)) &&
                     maxDurationAt(s, taken, hours, settings, selectedDate) > 0
                   )
                   const available = openStarts.length > 0
@@ -392,7 +394,7 @@ export default function BookingPage() {
                             <div className="grid grid-cols-3 gap-2">
                               {daySlots.map(slot => {
                                 const longest = maxDurationAt(slot, taken, hours, settings, selectedDate)
-                                const past = nowMins !== null && slot < nowMins
+                                const past = nowMins !== null && slotHasPassed(slot, nowMins, settings)
                                 const disabled = past || longest === 0
                                 const isPicked = selectedStart === slot
                                 return (

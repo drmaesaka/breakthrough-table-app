@@ -210,7 +210,10 @@ export function validateBooking(opts: {
   if (duration > settings.max_duration_minutes) {
     return `Bookings are at most ${formatDuration(settings.max_duration_minutes)}.`
   }
-  if (dateStr === today && nowMinutes !== null && start < nowMinutes) {
+  // A slot that is already under way can still be booked (someone who walks
+  // in at 10:10 can take the 10:00 slot); only a slot that has fully ended is
+  // in the past.
+  if (dateStr === today && nowMinutes !== null && slotHasPassed(start, nowMinutes, settings)) {
     return 'That time has already passed today.'
   }
   if (!isFree(start, end, taken)) return 'That overlaps a booking already on the calendar.'
@@ -225,7 +228,27 @@ export function addDays(dateStr: string, n: number): string {
   return d.toLocaleDateString('en-CA')
 }
 
-/** Minutes since local midnight, for the past-slot check. */
+/**
+ * The venue's timezone. Every "today" and "now" for booking is the venue's,
+ * not the machine's: the server runs in UTC, five or six hours ahead of
+ * Minnesota, and used to reject a 1pm booking at 10am as already past (and
+ * all of today after 7pm). Fixed 2026-10-07.
+ */
+export const VENUE_TZ = 'America/Chicago'
+
+/** Today at the venue, YYYY-MM-DD. */
+export function venueToday(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: VENUE_TZ }).format(date)
+}
+
+/** Minutes since midnight at the venue, for the past-slot check. */
 export function nowMinutes(date: Date = new Date()): number {
-  return date.getHours() * 60 + date.getMinutes()
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: VENUE_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date)
+  const get = (t: string) => Number(parts.find(p => p.type === t)?.value || 0)
+  return get('hour') * 60 + get('minute')
+}
+
+/** True once a slot starting at `start` has fully ended. The slot in progress is still bookable. */
+export function slotHasPassed(start: number, now: number, settings: VenueSettings): boolean {
+  return start + settings.slot_minutes <= now
 }

@@ -1,3 +1,4 @@
+import { venueToday } from '@/lib/venue'
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, requireGroupOwnership } from '@/lib/api-auth'
 
@@ -199,7 +200,7 @@ export async function DELETE(req: NextRequest) {
     if (!owns.ok) return NextResponse.json({ error: owns.error }, { status: owns.status })
   }
 
-  const today = new Date().toLocaleDateString('en-CA')
+  const today = venueToday()
   const { count } = await supabase
     .from('room_bookings')
     .select('id', { count: 'exact', head: true })

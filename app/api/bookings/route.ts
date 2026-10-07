@@ -7,6 +7,8 @@ import {
   toIntervals,
   toTimeString,
   validateBooking,
+  venueToday,
+  nowMinutes,
   type VenueHours,
   type VenueSettings,
 } from '@/lib/venue'
@@ -43,7 +45,7 @@ async function loadVenue(): Promise<{ hours: VenueHours[]; settings: VenueSettin
 
 /** Local calendar day, never toISOString — see lib/dates.ts for why. */
 function today(): string {
-  return new Date().toLocaleDateString('en-CA')
+  return venueToday()
 }
 
 function dateLabel(d: string): string {
@@ -138,7 +140,7 @@ export async function POST(req: NextRequest) {
     settings,
     dateStr: booking_date,
     today: today(),
-    nowMinutes: new Date().getHours() * 60 + new Date().getMinutes(),
+    nowMinutes: nowMinutes(),
   })
   if (problem) return NextResponse.json({ error: problem }, { status: 400 })
 
