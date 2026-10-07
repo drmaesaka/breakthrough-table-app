@@ -243,6 +243,33 @@ async function getAll<T>(path: string, params: Record<string, string | number> =
   return out
 }
 
+/** Content posted on Sunrise Network (Admin → Content). See lib/sunrise-library.ts. */
+export type CauseMachineResource = {
+  ResourceId: number
+  Title: string | null
+  GroupId: number | null
+  ResourceType: string | null
+  Status: string | null
+  /** Public, Community, MembershipLevel, Group, Neighborhood. */
+  Privacy: string | null
+  Description: string | null
+  DatePublished: string | null
+  DateExpires: string | null
+  FileUrl: string | null
+  CoverPhotoUrl: string | null
+  Communities: { ResourceUrl?: string; Author?: string }[] | null
+}
+
+export type CauseMachineGroup = { GroupId: number; Name: string | null; Status: string | null }
+
+export async function fetchResources(): Promise<CauseMachineResource[]> {
+  return getAll<CauseMachineResource>('v1/resources')
+}
+
+export async function fetchGroups(): Promise<CauseMachineGroup[]> {
+  return getAll<CauseMachineGroup>('v1/groups')
+}
+
 export async function fetchMembers(): Promise<CauseMachineMember[]> {
   return getAll<CauseMachineMember>('v1/members')
 }

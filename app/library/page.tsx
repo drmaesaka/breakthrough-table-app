@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import SunriseLibrary from '@/components/SunriseLibrary'
 
 const TYPE_CONFIG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
   video:   { label: 'Video',   bg: 'bg-red-50',    text: 'text-red-500',    icon: '▶' },
@@ -137,18 +138,11 @@ export default function LibraryPage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
         <h1 className="text-white text-2xl font-bold">Library</h1>
-        <p className="text-bt-light/60 text-sm mt-0.5">{groupName || 'Your group'} resources</p>
+        <p className="text-bt-light/60 text-sm mt-0.5">{groupName ? `${groupName} and Sunrise Network` : 'Sunrise Network'} resources</p>
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-5">
 
-        {current.length === 0 && previous.length === 0 && (
-          <div className="text-center py-16">
-            <p className="text-5xl mb-3">📚</p>
-            <p className="text-gray-500 font-medium">Nothing here yet</p>
-            <p className="text-gray-400 text-sm mt-1">Your leader will post resources here</p>
-          </div>
-        )}
 
         {/* Current Assignment */}
         {current.length > 0 && (
@@ -186,6 +180,8 @@ export default function LibraryPage() {
             )}
           </div>
         )}
+
+        <SunriseLibrary />
       </div>
 
       <BottomNav />

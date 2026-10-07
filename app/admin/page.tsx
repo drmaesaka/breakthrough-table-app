@@ -1,6 +1,7 @@
 'use client'
 import { eventWhen, endFromTime } from '@/lib/event-time'
 import { pickTable, onCurrentTableChange } from '@/lib/current-table'
+import { SunriseGroupPicker, SunriseVideoLinks } from '@/components/SunriseAdmin'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -1524,6 +1525,7 @@ export default function AdminPage() {
 
         {tab === 'content' && (
           <>
+            <SunriseVideoLinks />
             <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
               <h3 className="font-bold text-bt-navy">Add Content</h3>
               <input value={contentTitle} onChange={e => setContentTitle(e.target.value)} placeholder="Title *" className={inputClass} />
@@ -1792,6 +1794,9 @@ export default function AdminPage() {
                         {!g.program_start_date && (
                           <p className="text-[11px] text-amber-600 mt-0.5">Set this so members’ journey bar shows where the table really is.</p>
                         )}
+                        {/* Which Sunrise group's posts this table sees in Library. */}
+                        <SunriseGroupPicker tableId={g.id} value={g.sunrise_group_id ?? null}
+                          onSaved={v => setGroups(prev => prev.map(x => x.id === g.id ? { ...x, sunrise_group_id: v } : x))} />
                         {/* Who runs it, right under the name — the leaders box
                             further down is for changing that, not finding it. */}
                         {(() => {
