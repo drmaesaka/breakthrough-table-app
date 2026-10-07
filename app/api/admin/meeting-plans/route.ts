@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, requireGroupOwnership } from '@/lib/api-auth'
-import { MEETING_PLANS } from '@/lib/meeting-plans'
+import { MEETING_PLANS } from '@/lib/meeting-plans-seed'
 
 // Meeting plans are group-wide content, so every write here uses the service
 // key: meeting_plans carries a SELECT policy and nothing else, and a browser

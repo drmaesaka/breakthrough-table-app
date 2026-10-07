@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import {
-  MEETING_PLANS,
   MEETING_SECTIONS,
   resolveMeetingPlans,
   type StoredMeetingPlan,
@@ -41,13 +40,10 @@ export default function MeetingsPage() {
         .select('*')
         .order('number', { ascending: true })
 
-      // Before the migration and seed have run there is nothing to read. Fall
-      // back to the bundled curriculum so the page is useful on day one rather
-      // than showing an empty shelf and looking broken.
+      // No bundled fallback: the curriculum is TC-only and must not ship in
+      // page code. The database copy is seeded from Admin → meetings.
       if (error) console.error('meeting plans fetch failed:', error.message)
-      const resolved = rows && rows.length
-        ? resolveMeetingPlans(rows as StoredMeetingPlan[])
-        : (MEETING_PLANS as StoredMeetingPlan[])
+      const resolved = resolveMeetingPlans((rows || []) as StoredMeetingPlan[])
 
       const group = Array.isArray(profile?.groups) ? profile?.groups[0] : profile?.groups
       const currentNumber = (group as any)?.current_meeting_number ?? null

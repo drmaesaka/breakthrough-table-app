@@ -12,7 +12,6 @@ import {
   MEETING_SECTIONS,
   resolveMeetingPlans,
   type StoredMeetingPlan,
-  MEETING_PLANS,
 } from '@/lib/meeting-plans'
 import { localDay } from '@/lib/dates'
 import {
@@ -468,6 +467,12 @@ export default function AdminPage() {
 
   async function loadGroupData(gid: string) {
     const supabase = createClient()
+    // Meeting titles for attendance on the groups tab. They used to fall back
+    // to the curriculum bundled in page code; that copy is server-only now.
+    loadMeetingPlans(gid)
+    // Meeting titles for attendance on the groups tab. They used to fall back
+    // to the curriculum bundled in page code; that copy is server-only now.
+    loadMeetingPlans(gid)
     const [t, c, p, n] = await Promise.all([
       supabase.from('tasks').select('*').eq('group_id', gid).eq('archived', false).order('created_at', { ascending: false }),
       supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
@@ -1989,7 +1994,7 @@ export default function AdminPage() {
                     <TableAttendance
                       group={g}
                       seated={users.filter((u: any) => u.group_id === g.id).slice().sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))}
-                      plans={(meetingDefaults.length ? resolvedMeetings() : MEETING_PLANS).map(p => ({ number: p.number, title: p.title }))}
+                      plans={resolvedMeetings().map(p => ({ number: p.number, title: p.title }))}
                       headers={authHeaders}
                       onCurrentMeeting={(gid, n) => setGroups(prev => prev.map(x => x.id === gid ? { ...x, current_meeting_number: n } : x))}
                     />
