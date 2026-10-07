@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
@@ -7,6 +7,7 @@ import Link from 'next/link'
 import Avatar from '@/components/Avatar'
 import MyTasks from '@/components/MyTasks'
 import TableChat from '@/components/TableChat'
+import { pickTable, setCurrentTable, onCurrentTableChange } from '@/lib/current-table'
 import { notifyAbout } from '@/lib/notify-client'
 
 type Detail = {
@@ -100,7 +101,9 @@ export default function GroupPage() {
       // ?table=<id> from a chat notification opens that table, if it is one of mine.
       const wantTable = new URLSearchParams(window.location.search).get('table')
       if (wantTable && !want) setView('chat')
-      const first = (wantTable && all.find(t => t.id === wantTable)?.id) || all[0]?.id || null
+      // Otherwise the table chosen in the "Working in" bar, else their own.
+      const first = (wantTable && all.find(t => t.id === wantTable)?.id) || pickTable(all.map(t => t.id), home)
+      if (first && leader) setCurrentTable(first)
       if (!first) { router.push('/dashboard'); return }
       setGroupId(first)
       const firstName = all.find(t => t.id === first)?.name
@@ -159,7 +162,12 @@ export default function GroupPage() {
     if (r.pushed || r.emailed) setNudgeText('')
   }
 
+  // Follow the "Working in" bar.
+  const switchRef = useRef<(gid: string) => void>(() => {})
+  useEffect(() => onCurrentTableChange(gid => switchRef.current(gid)), [])
+
   async function switchTable(gid: string) {
+    if (gid === groupId || !tables.some(t => t.id === gid)) return
     setGroupId(gid); setDetail(null); setOpen(null)
     if (gid !== homeGroupId) setView(v => v === 'you' ? 'chat' : v)
     setSendMode(null); setSendText(''); setSendNote(''); setNudgeText(''); setNudgeNote(null)
@@ -181,6 +189,7 @@ export default function GroupPage() {
 
   const detailById = new Map((detail?.members || []).map(m => [m.id, m]))
 
+  switchRef.current = switchTable
   const onHome = groupId === homeGroupId
   // Members: You · Chat. The Table tab (who is at the table, the TC send
   // card, member detail) is TC-only — members do not need a view of everyone
@@ -203,12 +212,6 @@ export default function GroupPage() {
             </Link>
           )}
         </div>
-        {isLeader && tables.length > 1 && (
-          <select value={groupId || ''} onChange={e => switchTable(e.target.value)}
-            className="mt-3 w-full bg-white/15 text-white text-sm rounded-xl px-3 py-2 border border-white/25 focus:outline-none">
-            {tables.map(t => <option key={t.id} value={t.id} className="text-gray-900">{t.name}{t.id === homeGroupId ? ' (your table)' : ''}</option>)}
-          </select>
-        )}
         <div className="flex gap-1 mt-4">
           {tabs.map(([k, label]) => (
             <button key={k} onClick={() => setView(k)}

@@ -3,22 +3,42 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { pickTable, setCurrentTable, onCurrentTableChange } from '@/lib/current-table'
 
 export default function BottomNav() {
   const pathname = usePathname()
   const [isLeader, setIsLeader] = useState(false)
   const [unread, setUnread] = useState(0)
+  // TCs: every table they can work in (the one they sit at, then the ones
+  // they lead) and the one they are working in now.
+  const [tables, setTables] = useState<{ id: string; name: string; home: boolean }[]>([])
+  const [current, setCurrent] = useState<string | null>(null)
 
   useEffect(() => {
     async function checkRole() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-      if (data?.role === 'leader') setIsLeader(true)
+      const { data } = await supabase.from('profiles').select('role, group_id, groups(name)').eq('id', user.id).single()
+      if (data?.role !== 'leader') return
+      setIsLeader(true)
+      const home = data.group_id ? { id: data.group_id as string, name: (data.groups as any)?.name || 'My table', home: true } : null
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin/my-groups', { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } }).catch(() => null)
+      const led = res && res.ok ? ((await res.json()).groups || []) : []
+      const all = [...(home ? [home] : []), ...led.filter((g: any) => g.id !== home?.id).map((g: any) => ({ id: g.id, name: g.name, home: false }))]
+      setTables(all)
+      setCurrent(pickTable(all.map(t => t.id), home?.id))
     }
     checkRole()
+    return onCurrentTableChange(setCurrent)
   }, [])
+
+  // The bar adds height above the tabs; screens with a pinned message box
+  // read this to stay clear of it.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--table-bar', tables.length ? '34px' : '0px')
+  }, [tables.length])
 
   // Unread count for the bell: on every screen change and when the app comes
   // back to the foreground (an installed PWA resumes without reloading).
@@ -82,6 +102,27 @@ export default function BottomNav() {
       )}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
+        {/* Which table a TC is working in, on every screen, with a switch.
+            My Table and Admin follow it. */}
+        {tables.length > 0 && (() => {
+          const t = tables.find(x => x.id === current) || tables[0]
+          return (
+            <div className="relative h-[34px] bg-bt-navy text-white flex items-center justify-center gap-1.5 text-xs font-semibold">
+              <span className="text-bt-light/70 font-medium">Working in</span>
+              <span className="truncate max-w-[55%]">🪑 {t.name}</span>
+              {tables.length > 1 && (
+                <>
+                  <span className="text-bt-light/70">▾</span>
+                  <select value={t.id} aria-label="Switch table"
+                    onChange={e => { setCurrent(e.target.value); setCurrentTable(e.target.value) }}
+                    className="absolute inset-0 opacity-0 w-full">
+                    {tables.map(x => <option key={x.id} value={x.id}>{x.name}{x.home ? ' (your table)' : ''}</option>)}
+                  </select>
+                </>
+              )}
+            </div>
+          )
+        })()}
         <div className="flex">
           {tabs.map(tab => {
             const active = pathname === tab.href

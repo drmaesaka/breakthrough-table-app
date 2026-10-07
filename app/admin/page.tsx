@@ -1,6 +1,7 @@
 'use client'
 import { eventWhen, endFromTime } from '@/lib/event-time'
-import { useEffect, useState } from 'react'
+import { pickTable, onCurrentTableChange } from '@/lib/current-table'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
@@ -421,6 +422,8 @@ export default function AdminPage() {
   const emptyRoom = { name: '', suite: '', room_type: 'conference_room', capacity: '', description: '' }
   const [newRoom, setNewRoom] = useState<any>(emptyRoom)
 
+  const selectTableRef = useRef<(gid: string) => void>(() => {})
+  useEffect(() => onCurrentTableChange(gid => selectTableRef.current(gid)), [])
   const router = useRouter()
 
   async function authHeaders(): Promise<Record<string, string>> {
@@ -455,7 +458,9 @@ export default function AdminPage() {
         : await ledGroups(supabase, user.id, '*, last_period_start')
       setGroups(grps)
       setUsers(membersRes.members || [])
-      if (grps[0]) { setSelectedGroup(grps[0].id); loadGroupData(grps[0].id) }
+      // The table in the "Working in" bar, if it is one this TC leads.
+      const startId = pickTable(grps.map((g: any) => g.id))
+      if (startId) { setSelectedGroup(startId); loadGroupData(startId) }
       setLoading(false)
     }
     load()
@@ -1357,6 +1362,17 @@ export default function AdminPage() {
 
   if (loading) return <div className="min-h-screen bg-bt-pale flex items-center justify-center"><p className="text-gray-400">Loading...</p></div>
 
+  // Follow the "Working in" bar. A table this TC sits at but does not lead
+  // is not in Admin's list; Admin stays where it is then.
+  selectTableRef.current = (gid: string) => {
+    if (gid === selectedGroup || !groups.some(g => g.id === gid)) return
+    setSelectedGroup(gid)
+    loadGroupData(gid)
+    setJournalResponses(null)
+    if (tab === 'events') loadEvents(gid)
+    if (tab === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans(gid) }
+  }
+
   return (
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-4">
@@ -1372,19 +1388,11 @@ export default function AdminPage() {
             </p>
           </div>
         )}
-        {groups.length > 0 && (
-          <select value={selectedGroup}
-            onChange={e => {
-              const gid = e.target.value
-              setSelectedGroup(gid)
-              loadGroupData(gid)
-              setJournalResponses(null)
-              if (tab === 'events') loadEvents(gid)
-              if (tab === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans(gid) }
-            }}
-            className="mt-3 w-full bg-white/15 text-white text-sm rounded-xl px-3 py-2 border border-white/25 focus:outline-none">
-            {groups.map(g => <option key={g.id} value={g.id} className="text-gray-900">{g.name}</option>)}
-          </select>
+        {groups.length > 0 && selectedGroup && (
+          <p className="text-bt-light/70 text-sm mt-1">
+            Working in <span className="text-white font-semibold">{groups.find(g => g.id === selectedGroup)?.name}</span>
+            <span className="text-bt-light/50"> · switch in the bar at the bottom</span>
+          </p>
         )}
         <div className="flex gap-2 mt-4 pb-1 overflow-x-auto">
           {// 'prompts' hidden: Reflections were removed 2026-10-07.

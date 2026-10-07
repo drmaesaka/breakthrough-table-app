@@ -308,7 +308,7 @@ export default function LeadersPage() {
           <PhotoPreview att={att} />
           <form onSubmit={sendMessage}
             className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
-            style={{ paddingBottom: 'calc(0.75rem + 60px)' }}>
+            style={{ paddingBottom: 'calc(0.75rem + 60px + var(--table-bar, 0px))' }}>
             <PhotoButton att={att} />
             <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)}
               placeholder="Message the other TCs..."
