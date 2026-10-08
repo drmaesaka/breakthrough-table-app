@@ -116,10 +116,9 @@ function todayLocal() {
 }
 
 /**
- * Roll call for one table, on its card in Admin → groups. Date box (today by
- * default), optional playbook meeting, tap the names, Save. What fills the
- * "Your BT Journey" timeline on every member's dashboard. Keyed by date so it
- * keeps working after the 12-meeting playbook is finished.
+ * Roll call for one table, on its card in Admin → Tables. Date box (today by
+ * default), tap the names, Save. Keyed by date, so it works for any meeting,
+ * in the playbook or after it.
  */
 function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
   group: { id: string; name: string; current_meeting_number?: number | null }
@@ -130,10 +129,9 @@ function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
 }) {
   const [open, setOpen] = useState(false)
   const [date, setDate] = useState(todayLocal())
-  const [number, setNumber] = useState<string>(() => {
-    const n = group.current_meeting_number
-    return n !== null && n !== undefined ? String(n) : ''
-  })
+  // No playbook-meeting box any more (TC feedback 2026-10-07: date and names
+  // are enough). A day recorded with a meeting number keeps it when re-saved.
+  const [number, setNumber] = useState<string>('')
   const [present, setPresent] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -150,7 +148,7 @@ function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
     setPresent(new Set<string>(json.user_ids || []))
     // A day already on record keeps its meeting number; a fresh day defaults
     // to the meeting after the last one recorded, or the table's current one.
-    if (json.meeting_number !== null && json.meeting_number !== undefined) setNumber(String(json.meeting_number))
+    setNumber(json.meeting_number !== null && json.meeting_number !== undefined ? String(json.meeting_number) : '')
   }
 
   async function loadHistory() {
@@ -190,8 +188,6 @@ function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
     setPresent(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
     setDirty(true); setMsg(null)
   }
-  const numbered = plans.filter(p => p.number >= 1)
-  const lastNumbered = numbered.length ? numbered[numbered.length - 1].number : 12
 
   if (!open) {
     return (
@@ -208,25 +204,12 @@ function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
         <p className="text-xs text-gray-400 font-medium">Attendance</p>
         <button onClick={() => setOpen(false)} className="text-xs text-gray-400 font-semibold">Close</button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="text-[11px] text-gray-400 font-medium">Meeting date</span>
-          <input type="date" value={date} max={todayLocal()}
-            onChange={e => { if (e.target.value) setDate(e.target.value) }}
-            className="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm bg-white" />
-        </label>
-        <label className="block">
-          <span className="text-[11px] text-gray-400 font-medium">Playbook meeting</span>
-          <select value={number} onChange={e => { setNumber(e.target.value); setDirty(true) }}
-            className="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm bg-white">
-            <option value="">After the playbook / other</option>
-            {numbered.map(p => <option key={p.number} value={String(p.number)}>#{p.number} · {p.title}</option>)}
-          </select>
-        </label>
-      </div>
-      {number !== '' && Number(number) === lastNumbered && (
-        <p className="text-[11px] text-gray-400">Last playbook meeting. From the next one, leave the meeting box on “After the playbook”.</p>
-      )}
+      <label className="block">
+        <span className="text-[11px] text-gray-400 font-medium">Meeting date</span>
+        <input type="date" value={date} max={todayLocal()}
+          onChange={e => { if (e.target.value) setDate(e.target.value) }}
+          className="mt-0.5 w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm bg-white" />
+      </label>
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-500">Tap everyone who was there.</p>
         <div className="flex gap-3">
@@ -270,7 +253,7 @@ function TableAttendance({ group, seated, plans, headers, onCurrentMeeting }: {
             {history.slice(0, 8).map(h => (
               <button key={h.date} type="button" onClick={() => setDate(h.date)}
                 className={`w-full flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${h.date === date ? 'bg-white text-bt-navy font-semibold' : 'text-gray-500'}`}>
-                <span>{fmtDate(h.date)}{h.meeting_number !== null ? ` · #${h.meeting_number}` : ''}</span>
+                <span>{fmtDate(h.date)}</span>
                 <span>{h.count} present</span>
               </button>
             ))}
@@ -486,9 +469,6 @@ export default function AdminPage() {
 
   async function loadGroupData(gid: string) {
     const supabase = createClient()
-    // Meeting titles for attendance on the groups tab. They used to fall back
-    // to the curriculum bundled in page code; that copy is server-only now.
-    loadMeetingPlans(gid)
     // Meeting titles for attendance on the groups tab. They used to fall back
     // to the curriculum bundled in page code; that copy is server-only now.
     loadMeetingPlans(gid)
