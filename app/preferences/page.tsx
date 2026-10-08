@@ -294,7 +294,7 @@ export default function PreferencesPage() {
           {([
             ['💬 Someone posts in my table chat (or the TC Room)', notifyChat, setNotifyChat, 'One ping per conversation, not per message'],
             ['✉️ I get a direct message', notifyDms, setNotifyDms, ''],
-            ['📚 My TC posts reading, a prompt or a library item', notifyUpdates, setNotifyUpdates, ''],
+            ['📚 My TC posts reading or a library item', notifyUpdates, setNotifyUpdates, ''],
           ] as [string, boolean, (v: boolean) => void, string][]).map(([label, on, set, hint]) => (
             <div key={label} className="flex items-center justify-between gap-3">
               <div className="min-w-0">

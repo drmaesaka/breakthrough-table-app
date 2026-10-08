@@ -59,7 +59,7 @@ export default function NotificationsPage() {
           <div className="text-center py-16">
             <p className="text-5xl mb-3">🔔</p>
             <p className="text-gray-500 font-medium">Nothing yet</p>
-            <p className="text-gray-400 text-sm mt-1">New messages, prompts and reading from your table will show up here.</p>
+            <p className="text-gray-400 text-sm mt-1">New messages, reading and updates from your table will show up here.</p>
           </div>
         )}
         {items.map(n => (
