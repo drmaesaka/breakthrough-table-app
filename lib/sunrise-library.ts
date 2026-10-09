@@ -18,7 +18,7 @@
 //
 // SERVER ONLY: uses the Cause Machine credentials and the service key.
 
-import { fetchResources, type CauseMachineResource } from './cause-machine'
+import { fetchResources, fetchGroups, type CauseMachineResource } from './cause-machine'
 
 /** Sunrise groups whose posts are for every member. */
 const ALL_MEMBER_GROUPS = new Set([7010 /* All BT Members */, 6857 /* ALL Sunrise Network */])
@@ -41,17 +41,20 @@ export type SunriseItem = {
   /** The item's page on Sunrise (needs a Sunrise login unless Public). */
   sunriseUrl: string | null
   cover: string | null
+  /** Posted to one Sunrise group (a table's, or the TCs'): who it is limited to, for a 🔒 label. */
+  onlyFor: string | null
 }
 
 // Five minutes is fresh enough for a library and spares Cause Machine.
-let cache: { at: number; rows: CauseMachineResource[] } | null = null
+let cache: { at: number; rows: CauseMachineResource[]; groups: Map<number, string> } | null = null
 const CACHE_MS = 5 * 60 * 1000
 
-async function allResources(): Promise<CauseMachineResource[]> {
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.rows
-  const rows = await fetchResources()
-  cache = { at: Date.now(), rows }
-  return rows
+async function allResources(): Promise<{ rows: CauseMachineResource[]; groups: Map<number, string> }> {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache
+  const [rows, gs] = await Promise.all([fetchResources(), fetchGroups().catch(() => [])])
+  const groups = new Map<number, string>(gs.map(g => [Number(g.GroupId), String(g.Name || 'its group')]))
+  cache = { at: Date.now(), rows, groups }
+  return cache
 }
 
 /** HTML from Sunrise's editor to plain text with paragraph breaks. */
@@ -77,7 +80,8 @@ export async function sunriseItemsFor(opts: {
 }): Promise<SunriseItem[]> {
   const now = Date.now()
   const out: SunriseItem[] = []
-  for (const r of await allResources()) {
+  const { rows, groups } = await allResources()
+  for (const r of rows) {
     if (r.Status !== 'Published') continue
     if (r.DateExpires && new Date(r.DateExpires).getTime() < now) continue
     const privacy = r.Privacy || ''
@@ -102,6 +106,9 @@ export async function sunriseItemsFor(opts: {
       url: kind === 'video' ? opts.videoLinks.get(id) || null : kind === 'document' ? r.FileUrl : null,
       sunriseUrl: community?.ResourceUrl || null,
       cover: r.CoverPhotoUrl,
+      onlyFor: privacy === 'Group' && !ALL_MEMBER_GROUPS.has(gid)
+        ? (gid === TC_GROUP ? 'TCs' : groups.get(gid) || 'its group')
+        : null,
     })
   }
   out.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))

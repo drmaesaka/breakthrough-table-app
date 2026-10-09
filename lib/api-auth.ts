@@ -107,11 +107,20 @@ export async function isSuperAdmin(userId: string): Promise<boolean> {
 }
 
 export async function leaderGroupIds(userId: string): Promise<string[]> {
-  const supabase = adminClient()
   if (await isSuperAdmin(userId)) {
-    const { data } = await supabase.from('groups').select('id')
+    const { data } = await adminClient().from('groups').select('id')
     return (data || []).map(g => g.id as string)
   }
+  return directlyLedGroupIds(userId)
+}
+
+/**
+ * The tables this person is actually named TC of, without the super-admin
+ * "every table". For reading another table's private material (Sunrise group
+ * posts in Library), where owning the app is not a reason to see it.
+ */
+export async function directlyLedGroupIds(userId: string): Promise<string[]> {
+  const supabase = adminClient()
   const [{ data: legacy }, { data: joined }] = await Promise.all([
     supabase.from('groups').select('id').eq('leader_id', userId),
     supabase.from('group_leaders').select('group_id').eq('user_id', userId),

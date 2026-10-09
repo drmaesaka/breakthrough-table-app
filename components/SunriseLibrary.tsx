@@ -85,6 +85,7 @@ export default function SunriseLibrary() {
               )}
               <div className="min-w-0 flex-1">
                 <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${KIND[item.kind].cls}`}>{KIND[item.kind].label}</span>
+                {item.onlyFor && <span className="inline-block ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">🔒 {item.onlyFor} only</span>}
                 <p className="font-semibold text-gray-900 text-sm leading-snug mt-0.5 line-clamp-2">{item.title}</p>
                 {item.author && <p className="text-[11px] text-gray-400 mt-0.5 truncate">{item.author}</p>}
               </div>
@@ -114,6 +115,7 @@ function Viewer({ item, onClose }: { item: SunriseItem; onClose: () => void }) {
         <div className="min-w-0">
           <p className="text-white font-semibold leading-snug">{item.title}</p>
           {item.author && <p className="text-bt-light/70 text-xs mt-0.5">{item.author}</p>}
+          {item.onlyFor && <p className="text-amber-300 text-xs mt-0.5">🔒 Only {item.onlyFor} can see this</p>}
         </div>
       </div>
 

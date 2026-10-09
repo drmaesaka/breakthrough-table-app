@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
+import { adminClient, requireUser, directlyLedGroupIds } from '@/lib/api-auth'
 import { causeMachineConfigured } from '@/lib/cause-machine'
 import { sunriseItemsFor } from '@/lib/sunrise-library'
 
@@ -17,7 +17,9 @@ export async function GET(req: NextRequest) {
   const isLeader = auth.role === 'leader'
   const { data: prof } = await admin.from('profiles').select('group_id').eq('id', auth.userId).maybeSingle()
   const tableIds = new Set<string>(prof?.group_id ? [prof.group_id] : [])
-  if (isLeader) for (const id of await leaderGroupIds(auth.userId)) tableIds.add(id)
+  // Tables they sit at or are named TC of — not every table for a super admin:
+  // a table's private Sunrise group posts stay with that table (2026-10-09).
+  if (isLeader) for (const id of await directlyLedGroupIds(auth.userId)) tableIds.add(id)
 
   // Both reads tolerate the 2026-10-07 migration not having run yet.
   const [{ data: groups }, { data: links }] = await Promise.all([
