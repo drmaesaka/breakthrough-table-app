@@ -111,7 +111,8 @@ export default function GroupPage() {
       const wantTable = new URLSearchParams(window.location.search).get('table')
       if (wantTable && !want) setView('chat')
       // Otherwise the table chosen in the "Working in" bar, else their own.
-      const first = (wantTable && all.find(t => t.id === wantTable)?.id) || pickTable(all.map(t => t.id), home)
+      // ?tab=you means your own habits, which live on your own table.
+      const first = (wantTable && all.find(t => t.id === wantTable)?.id) || (want === 'you' && home) || pickTable(all.map(t => t.id), home)
       // Leave Admin's "All tables" choice alone; this screen just shows one table.
       if (first && leader && getCurrentTable() !== ALL_TABLES) setCurrentTable(first)
       if (!first) { router.push('/dashboard'); return }

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
 import NotificationCard from '@/components/NotificationCard'
 import Avatar from '@/components/Avatar'
@@ -320,6 +321,15 @@ export default function ProfilePage() {
             </div>
             <span className="text-2xl">🎯</span>
           </div>
+
+          {/* Habits are checked off on My Table → You, not here; members
+              looked for the tick on this page (2026-10-09). */}
+          {habits.length > 0 && (
+            <Link href="/group?tab=you"
+              className="block w-full text-center bg-bt-navy text-white py-2.5 rounded-xl text-sm font-semibold">
+              ✓ Check off today&apos;s habits
+            </Link>
+          )}
 
           {habits.length > 0 && (
             <div className="space-y-2">
