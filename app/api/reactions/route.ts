@@ -6,45 +6,56 @@ import { REACTION_EMOJIS, type ReactionChat } from '@/lib/reactions'
 // no RLS policies — so every call first narrows the message ids to ones this
 // person can see in that chat.
 //
-// POST { chat, ids }                → { reactions: { [messageId]: [{ emoji, count, mine, names }] } }
+// POST { chat, ids }                → { reactions: { [messageId]: [{ emoji, count, mine, names }] }, edits }
 // POST { chat, id, emoji, toggle }  → adds or removes the caller's reaction, then the same for that id
+// POST { chat, id, content, edit }  → changes the text of the caller's OWN message (typos)
+//
+// `edits` carries the current text of edited messages: the chats only poll
+// for new messages, so this is how an edit reaches screens already open.
 
 const CHATS: Record<ReactionChat, string> = {
   table: 'messages', room: 'chat_room_messages', direct: 'direct_messages', leaders: 'leader_messages',
 }
 
-async function visibleIds(chat: ReactionChat, ids: string[], userId: string, role: string): Promise<string[]> {
+type Row = { id: string; content: string | null; edited_at?: string | null; author: string }
+
+/** The messages among `ids` this person can see in that chat, with their author and text. */
+async function visibleRows(chat: ReactionChat, ids: string[], userId: string, role: string): Promise<Row[]> {
   if (!ids.length) return []
   const admin = adminClient()
-  if (chat === 'leaders') {
-    if (role !== 'leader') return []
-    const { data } = await admin.from('leader_messages').select('id').in('id', ids)
-    return (data || []).map(r => r.id)
-  }
+  // select('*'): edited_at only exists once sql/2026-10-09-message-edits.sql has run.
+  const { data } = await admin.from(CHATS[chat]).select('*').in('id', ids)
+  const rows = (data || []) as any[]
+  const out = (keep: (r: any) => boolean) => rows.filter(keep).map(r => ({
+    id: r.id, content: r.content ?? null, edited_at: r.edited_at ?? null, author: r.sender_id || r.user_id,
+  }))
+  if (chat === 'leaders') return role === 'leader' ? out(() => true) : []
   if (chat === 'table') {
     const [{ data: prof }, led] = await Promise.all([
       admin.from('profiles').select('group_id').eq('id', userId).maybeSingle(),
       role === 'leader' ? leaderGroupIds(userId) : Promise.resolve([] as string[]),
     ])
     const mine = new Set<string>([...(prof?.group_id ? [prof.group_id] : []), ...led])
-    const { data } = await admin.from('messages').select('id, group_id').in('id', ids)
-    return (data || []).filter(r => mine.has(r.group_id)).map(r => r.id)
+    return out(r => mine.has(r.group_id))
   }
   if (chat === 'room') {
-    const [{ data: rows }, { data: rooms }] = await Promise.all([
-      admin.from('chat_room_messages').select('id, room_id').in('id', ids),
-      admin.from('chat_room_members').select('room_id').eq('user_id', userId),
-    ])
+    const { data: rooms } = await admin.from('chat_room_members').select('room_id').eq('user_id', userId)
     const mine = new Set((rooms || []).map(r => r.room_id))
-    return (rows || []).filter(r => mine.has(r.room_id)).map(r => r.id)
+    return out(r => mine.has(r.room_id))
   }
-  const { data: rows } = await admin.from('direct_messages').select('id, conversation_id').in('id', ids)
-  const convIds = [...new Set((rows || []).map(r => r.conversation_id))]
+  const convIds = [...new Set(rows.map(r => r.conversation_id))]
   if (!convIds.length) return []
   const { data: convs } = await admin.from('dm_conversations').select('id')
     .in('id', convIds).or(`participant_1.eq.${userId},participant_2.eq.${userId}`)
   const mine = new Set((convs || []).map(c => c.id))
-  return (rows || []).filter(r => mine.has(r.conversation_id)).map(r => r.id)
+  return out(r => mine.has(r.conversation_id))
+}
+
+/** Edited messages among `rows`: their current text, so open chats pick up a fix. */
+function editsOf(rows: Row[]) {
+  const out: Record<string, { content: string | null; edited_at: string }> = {}
+  for (const r of rows) if (r.edited_at) out[r.id] = { content: r.content, edited_at: r.edited_at }
+  return out
 }
 
 async function summarize(chat: ReactionChat, ids: string[], userId: string) {
@@ -73,11 +84,28 @@ export async function POST(req: NextRequest) {
   if (!CHATS[chat]) return NextResponse.json({ error: 'Unknown chat' }, { status: 400 })
 
   try {
+    if (body.edit) {
+      const id = String(body.id || '')
+      const content = String(body.content ?? '').trim()
+      if (!content) return NextResponse.json({ error: 'A message cannot be empty' }, { status: 400 })
+      if (content.length > 4000) return NextResponse.json({ error: 'That message is too long' }, { status: 400 })
+      const [row] = await visibleRows(chat, [id], auth.userId, auth.role)
+      if (!row) return NextResponse.json({ error: 'Message not found' }, { status: 404 })
+      if (row.author !== auth.userId) return NextResponse.json({ error: 'You can only edit your own messages' }, { status: 403 })
+      const edited_at = new Date().toISOString()
+      const admin = adminClient()
+      let { data, error } = await admin.from(CHATS[chat]).update({ content, edited_at }).eq('id', id).select('id')
+      // Before the edits migration: change the text without the "Edited" mark.
+      if (error && /edited_at/.test(error.message)) ({ data, error } = await admin.from(CHATS[chat]).update({ content }).eq('id', id).select('id'))
+      if (error) throw error
+      if (!data?.length) return NextResponse.json({ error: 'Could not save the change' }, { status: 500 })
+      return NextResponse.json({ edits: { [id]: { content, edited_at } } })
+    }
     if (body.toggle) {
       const id = String(body.id || '')
       const emoji = String(body.emoji || '')
       if (!REACTION_EMOJIS.includes(emoji)) return NextResponse.json({ error: 'Unknown reaction' }, { status: 400 })
-      const [ok] = await visibleIds(chat, [id], auth.userId, auth.role)
+      const [ok] = await visibleRows(chat, [id], auth.userId, auth.role)
       if (!ok) return NextResponse.json({ error: 'Message not found' }, { status: 404 })
       const admin = adminClient()
       const { data: had } = await admin.from('message_reactions').select('id')
@@ -89,8 +117,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ reactions: await summarize(chat, [id], auth.userId) })
     }
     const ids: string[] = Array.isArray(body.ids) ? body.ids.slice(0, 300).map(String) : []
-    const ok = await visibleIds(chat, ids, auth.userId, auth.role)
-    return NextResponse.json({ reactions: await summarize(chat, ok, auth.userId) })
+    const rows = await visibleRows(chat, ids, auth.userId, auth.role)
+    return NextResponse.json({ reactions: await summarize(chat, rows.map(r => r.id), auth.userId), edits: editsOf(rows) })
   } catch (err: any) {
     // Before the migration runs: no reactions, rather than an error in every chat.
     if (/message_reactions/.test(err?.message || '')) return NextResponse.json({ reactions: {}, note: 'not set up' })

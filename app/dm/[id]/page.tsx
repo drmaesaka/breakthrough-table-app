@@ -184,7 +184,7 @@ export default function DMPage() {
               {!isMe && (
                 <Avatar src={otherPerson?.avatar_url} name={otherName} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
               )}
-              <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`} onClick={e => rx.tapMessage(e, msg.id)}>
+              <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`} {...rx.holdProps(msg.id)}>
                 {showName && (
                   <span className="text-xs text-gray-400 font-medium mb-1 px-1">{otherName}</span>
                 )}
@@ -193,13 +193,10 @@ export default function DMPage() {
                   <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
                     isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
                   }`}>
-                    {msg.content}
+                    {rx.text(msg)}
                   </div>
                 )}
-                {!msg.content && msg.image_url && rx.openId !== msg.id && !rx.map[msg.id]?.length && (
-                  <button type="button" onClick={() => rx.setOpenId(msg.id)} className="text-[11px] text-gray-400 px-1">☺ React</button>
-                )}
-                <MessageReactions id={msg.id} state={rx} isMe={isMe} />
+                <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
               </div>
             </div>
           )
