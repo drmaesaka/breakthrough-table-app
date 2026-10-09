@@ -7,7 +7,7 @@ import Link from 'next/link'
 import Avatar from '@/components/Avatar'
 import MyTasks from '@/components/MyTasks'
 import TableChat from '@/components/TableChat'
-import { pickTable, setCurrentTable, onCurrentTableChange } from '@/lib/current-table'
+import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
 
 type Detail = {
   id: string; full_name: string; avatar_url: string | null; role: string
@@ -46,6 +46,15 @@ export default function GroupPage() {
   const [nudgeText, setNudgeText] = useState('')
   const [nudging, setNudging] = useState(false)
   const [nudgeNote, setNudgeNote] = useState<{ id: string; text: string } | null>(null)
+  // TC "Add a member" card (2026-10-09): the invite link for someone new, or
+  // seat someone already in the app — what Admin → Tables does, from here.
+  const [addOpen, setAddOpen] = useState(false)
+  const [invite, setInvite] = useState<string | null>(null)
+  const [inviteNote, setInviteNote] = useState('')
+  const [candidates, setCandidates] = useState<{ id: string; full_name: string | null; group_id: string | null }[]>([])
+  const [addPick, setAddPick] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [addNote, setAddNote] = useState('')
   const router = useRouter()
 
   async function headers(): Promise<Record<string, string>> {
@@ -103,7 +112,8 @@ export default function GroupPage() {
       if (wantTable && !want) setView('chat')
       // Otherwise the table chosen in the "Working in" bar, else their own.
       const first = (wantTable && all.find(t => t.id === wantTable)?.id) || pickTable(all.map(t => t.id), home)
-      if (first && leader) setCurrentTable(first)
+      // Leave Admin's "All tables" choice alone; this screen just shows one table.
+      if (first && leader && getCurrentTable() !== ALL_TABLES) setCurrentTable(first)
       if (!first) { router.push('/dashboard'); return }
       setGroupId(first)
       const firstName = all.find(t => t.id === first)?.name
@@ -136,6 +146,49 @@ export default function GroupPage() {
     }
   }
 
+  async function openAddMember() {
+    if (addOpen) { setAddOpen(false); return }
+    setAddOpen(true); setAddNote(''); setInviteNote(''); setAddPick(''); setInvite(null)
+    const h = await headers()
+    const [inv, mem] = await Promise.all([
+      fetch(`/api/admin/invite?group_id=${encodeURIComponent(groupId!)}`, { headers: h }).catch(() => null),
+      fetch('/api/admin/members', { headers: h }).catch(() => null),
+    ])
+    // A table the TC sits at but does not run has no invite for them.
+    if (inv?.ok) setInvite((await inv.json()).url || null)
+    else setInviteNote('Only this table’s TC can share its invite link.')
+    const list = mem?.ok ? ((await mem.json()).members || []) : []
+    setCandidates(list.filter((u: any) => u.group_id !== groupId)
+      .sort((a: any, b: any) => (a.group_id ? 1 : 0) - (b.group_id ? 1 : 0) || (a.full_name || '').localeCompare(b.full_name || '')))
+  }
+
+  async function shareInvite() {
+    if (!invite) return
+    const text = `Join ${groupName} on the Breakthrough Table app: ${invite}`
+    try {
+      if (navigator.share) { await navigator.share({ title: 'Breakthrough Table', text, url: invite }); return }
+    } catch { return /* closed the share sheet */ }
+    try { await navigator.clipboard.writeText(invite); setInviteNote('✓ Link copied. Paste it in a text or email.') }
+    catch { setInviteNote('Copy the link above and send it to them.') }
+  }
+
+  async function seatMember() {
+    const who = candidates.find(c => c.id === addPick)
+    if (!who || !groupId) return
+    const from = who.group_id ? tables.find(t => t.id === who.group_id)?.name : null
+    if (from && !confirm(`Move ${who.full_name || 'them'} from ${from} to ${groupName}? A person sits at one table.`)) return
+    setAdding(true); setAddNote('')
+    const res = await fetch('/api/admin/members', { method: 'PATCH',
+      headers: { ...(await headers()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: who.id, groupId }) })
+    const r = await res.json().catch(() => ({}))
+    setAdding(false)
+    if (!res.ok) { setAddNote(r.error || 'Could not add them. Try again.'); return }
+    setAddNote(`✓ ${who.full_name || 'They'} added to ${groupName}.`)
+    setCandidates(c => c.filter(x => x.id !== who.id)); setAddPick('')
+    await loadTable(groupId, true)
+  }
+
   async function nudgeMember(id: string, name: string) {
     const text = nudgeText.trim()
     if (!text) return
@@ -157,7 +210,7 @@ export default function GroupPage() {
 
   async function switchTable(gid: string) {
     if (gid === groupId || !tables.some(t => t.id === gid)) return
-    setGroupId(gid); setDetail(null); setOpen(null)
+    setGroupId(gid); setDetail(null); setOpen(null); setAddOpen(false)
     if (gid !== homeGroupId) setView(v => v === 'you' ? 'chat' : v)
     setSendMode(null); setSendText(''); setSendNote(''); setNudgeText(''); setNudgeNote(null)
     const t = tables.find(x => x.id === gid); if (t) setGroupName(t.name)
@@ -250,6 +303,47 @@ export default function GroupPage() {
               </>
             )}
             {sendNote && <p className={`text-xs ${sendNote.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{sendNote}</p>}
+          </div>
+        )}
+
+        {isLeader && detail && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+            <button type="button" onClick={openAddMember}
+              className={`w-full py-2.5 rounded-xl text-sm font-semibold border ${addOpen ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-bt-navy border-gray-200'}`}>
+              ➕ Add a member
+            </button>
+            {addOpen && (
+              <>
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-bt-navy">New to the app</p>
+                  <p className="text-gray-400 text-xs">Send them this link. When they sign up they land at {groupName}.</p>
+                  {invite && <p className="text-xs text-gray-600 break-all font-mono bg-bt-pale rounded-lg px-3 py-2">{invite}</p>}
+                  {invite && (
+                    <button type="button" onClick={shareInvite}
+                      className="w-full py-2.5 rounded-xl text-sm font-semibold border-2 border-bt-blue text-bt-blue">
+                      Share invite link
+                    </button>
+                  )}
+                  {inviteNote && <p className={`text-xs ${inviteNote.startsWith('✓') ? 'text-green-600' : 'text-gray-500'}`}>{inviteNote}</p>}
+                </div>
+                <div className="space-y-2 pt-2 border-t border-gray-100">
+                  <p className="text-xs font-semibold text-bt-navy">Already in the app</p>
+                  <select value={addPick} onChange={e => setAddPick(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-base text-gray-900 bg-white">
+                    <option value="">{candidates.length ? 'Pick someone...' : 'Nobody else to add'}</option>
+                    {candidates.map(c => {
+                      const at = c.group_id ? tables.find(t => t.id === c.group_id)?.name : null
+                      return <option key={c.id} value={c.id}>{c.full_name || 'Unnamed'}{at ? ` — at ${at}` : ' — no table yet'}</option>
+                    })}
+                  </select>
+                  <button type="button" onClick={seatMember} disabled={!addPick || adding}
+                    className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                    {adding ? 'Adding...' : `Add to ${groupName}`}
+                  </button>
+                  {addNote && <p className={`text-xs ${addNote.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{addNote}</p>}
+                </div>
+              </>
+            )}
           </div>
         )}
 
