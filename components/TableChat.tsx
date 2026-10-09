@@ -167,7 +167,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
 
   return (
     <>
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 space-y-3">
         <p className="text-center text-[11px] text-gray-400">🔒 Only the people at {groupName || 'this table'} can see this.</p>
         {messages.length === 0 && (
           <div className="text-center py-16">
