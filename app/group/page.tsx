@@ -8,7 +8,6 @@ import Avatar from '@/components/Avatar'
 import MyTasks from '@/components/MyTasks'
 import TableChat from '@/components/TableChat'
 import { pickTable, setCurrentTable, onCurrentTableChange } from '@/lib/current-table'
-import { notifyAbout } from '@/lib/notify-client'
 
 type Detail = {
   id: string; full_name: string; avatar_url: string | null; role: string
@@ -37,9 +36,10 @@ export default function GroupPage() {
   const [detail, setDetail] = useState<{ members: Detail[]; tasks_total: number; prompts_total: number } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [view, setView] = useState<'chat' | 'you' | 'people'>('you')
-  // TC quick-send: reading or a message to the selected table, and a
-  // personal nudge to one member — without a trip to Admin.
-  const [sendMode, setSendMode] = useState<'message' | 'reading' | null>(null)
+  // TC quick-send: a message to the selected table, and a personal nudge
+  // to one member — without a trip to Admin. (A 📚 Reading button sat here
+  // until 2026-10-09; reading now goes in a message, or the + on the You tab.)
+  const [sendMode, setSendMode] = useState<'message' | null>(null)
   const [sendText, setSendText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendNote, setSendNote] = useState('')
@@ -119,28 +119,17 @@ export default function GroupPage() {
   async function sendToTable() {
     const text = sendText.trim()
     if (!text || !groupId || !sendMode) return
-    if (sendMode === 'message' && !confirm(`Send this to everyone at ${groupName}?`)) return
+    if (!confirm(`Send this to everyone at ${groupName}?`)) return
     setSending(true); setSendNote('')
     const h = { ...(await headers()), 'Content-Type': 'application/json' }
     try {
-      if (sendMode === 'reading') {
-        // First line is the title, anything after it the description.
-        const [title, ...rest] = text.split('\n')
-        const res = await fetch('/api/admin/post-item', { method: 'POST', headers: h,
-          body: JSON.stringify({ table: 'tasks', rows: [{ group_id: groupId, title: title.trim(), description: rest.join('\n').trim() }] }) })
-        const r = await res.json().catch(() => ({}))
-        if (!res.ok) { setSendNote(`Could not post: ${r.detail || r.error || res.status}`); return }
-        for (const row of r.items || []) notifyAbout('task', row.id)
-        setSendNote(`✓ Added to ${groupName}'s Reading & Resources.`)
-      } else {
-        const res = await fetch('/api/send-broadcast', { method: 'POST', headers: h,
-          body: JSON.stringify({ group_id: groupId, message: text, scope: 'table' }) })
-        const r = await res.json().catch(() => ({}))
-        if (!res.ok) { setSendNote(`Could not send: ${r.error || res.status}`); return }
-        const parts = [`${r.sent} by push`]
-        if (r.emailed) parts.push(`${r.emailed} by email`)
-        setSendNote(`✓ Sent to ${r.recipients} member${r.recipients === 1 ? '' : 's'} (${parts.join(', ')}).`)
-      }
+      const res = await fetch('/api/send-broadcast', { method: 'POST', headers: h,
+        body: JSON.stringify({ group_id: groupId, message: text, scope: 'table' }) })
+      const r = await res.json().catch(() => ({}))
+      if (!res.ok) { setSendNote(`Could not send: ${r.error || res.status}`); return }
+      const parts = [`${r.sent} by push`]
+      if (r.emailed) parts.push(`${r.emailed} by email`)
+      setSendNote(`✓ Sent to ${r.recipients} member${r.recipients === 1 ? '' : 's'} (${parts.join(', ')}).`)
       setSendText(''); setSendMode(null)
     } finally {
       setSending(false)
@@ -244,27 +233,19 @@ export default function GroupPage() {
         {isLeader && detail && (
           <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
             <h3 className="font-bold text-bt-navy text-sm">Send to {groupName}</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {([['reading', '📚 Reading'], ['message', '📣 Message']] as const).map(([k, label]) => (
-                <button key={k} type="button" onClick={() => { setSendMode(sendMode === k ? null : k); setSendNote('') }}
-                  className={`py-2.5 rounded-xl text-sm font-semibold border ${sendMode === k ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-bt-navy border-gray-200'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            <button type="button" onClick={() => { setSendMode(sendMode ? null : 'message'); setSendNote('') }}
+              className={`w-full py-2.5 rounded-xl text-sm font-semibold border ${sendMode ? 'bg-bt-navy text-white border-bt-navy' : 'bg-white text-bt-navy border-gray-200'}`}>
+              📣 Message
+            </button>
             {sendMode && (
               <>
-                <p className="text-gray-400 text-xs">
-                  {sendMode === 'reading'
-                    ? 'Added to Reading & Resources on everyone\'s You tab, with a notification. First line is the title; put a link or note on the next line.'
-                    : 'Goes to everyone at this table now: by push, or by email if their notifications are off.'}
-                </p>
+                <p className="text-gray-400 text-xs">Goes to everyone at this table now: by push, or by email if their notifications are off.</p>
                 <textarea value={sendText} onChange={e => setSendText(e.target.value)} rows={3}
-                  placeholder={sendMode === 'reading' ? 'e.g. Read chapter 2 of As a Man Thinketh\nhttps://…' : 'Type your message...'}
+                  placeholder="Type your message..."
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base text-gray-900 resize-none leading-relaxed focus:outline-none focus:ring-2 focus:ring-bt-blue" />
                 <button onClick={sendToTable} disabled={sending || !sendText.trim()}
                   className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                  {sending ? 'Sending...' : sendMode === 'reading' ? 'Add Reading' : 'Send to Table Now'}
+                  {sending ? 'Sending...' : 'Send to Table Now'}
                 </button>
               </>
             )}
