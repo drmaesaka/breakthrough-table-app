@@ -293,11 +293,6 @@ export default function GroupPage() {
                     )}
                     {d && !d.push_enabled && <span className="text-xs" title="No notifications">🔕</span>}
                   </div>
-                  {d && (
-                    <p className="text-[11px] text-gray-400 mt-1.5">
-                      {d.habits.filter(h => h.done).length}/{d.habits.length} habits
-                    </p>
-                  )}
                 </div>
 {(member.streak || 0) > 0 && (
                   <span className="flex-shrink-0 text-sm font-semibold text-orange-500">🔥 {member.streak}</span>
