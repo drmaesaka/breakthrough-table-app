@@ -24,3 +24,16 @@ body {
     font-size: 16px !important;
   }
 }
+
+/* Chat messages (2026-10-09): holding one opens its menu (reactions, Copy,
+   Edit), so iPhone's own text highlight and link preview are switched off on
+   the message and everything inside it. The edit box turns selection back on. */
+.chat-hold, .chat-hold * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+.chat-hold textarea {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}

@@ -184,7 +184,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
               {!isMe && (
                 <Avatar src={msg.profiles?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
               )}
-              <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`} {...rx.holdProps(msg.id)}>
+              <div {...rx.holdProps(msg.id)} className={`chat-hold flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
                 <MessagePhoto url={msg.image_url} />
                 {msg.content && (

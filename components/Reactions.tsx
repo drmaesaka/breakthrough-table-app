@@ -112,8 +112,8 @@ export function useReactions(chat: ReactionChat, messageIds: string[]) {
       onTouchCancel: cancel,
       onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); heldAt.current = Date.now(); setOpenId(id) },
       onClickCapture: (e: React.MouseEvent) => { if (Date.now() - heldAt.current < 700) { e.preventDefault(); e.stopPropagation() } },
-      // No iOS text-selection / link-preview popup fighting the hold.
-      style: { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' } as React.CSSProperties,
+      // No iOS text highlight / link preview fighting the hold (globals.css).
+      className: 'chat-hold',
     }
   }
 
