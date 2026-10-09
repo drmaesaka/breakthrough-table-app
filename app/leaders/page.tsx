@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
+import { GifButton } from '@/components/GifPicker'
 import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
 
@@ -322,6 +323,7 @@ export default function LeadersPage() {
             className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
             style={{ paddingBottom: 'calc(0.75rem + 60px + var(--table-bar, 0px))' }}>
             <PhotoButton att={att} />
+            <GifButton att={att} />
             <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)}
               placeholder="Message the other TCs..."
               className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />

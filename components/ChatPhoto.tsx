@@ -20,9 +20,12 @@ export function usePhotoAttach(userId: string | null | undefined) {
     if (!userId) return
     setError(''); setBusy(true)
     const supabase = createClient()
-    const blob = await shrinkImage(file, 1600, 0.82)
-    const path = `${userId}/${crypto.randomUUID()}.jpg`
-    const { error: upErr } = await supabase.storage.from('chat-photos').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false })
+    // A GIF goes up as it is: shrinking redraws it as a still JPEG.
+    const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name)
+    if (isGif && file.size > 10 * 1024 * 1024) { setBusy(false); setError('That GIF is over 10 MB. Try a smaller one.'); return }
+    const blob = isGif ? file : await shrinkImage(file, 1600, 0.82)
+    const path = `${userId}/${crypto.randomUUID()}.${isGif ? 'gif' : 'jpg'}`
+    const { error: upErr } = await supabase.storage.from('chat-photos').upload(path, blob, { contentType: isGif ? 'image/gif' : blob.type || 'image/jpeg', upsert: false })
     setBusy(false)
     if (upErr) {
       setError(/bucket not found/i.test(upErr.message) ? "Photos aren't switched on yet." : "Couldn't add the photo. Try again.")
@@ -31,7 +34,7 @@ export function usePhotoAttach(userId: string | null | undefined) {
     setPhoto(supabase.storage.from('chat-photos').getPublicUrl(path).data.publicUrl)
   }
 
-  return { photo, busy, error, fileRef, pick, clear: () => { setPhoto(null); setError('') }, active: !!(photo || busy || error) }
+  return { photo, busy, error, fileRef, pick, setPhoto, clear: () => { setPhoto(null); setError('') }, active: !!(photo || busy || error) }
 }
 
 /** The camera button that sits left of the message box. */

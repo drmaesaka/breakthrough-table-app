@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
+import { GifButton } from '@/components/GifPicker'
 import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -210,6 +211,7 @@ export default function DMPage() {
         className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}>
         <PhotoButton att={att} />
+        <GifButton att={att} />
         <input
           type="text"
           value={newMessage}

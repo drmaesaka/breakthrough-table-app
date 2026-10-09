@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import Avatar from '@/components/Avatar'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
+import { GifButton } from '@/components/GifPicker'
 import PeoplePicker from '@/components/PeoplePicker'
 
 type Member = { user_id: string; full_name: string; avatar_url: string | null }
@@ -204,6 +205,7 @@ export default function RoomPage() {
       <form onSubmit={send} className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}>
         <PhotoButton att={att} />
+        <GifButton att={att} />
         <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder={`Message ${room?.name || 'the group'}...`}
           className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
         <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
