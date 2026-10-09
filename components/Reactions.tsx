@@ -215,3 +215,46 @@ export function MessageReactions({ id, state, isMe, content }: {
     </div>
   )
 }
+
+/**
+ * Reactions on a post (Reading & Resources, an event, an announcement),
+ * 2026-10-09. Posts are cards with their own taps (tick, RSVP, open), so
+ * instead of a hold there is a small ☺+ button beside the chips.
+ */
+export function PostReactions({ id, state }: { id: string; state: ReactionsState }) {
+  const list = state.map[id] || []
+  const open = state.openId === id
+  return (
+    // Taps here never reach the card (ticking a reading item, opening a link).
+    <div className="flex flex-col gap-1 mt-2" onClick={e => e.stopPropagation()}>
+      <div className="flex gap-1 flex-wrap items-center">
+        {list.map(r => (
+          <button key={r.emoji} type="button" onClick={() => state.toggle(id, r.emoji)}
+            className={`text-xs px-2 py-0.5 rounded-full border ${r.mine ? 'bg-bt-pale border-bt-blue/40 text-bt-navy' : 'bg-white border-gray-200 text-gray-600'}`}>
+            {r.emoji}{r.count > 1 ? ` ${r.count}` : ''}
+          </button>
+        ))}
+        <button type="button" onClick={() => state.setOpenId(open ? null : id)} aria-label="React"
+          className={`text-xs px-2 py-0.5 rounded-full border ${open ? 'bg-bt-pale border-bt-blue/40' : 'bg-white border-gray-200'} text-gray-500`}>
+          ☺+
+        </button>
+      </div>
+      {open && (
+        <div className="flex gap-1 bg-white rounded-full shadow-md border border-gray-100 px-2 py-1 self-start">
+          {REACTION_EMOJIS.map(e => {
+            const mine = list.some(x => x.emoji === e && x.mine)
+            return (
+              <button key={e} type="button" onClick={() => state.toggle(id, e)} aria-label={`React ${e}`}
+                className={`text-xl w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform ${mine ? 'bg-bt-pale' : ''}`}>
+                {e}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {open && list.length > 0 && (
+        <p className="text-[11px] text-gray-400">{list.map(r => `${r.emoji} ${r.names.join(', ')}`).join(' · ')}</p>
+      )}
+    </div>
+  )
+}

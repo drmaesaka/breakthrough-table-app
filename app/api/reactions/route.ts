@@ -15,6 +15,32 @@ import { REACTION_EMOJIS, type ReactionChat } from '@/lib/reactions'
 
 const CHATS: Record<ReactionChat, string> = {
   table: 'messages', room: 'chat_room_messages', direct: 'direct_messages', leaders: 'leader_messages',
+  task: 'tasks', event: 'events', announcement: 'notifications',
+}
+const POSTS = new Set<ReactionChat>(['task', 'event', 'announcement'])
+
+/** The person's own table plus the ones they lead. */
+async function myTables(userId: string, role: string): Promise<Set<string>> {
+  const [{ data: prof }, led] = await Promise.all([
+    adminClient().from('profiles').select('group_id').eq('id', userId).maybeSingle(),
+    role === 'leader' ? leaderGroupIds(userId) : Promise.resolve([] as string[]),
+  ])
+  return new Set<string>([...(prof?.group_id ? [prof.group_id] : []), ...led])
+}
+
+/** Posts among `ids` this person can see. Nobody edits a post here. */
+async function visiblePosts(kind: ReactionChat, ids: string[], userId: string, role: string): Promise<Row[]> {
+  const admin = adminClient()
+  const row = (id: string) => ({ id, content: null, edited_at: null, author: '' })
+  if (kind === 'announcement') {
+    // Anyone who received it. ids are post_ids.
+    const { data } = await admin.from('notifications').select('post_id').eq('user_id', userId).in('post_id', ids)
+    return [...new Set((data || []).map(r => r.post_id as string))].map(row)
+  }
+  const { data } = await admin.from(CHATS[kind]).select('id, group_id').in('id', ids)
+  const mine = await myTables(userId, role)
+  // An event with no table is for all of BT.
+  return (data || []).filter(r => mine.has(r.group_id) || (kind === 'event' && !r.group_id)).map(r => row(r.id))
 }
 
 type Row = { id: string; content: string | null; edited_at?: string | null; author: string }
@@ -22,6 +48,7 @@ type Row = { id: string; content: string | null; edited_at?: string | null; auth
 /** The messages among `ids` this person can see in that chat, with their author and text. */
 async function visibleRows(chat: ReactionChat, ids: string[], userId: string, role: string): Promise<Row[]> {
   if (!ids.length) return []
+  if (POSTS.has(chat)) return visiblePosts(chat, ids, userId, role)
   const admin = adminClient()
   // select('*'): edited_at only exists once sql/2026-10-09-message-edits.sql has run.
   const { data } = await admin.from(CHATS[chat]).select('*').in('id', ids)
@@ -31,11 +58,7 @@ async function visibleRows(chat: ReactionChat, ids: string[], userId: string, ro
   }))
   if (chat === 'leaders') return role === 'leader' ? out(() => true) : []
   if (chat === 'table') {
-    const [{ data: prof }, led] = await Promise.all([
-      admin.from('profiles').select('group_id').eq('id', userId).maybeSingle(),
-      role === 'leader' ? leaderGroupIds(userId) : Promise.resolve([] as string[]),
-    ])
-    const mine = new Set<string>([...(prof?.group_id ? [prof.group_id] : []), ...led])
+    const mine = await myTables(userId, role)
     return out(r => mine.has(r.group_id))
   }
   if (chat === 'room') {
@@ -84,6 +107,7 @@ export async function POST(req: NextRequest) {
   if (!CHATS[chat]) return NextResponse.json({ error: 'Unknown chat' }, { status: 400 })
 
   try {
+    if (body.edit && POSTS.has(chat)) return NextResponse.json({ error: 'Posts are edited in Admin' }, { status: 400 })
     if (body.edit) {
       const id = String(body.id || '')
       const content = String(body.content ?? '').trim()

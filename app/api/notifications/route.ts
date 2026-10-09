@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (countOnly) return NextResponse.json({ unread: count || 0 })
 
   const { data, error } = await admin.from('notifications')
-    .select('id, kind, title, body, url, created_at, read_at')
+    .select('*')
     .eq('user_id', auth.userId).order('created_at', { ascending: false }).limit(60)
   if (error) return NextResponse.json({ error: 'Could not load notifications' }, { status: 500 })
   return NextResponse.json({ unread: count || 0, items: data || [] })

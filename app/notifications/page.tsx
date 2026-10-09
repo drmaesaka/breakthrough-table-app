@@ -3,13 +3,16 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import { useReactions, PostReactions } from '@/components/Reactions'
 
-type Item = { id: string; kind: string; title: string; body: string; url: string; created_at: string; read_at: string | null }
+type Item = { id: string; kind: string; title: string; body: string; url: string; created_at: string; read_at: string | null; post_id?: string | null }
 
 // The 🔔 inbox: everything the app has notified me about, newest first, so a
 // swiped-away banner — or no push at all — does not mean missing it.
 export default function NotificationsPage() {
   const [items, setItems] = useState<Item[]>([])
+  // Announcements can be reacted to (2026-10-09); they share a post_id across recipients.
+  const rx = useReactions('announcement', items.map(n => n.post_id || '').filter(Boolean))
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const router = useRouter()
@@ -63,8 +66,9 @@ export default function NotificationsPage() {
           </div>
         )}
         {items.map(n => (
-          <button key={n.id} onClick={() => router.push(n.url || '/dashboard')}
-            className={`w-full text-left rounded-2xl px-4 py-3 shadow-sm flex gap-3 ${n.read_at ? 'bg-white' : 'bg-white ring-2 ring-bt-blue/30'}`}>
+          // A div, not a button: an announcement holds reaction buttons.
+          <div key={n.id} role="button" onClick={() => router.push(n.url || '/dashboard')}
+            className={`w-full text-left rounded-2xl px-4 py-3 shadow-sm flex gap-3 cursor-pointer ${n.read_at ? 'bg-white' : 'bg-white ring-2 ring-bt-blue/30'}`}>
             <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${n.read_at ? 'bg-transparent' : 'bg-bt-blue'}`} />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
@@ -72,8 +76,9 @@ export default function NotificationsPage() {
                 <span className="text-[11px] text-gray-400 flex-shrink-0">{when(n.created_at)}</span>
               </div>
               {n.body && <p className="text-sm text-gray-600 mt-0.5 line-clamp-2 break-words">{n.body}</p>}
+              {n.post_id && <PostReactions id={n.post_id} state={rx} />}
             </div>
-          </button>
+          </div>
         ))}
       </div>
       <BottomNav />

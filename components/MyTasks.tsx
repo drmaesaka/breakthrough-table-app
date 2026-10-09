@@ -6,11 +6,13 @@ import { linkify, hasLink } from '@/lib/linkify'
 import { notifyAbout } from '@/lib/notify-client'
 import { localDay } from '@/lib/dates'
 import { calcAdherence, datesByHabit, streakFor, doneInPeriod, periodKey, freqOf, FREQ_LABEL, type Habit, type Frequency } from '@/lib/habits'
+import { useReactions, PostReactions } from '@/components/Reactions'
 
 // Your own habits and reading. Lived on its own Tasks tab until 2026-10-05,
 // when it moved to the top of My Table so "me" and "my table" are one place.
 export default function MyTasks() {
   const [tasks, setTasks] = useState<any[]>([])
+  const rx = useReactions('task', tasks.map((t: any) => t.id))
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set())
   const [habits, setHabits] = useState<Habit[]>([])
   /** Habit id → every day it was logged (YYYY-MM-DD), for the calendar. */
@@ -499,6 +501,7 @@ export default function MyTasks() {
                           {(hasLink(task.title) || hasLink(task.description)) && (
                             <p className="text-[11px] text-gray-300 mt-1">Tap the link to open it · tap anywhere else to mark done</p>
                           )}
+                          <PostReactions id={task.id} state={rx} />
                         </div>
                       </div>
                     )

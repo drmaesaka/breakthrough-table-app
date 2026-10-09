@@ -53,6 +53,8 @@ export async function notifyMembers(admin: any, args: {
   /** Email those without push? Off for table chat — a burst of chat emails is noise. */
   emailFallback: boolean
   emailCta?: string
+  /** Shared by every recipient's inbox row, so a broadcast can be reacted to as one post. */
+  postId?: string
 }) {
   const recipients = [...new Set(args.recipientIds)]
   if (!recipients.length) return { pushed: 0, emailed: 0, skipped: 0 }
@@ -68,9 +70,15 @@ export async function notifyMembers(admin: any, args: {
   // how members without push see what they missed. Before the 2026-10-06
   // migration the table is missing: log and carry on delivering.
   const { error: inboxError } = await admin.from('notifications').insert(
-    wanted.map(user_id => ({ user_id, kind: args.kind, title: args.title, body: args.body.slice(0, 500), url: args.url }))
+    wanted.map(user_id => ({ user_id, kind: args.kind, title: args.title, body: args.body.slice(0, 500), url: args.url, ...(args.postId ? { post_id: args.postId } : {}) }))
   )
   if (inboxError) console.error('notify: inbox write failed:', inboxError.message)
+  // Before sql/2026-10-09-post-reactions.sql there is no post_id column: write it without.
+  if (inboxError && args.postId && /post_id/.test(inboxError.message)) {
+    await admin.from('notifications').insert(
+      wanted.map(user_id => ({ user_id, kind: args.kind, title: args.title, body: args.body.slice(0, 500), url: args.url }))
+    )
+  }
 
   const { data: subs } = await admin.from('push_subscriptions').select('*').in('user_id', wanted)
   const subsByUser = new Map<string, any[]>()

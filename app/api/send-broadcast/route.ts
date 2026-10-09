@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
     url: '/dashboard',
     emailFallback: true,
     emailCta: 'Open Breakthrough Table',
+    postId: crypto.randomUUID(),
   })
   return NextResponse.json({ sent: result.pushed, emailed: result.emailed, recipients: recipientIds.length, scope })
 }

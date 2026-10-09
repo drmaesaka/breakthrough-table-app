@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import type { SunriseEvent } from '@/lib/sunrise-events'
+import { useReactions, PostReactions } from '@/components/Reactions'
 
 /** Same event already posted in the app (same day, overlapping name)? Then the app's copy, with its RSVP, wins. */
 function alsoInApp(s: SunriseEvent, events: any[]) {
@@ -15,6 +16,7 @@ function alsoInApp(s: SunriseEvent, events: any[]) {
 
 export default function EventsPage() {
   const [events, setEvents] = useState<any[]>([])
+  const rx = useReactions('event', events.map(e => e.id))
   const [rsvps, setRsvps] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
@@ -177,6 +179,7 @@ export default function EventsPage() {
                     {event.description && (
                       <p className="text-gray-500 text-sm mt-2 leading-relaxed">{event.description}</p>
                     )}
+                    <PostReactions id={event.id} state={rx} />
                   </div>
                 </div>
 
