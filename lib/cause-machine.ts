@@ -182,7 +182,17 @@ export type CauseMachineEvent = {
   Name: string | null
   OrganizationName: string | null
   StartDate: string | null
+  /** Published, Draft, Deleted. */
   Status: string | null
+  // Used by the Events page (lib/sunrise-events.ts), 2026-10-09.
+  EndDate?: string | null
+  Tagline?: string | null
+  /** Public or Private. */
+  Privacy?: string | null
+  Venue?: { Name?: string | null; Address?: { AddressLine1?: string | null; AddressLine2?: string | null; City?: string | null; State?: string | null } | null } | null
+  Communities?: { EventUrl?: string | null }[] | null
+  LogoImageUrl?: string | null
+  BannerImageUrl?: string | null
 }
 
 type Envelope<T> = { PageInfo: PageInfo; Results: T[] }
@@ -289,6 +299,16 @@ export async function fetchRecurringDonations(): Promise<unknown[]> {
  */
 export async function fetchEvents(): Promise<CauseMachineEvent[]> {
   return getAll<CauseMachineEvent>('v1/events')
+}
+
+/** One event's full record; `Overview` is its description as HTML. */
+export async function fetchEventOverview(eventId: number): Promise<string | null> {
+  const token = await getToken()
+  const res = await fetch(`${BASE}/v1/events/${eventId}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+  if (res.status === 401) cachedToken = null
+  if (!res.ok) return null
+  const json = await res.json().catch(() => null)
+  return typeof json?.Overview === 'string' ? json.Overview : null
 }
 
 /** EventId → event name, for classifying ticket payments. */

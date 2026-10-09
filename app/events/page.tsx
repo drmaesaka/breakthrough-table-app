@@ -3,6 +3,15 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
+import type { SunriseEvent } from '@/lib/sunrise-events'
+
+/** Same event already posted in the app (same day, overlapping name)? Then the app's copy, with its RSVP, wins. */
+function alsoInApp(s: SunriseEvent, events: any[]) {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  const day = (d: string) => new Date(d).toDateString()
+  const name = norm(s.title)
+  return events.some(e => day(e.event_date) === day(s.start) && (norm(e.title).includes(name) || name.includes(norm(e.title))))
+}
 
 export default function EventsPage() {
   const [events, setEvents] = useState<any[]>([])
@@ -11,6 +20,11 @@ export default function EventsPage() {
   const [userId, setUserId] = useState('')
   const [rsvping, setRsvping] = useState<string | null>(null)
   const [rsvpError, setRsvpError] = useState<string | null>(null)
+  // Sunrise Network's own events (2026-10-09), straight from Sunrise; tickets
+  // are bought there. Loaded after the app's so a slow Sunrise never holds
+  // the page up. See lib/sunrise-events.ts.
+  const [sunrise, setSunrise] = useState<SunriseEvent[]>([])
+  const [openSunrise, setOpenSunrise] = useState<string | null>(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -27,6 +41,8 @@ export default function EventsPage() {
       setEvents(json.events || [])
       setRsvps(new Set<string>(json.rsvp_event_ids || []))
       setLoading(false)
+      const sr = await fetch('/api/events/sunrise', { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } }).catch(() => null)
+      if (sr?.ok) setSunrise((await sr.json()).events || [])
     }
     load()
   }, [router])
@@ -84,7 +100,7 @@ export default function EventsPage() {
       </div>
 
       <div className="px-5 py-5 pb-28 space-y-4">
-        {events.length === 0 && (
+        {events.length === 0 && sunrise.length === 0 && (
           <div className="text-center py-16">
             <p className="text-5xl mb-3">📅</p>
             <p className="text-gray-500 font-medium">No upcoming events</p>
@@ -92,7 +108,42 @@ export default function EventsPage() {
           </div>
         )}
 
-        {events.map(event => {
+        {[
+          ...events.map(e => ({ at: e.event_date as string, app: e, sun: null as SunriseEvent | null })),
+          ...sunrise.filter(s => !alsoInApp(s, events)).map(s => ({ at: s.start, app: null as any, sun: s })),
+        ].sort((a, b) => a.at.localeCompare(b.at)).map(({ app: event, sun }) => {
+          if (sun) {
+            const until = daysUntil(sun.start)
+            const open = openSunrise === sun.id
+            return (
+              <div key={sun.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                <div className="h-1.5 bg-amber-400" />
+                {sun.image && <img src={sun.image} alt="" className="w-full max-h-44 object-cover" />}
+                <div className="p-5">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">🌅 Sunrise Network</span>
+                    <span className={`text-xs font-semibold ${until === 'Today' ? 'text-orange-500' : 'text-gray-400'}`}>{until}</span>
+                  </div>
+                  <h3 className="font-bold text-gray-900 text-base leading-tight">{sun.title}</h3>
+                  {sun.tagline && <p className="text-gray-500 text-sm mt-0.5">{sun.tagline}</p>}
+                  <p className="text-gray-400 text-xs mt-1">{formatDate(sun.start)} · {formatTime(sun.start)}{sun.end ? ` – ${formatTime(sun.end)}` : ''}</p>
+                  {sun.location && <p className="text-gray-500 text-sm mt-1">📍 {sun.location}</p>}
+                  {sun.description && (
+                    <button type="button" onClick={() => setOpenSunrise(open ? null : sun.id)} className="block text-left mt-2">
+                      <p className={`text-gray-500 text-sm leading-relaxed whitespace-pre-line ${open ? '' : 'line-clamp-3'}`}>{sun.description}</p>
+                      <span className="text-bt-blue text-xs font-semibold">{open ? 'Less' : 'More'}</span>
+                    </button>
+                  )}
+                  {sun.url && (
+                    <a href={sun.url} target="_blank" rel="noopener noreferrer"
+                      className="block mt-4 py-2.5 rounded-xl font-semibold text-sm bg-bt-navy text-white text-center">
+                      Details &amp; tickets →
+                    </a>
+                  )}
+                </div>
+              </div>
+            )
+          }
           const isRsvped = rsvps.has(event.id)
           const isVirtual = event.event_type === 'virtual'
           const until = daysUntil(event.event_date)
