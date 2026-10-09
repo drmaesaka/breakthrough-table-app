@@ -9,25 +9,15 @@ import { GifButton } from '@/components/GifPicker'
 import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
 
-// The TCs' own space: one channel across every table, plus a shared shelf of
-// internal material. Table chat is scoped to a group_id and DMs are one-to-one,
+// The TCs' own space: one channel across every table. (A shared Resources
+// shelf sat beside it until 2026-10-09; it was never used, and TC-only
+// material lives in Library via Sunrise's BT Leadership group.) Table chat is scoped to a group_id and DMs are one-to-one,
 // so before this there was no room where all the TCs were in the same place.
 //
-// Both tables are leader-only at the RLS level, not just hidden behind this
+// The chat is leader-only at the RLS level, not just hidden behind this
 // page — a participant who guesses the URL still reads nothing.
 
-type Resource = {
-  id: string
-  title: string
-  url: string
-  type: string | null
-  description: string | null
-  created_at: string
-  profiles?: { full_name: string | null } | null
-}
-
 export default function LeadersPage() {
-  const [tab, setTab] = useState<'resources' | 'chat'>('resources')
   const [checking, setChecking] = useState(true)
   const [user, setUser] = useState<any>(null)
   const att = usePhotoAttach(user?.id)
@@ -41,15 +31,6 @@ export default function LeadersPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const newestSeenRef = useRef<string | null>(null)
   const lastIdRef = useRef<string | null>(null)
-
-  // Resources
-  const [resources, setResources] = useState<Resource[]>([])
-  const [resTitle, setResTitle] = useState('')
-  const [resUrl, setResUrl] = useState('')
-  const [resType, setResType] = useState('document')
-  const [resDesc, setResDesc] = useState('')
-  const [resSaving, setResSaving] = useState(false)
-  const [resError, setResError] = useState('')
 
   const router = useRouter()
   const supabase = createClient()
@@ -91,15 +72,6 @@ export default function LeadersPage() {
     })
   }
 
-  async function fetchResources() {
-    const { data, error } = await supabase
-      .from('leader_resources')
-      .select('*, profiles(full_name, avatar_url)')
-      .order('created_at', { ascending: false })
-    if (error) { console.error('leader resources fetch failed:', error.message); return }
-    setResources((data || []) as Resource[])
-  }
-
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -110,16 +82,17 @@ export default function LeadersPage() {
       if (profile?.role !== 'leader') { router.push('/dashboard'); return }
 
       setUser(user)
-      await Promise.all([fetchResources(), fetchMessages()])
+      await fetchMessages()
       setChecking(false)
     }
     load()
   }, [router])
 
   useEffect(() => {
-    const interval = setInterval(() => { if (tab === 'chat') fetchMessages() }, 3000)
+    const interval = setInterval(() => { fetchMessages() }, 3000)
     return () => clearInterval(interval)
-  }, [tab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Keyed by the newest message id rather than the array, which the poll
   // replaces every tick and which would otherwise re-scroll on a loop.
@@ -127,8 +100,8 @@ export default function LeadersPage() {
     const lastId = messages[messages.length - 1]?.id ?? null
     if (lastId === lastIdRef.current) return
     lastIdRef.current = lastId
-    if (tab === 'chat') bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, tab])
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault()
@@ -148,48 +121,12 @@ export default function LeadersPage() {
     fetchMessages()
   }
 
-  async function addResource() {
-    if (!resTitle.trim()) { setResError('Title is required'); return }
-    if (!resUrl.trim()) { setResError('Link is required'); return }
-    setResSaving(true)
-    setResError('')
-    const { data, error } = await supabase.from('leader_resources').insert({
-      title: resTitle.trim(),
-      url: resUrl.trim(),
-      type: resType,
-      description: resDesc.trim() || null,
-      created_by: user.id,
-    }).select('*, profiles(full_name, avatar_url)').single()
-    setResSaving(false)
-    if (error) { setResError(error.message); return }
-    setResources(p => [data as Resource, ...p])
-    setResTitle(''); setResUrl(''); setResDesc('')
-  }
-
-  async function deleteResource(id: string) {
-    if (!confirm('Remove this resource for every TC?')) return
-    // .select() so a delete the database quietly refuses (zero rows, no
-    // error) is reported instead of the item vanishing and coming back.
-    const { data, error } = await supabase.from('leader_resources').delete().eq('id', id).select('id')
-    if (error || !data?.length) {
-      // Fall back to the server, which checks the caller is a TC itself.
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/leaders/resources', { method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
-        body: JSON.stringify({ id }) }).catch(() => null)
-      if (!res || !res.ok) { setResError("Couldn't remove that resource. Try again, or ask Thompson."); return }
-    }
-    setResources(p => p.filter(r => r.id !== id))
-  }
-
   function getInitials(name: string) {
     const parts = (name || '').trim().split(' ')
     return parts.length >= 2
       ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
       : name.slice(0, 2).toUpperCase() || '?'
   }
-
-  const inputClass = "w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
 
   if (checking) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
@@ -201,84 +138,10 @@ export default function LeadersPage() {
     <div style={{ height: '100dvh' }} className="bg-bt-pale flex flex-col">
       <div className="bg-bt-navy px-5 pt-14 pb-0 flex-shrink-0">
         <h1 className="text-white text-2xl font-bold">TC Room</h1>
-        <p className="text-bt-light/60 text-sm mt-0.5 mb-3">Leaders only — not visible to members</p>
-        <div className="flex gap-1">
-          {(['resources', 'chat'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-2 rounded-t-xl text-sm font-semibold transition-colors ${
-                tab === t ? 'bg-bt-pale text-bt-navy' : 'text-white/60 hover:text-white/80'
-              }`}>
-              {t === 'resources' ? '📁 Resources' : '💬 TC Chat'}
-            </button>
-          ))}
-        </div>
+        <p className="text-bt-light/60 text-sm mt-0.5 mb-4">TC chat · leaders only, not visible to members</p>
       </div>
 
-      {tab === 'resources' && (
-        <div className="flex-1 overflow-y-auto px-5 py-5 pb-28 space-y-4">
-          <div className="bg-white rounded-2xl p-5 shadow-sm">
-            <h3 className="font-bold text-bt-navy mb-3">Add a resource</h3>
-            <div className="space-y-3">
-              <input value={resTitle} onChange={e => setResTitle(e.target.value)}
-                placeholder="Title" className={inputClass} />
-              <input value={resUrl} onChange={e => setResUrl(e.target.value)}
-                placeholder="https://..." className={inputClass} />
-              <select value={resType} onChange={e => setResType(e.target.value)} className={inputClass}>
-                {['document', 'video', 'training', 'template', 'link'].map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <textarea value={resDesc} onChange={e => setResDesc(e.target.value)} rows={2}
-                placeholder="What is this for? (optional)" className={inputClass} />
-              {resError && <p className="text-red-600 text-xs">{resError}</p>}
-              <button onClick={addResource} disabled={resSaving}
-                className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
-                {resSaving ? 'Saving...' : 'Add Resource'}
-              </button>
-            </div>
-          </div>
-
-          {resources.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-4xl mb-3">📁</p>
-              <p className="text-gray-500 font-medium">No shared resources yet</p>
-              <p className="text-gray-400 text-sm mt-1">Anything added here is visible to every TC</p>
-            </div>
-          )}
-
-          {resources.map(r => (
-            <div key={r.id} className="bg-white rounded-2xl p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  {r.type && (
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-bt-pale text-bt-blue px-2 py-0.5 rounded-full">
-                      {r.type}
-                    </span>
-                  )}
-                  <h4 className="font-bold text-gray-900 text-sm mt-1.5">{r.title}</h4>
-                  {r.description && (
-                    <p className="text-gray-500 text-sm mt-1 leading-relaxed">{r.description}</p>
-                  )}
-                  <a href={r.url} target="_blank" rel="noopener noreferrer"
-                    className="text-bt-blue text-xs underline break-all mt-2 inline-block">
-                    Open →
-                  </a>
-                  <p className="text-gray-300 text-[11px] mt-2">
-                    Added by {r.profiles?.full_name || 'a TC'}
-                  </p>
-                </div>
-                <button onClick={() => deleteResource(r.id)}
-                  className="text-red-500 text-xs font-medium flex-shrink-0">
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'chat' && (
-        <>
+      <>
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
             {messages.length === 0 && (
               <div className="text-center py-16">
@@ -335,8 +198,7 @@ export default function LeadersPage() {
               </svg>
             </button>
           </form>
-        </>
-      )}
+      </>
 
       <BottomNav />
     </div>
