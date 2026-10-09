@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
-import { pickTable, setCurrentTable, onCurrentTableChange } from '@/lib/current-table'
+import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
 
 export default function BottomNav() {
   const pathname = usePathname()
@@ -28,7 +28,7 @@ export default function BottomNav() {
       const led = res && res.ok ? ((await res.json()).groups || []) : []
       const all = [...(home ? [home] : []), ...led.filter((g: any) => g.id !== home?.id).map((g: any) => ({ id: g.id, name: g.name, home: false }))]
       setTables(all)
-      setCurrent(pickTable(all.map(t => t.id), home?.id))
+      setCurrent(getCurrentTable() === ALL_TABLES ? ALL_TABLES : pickTable(all.map(t => t.id), home?.id))
     }
     checkRole()
     return onCurrentTableChange(setCurrent)
@@ -105,17 +105,22 @@ export default function BottomNav() {
         {/* Which table a TC is working in, on every screen, with a switch.
             My Table and Admin follow it. */}
         {tables.length > 0 && (() => {
+          // "All tables" is an Admin view; elsewhere the bar shows the one
+          // table the screen is actually on.
+          const allOffered = pathname.startsWith('/admin') && tables.length > 1
+          const showAll = allOffered && current === ALL_TABLES
           const t = tables.find(x => x.id === current) || tables[0]
           return (
             <div className="relative h-[34px] bg-bt-navy text-white flex items-center justify-center gap-1.5 text-xs font-semibold">
               <span className="text-bt-light/70 font-medium">Working in</span>
-              <span className="truncate max-w-[55%]">🪑 {t.name}</span>
+              <span className="truncate max-w-[55%]">{showAll ? '🌐 All tables' : `🪑 ${t.name}`}</span>
               {tables.length > 1 && (
                 <>
                   <span className="text-bt-light/70">▾</span>
-                  <select value={t.id} aria-label="Switch table"
+                  <select value={showAll ? ALL_TABLES : t.id} aria-label="Switch table"
                     onChange={e => { setCurrent(e.target.value); setCurrentTable(e.target.value) }}
                     className="absolute inset-0 opacity-0 w-full">
+                    {allOffered && <option value={ALL_TABLES}>All tables</option>}
                     {tables.map(x => <option key={x.id} value={x.id}>{x.name}{x.home ? ' (your table)' : ''}</option>)}
                   </select>
                 </>

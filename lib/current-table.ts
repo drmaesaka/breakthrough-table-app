@@ -4,6 +4,10 @@
 // per-person convenience, and a fresh device simply starts at their own table.
 
 const KEY = 'bt.currentTable'
+
+/** Admin only (2026-10-09): every table the TC leads at once. Screens that
+ *  show one table (My Table) ignore it and fall back to their usual table. */
+export const ALL_TABLES = 'all'
 const EVENT = 'bt-current-table'
 
 export function getCurrentTable(): string | null {

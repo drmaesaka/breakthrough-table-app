@@ -1,6 +1,6 @@
 'use client'
 import { eventWhen, endFromTime } from '@/lib/event-time'
-import { pickTable, onCurrentTableChange } from '@/lib/current-table'
+import { pickTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
 import { SunriseGroupPicker, SunriseVideoLinks } from '@/components/SunriseAdmin'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -107,6 +107,22 @@ function TablePicker({ groups, selectedGroup, extra, setExtra }: {
 /** The table picked at the top plus any extras that are still tables this leader has. */
 function targetTables(groups: { id: string }[], selectedGroup: string, extra: Set<string>) {
   return [selectedGroup, ...groups.map(g => g.id).filter(id => id !== selectedGroup && extra.has(id))]
+}
+
+/**
+ * "All tables" view: one row per item, however many tables it was posted to.
+ * A post to several tables is one row per table in the database; copies are
+ * matched on their text, and the row keeps every copy's id and table.
+ */
+function mergeCopies<T extends { id: string; group_id: string; title?: string; description?: string | null; url?: string | null }>(items: T[], allMode: boolean) {
+  const out = new Map<string, { item: T; ids: string[]; tableIds: string[] }>()
+  for (const it of items) {
+    const key = allMode ? [it.title, it.description || '', it.url || ''].join('\u0000') : it.id
+    const row = out.get(key)
+    if (row) { row.ids.push(it.id); row.tableIds.push(it.group_id) }
+    else out.set(key, { item: it, ids: [it.id], tableIds: [it.group_id] })
+  }
+  return [...out.values()]
 }
 
 /** Today as YYYY-MM-DD in the leader's own timezone (not UTC, which rolls at 7pm Central). */
@@ -278,6 +294,15 @@ export default function AdminPage() {
   const [memberEditBusy, setMemberEditBusy] = useState(false)
   const [memberEditError, setMemberEditError] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('')
+  /**
+   * "All tables" in the Working-in bar (2026-10-09): lists show every table
+   * this TC leads and posts go to all of them. selectedGroup stays a real
+   * table underneath, for the few things that only make sense per table.
+   * Mirrored in refs so loaders called right after a switch see it.
+   */
+  const [allMode, setAllMode] = useState(false)
+  const allRef = useRef(false)
+  const groupsRef = useRef<any[]>([])
   const [loading, setLoading] = useState(true)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
@@ -311,7 +336,8 @@ export default function AdminPage() {
   const [promptAlsoTo, setPromptAlsoTo] = useState<Set<string>>(new Set())
 
   // Inline editing (tasks, content, events, prompts) — one item at a time
-  const [editing, setEditing] = useState<{ table: string; id: string; fields: any } | null>(null)
+  // `others`: the other tables' copies, edited together in the All tables view.
+  const [editing, setEditing] = useState<{ table: string; id: string; fields: any; others?: string[] } | null>(null)
   const [editSaving, setEditSaving] = useState(false)
 
   // Member responses to reflection prompts, keyed by prompt id
@@ -458,14 +484,25 @@ export default function AdminPage() {
         ? ((await mineRes.json()).groups || [])
         : await ledGroups(supabase, user.id, '*, last_period_start')
       setGroups(grps)
+      groupsRef.current = grps
       setUsers(membersRes.members || [])
       // The table in the "Working in" bar, if it is one this TC leads.
       const startId = pickTable(grps.map((g: any) => g.id))
+      if (getCurrentTable() === ALL_TABLES && grps.length > 1) { allRef.current = true; setAllMode(true) }
       if (startId) { setSelectedGroup(startId); loadGroupData(startId) }
       setLoading(false)
     }
     load()
   }, [router])
+
+  function tableNames(ids: string[]) {
+    return ids.map(id => groups.find(g => g.id === id)?.name).filter(Boolean).join(' · ')
+  }
+
+  /** The tables a list or a post covers: every led table in All tables, else the one. */
+  function scopeIds(gid: string = selectedGroup): string[] {
+    return allRef.current ? groupsRef.current.map(g => g.id) : [gid]
+  }
 
   async function loadGroupData(gid: string) {
     const supabase = createClient()
@@ -473,8 +510,8 @@ export default function AdminPage() {
     // to the curriculum bundled in page code; that copy is server-only now.
     loadMeetingPlans(gid)
     const [t, c, p, n] = await Promise.all([
-      supabase.from('tasks').select('*').eq('group_id', gid).eq('archived', false).order('created_at', { ascending: false }),
-      supabase.from('content').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
+      supabase.from('tasks').select('*').in('group_id', scopeIds(gid)).eq('archived', false).order('created_at', { ascending: false }),
+      supabase.from('content').select('*').in('group_id', scopeIds(gid)).order('created_at', { ascending: false }),
       supabase.from('journal_prompts').select('*').eq('group_id', gid).order('created_at', { ascending: false }),
       supabase.from('group_notification_settings').select('*').eq('group_id', gid).maybeSingle(),
     ])
@@ -503,17 +540,20 @@ export default function AdminPage() {
     setNotifSaving(true)
     const supabase = createClient()
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    const { error } = await supabase.from('group_notification_settings').upsert({
-      group_id: selectedGroup,
+    // All tables: the same settings on every table. .select() so a table
+    // the write was quietly refused on counts as a failure.
+    const ids = scopeIds()
+    const { data: saved, error } = await supabase.from('group_notification_settings').upsert(ids.map(group_id => ({
+      group_id,
       checkin_enabled: checkinEnabled,
       checkin_time: checkinTime,
       checkin_timezone: timezone,
       reminder_enabled: reminderEnabled,
       reminder_message: reminderMessage.trim(),
       reminder_time: reminderTime,
-    }, { onConflict: 'group_id' })
+    })), { onConflict: 'group_id' }).select('group_id')
     setNotifSaving(false)
-    if (error) {
+    if (error || (saved || []).length < ids.length) {
       setNotifSaveError(true)
       setTimeout(() => setNotifSaveError(false), 4000)
       return
@@ -523,7 +563,7 @@ export default function AdminPage() {
   }
 
   async function sendBroadcast() {
-    const picked = broadcastTables.size ? [...broadcastTables] : (selectedGroup ? [selectedGroup] : [])
+    const picked = broadcastTables.size ? [...broadcastTables] : (selectedGroup ? scopeIds() : [])
     if (!broadcastMessage.trim() || (broadcastScope === 'tables' && !picked.length)) return
     if (broadcastScope === 'all' && !confirm('Send this to EVERY Breakthrough Table member, at every table?')) return
     if (broadcastScope === 'tables' && picked.length > 1) {
@@ -839,7 +879,8 @@ export default function AdminPage() {
     const data = json.events || []
     // Community-wide events (no group_id) plus this table's own. Events are
     // BT-wide by default since 2026-09-21; a table id means "this table only".
-    setEvents(data.filter((e: any) => !e.group_id || e.group_id === gid))
+    const ids = scopeIds(gid)
+    setEvents(data.filter((e: any) => !e.group_id || ids.includes(e.group_id)))
   }
 
   async function addEvent() {
@@ -862,7 +903,7 @@ export default function AdminPage() {
       virtual_link: eventType === 'virtual' ? eventLink.trim() || null : null,
       created_by: user!.id,
       // BT-wide unless the leader chose this table only.
-      group_id: eventAudience === 'table' && selectedGroup ? selectedGroup : null,
+      group_id: eventAudience === 'table' && selectedGroup && !allRef.current ? selectedGroup : null,
     }
     // Server-side: co-leaders were refused by the console INSERT policy.
     const res = await fetch('/api/admin/events', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(row) })
@@ -897,6 +938,18 @@ export default function AdminPage() {
       body: JSON.stringify(payload),
     })
     const result = await res.json().catch(() => ({}))
+    if (res.ok && editing.others?.length) {
+      // The same post on the other tables (All tables view).
+      const h = await authHeaders()
+      const rest = await Promise.all(editing.others.map(id => fetch('/api/admin/edit-item', {
+        method: 'PATCH', headers: h, body: JSON.stringify({ table: editing.table, id, fields: editing.fields }),
+      })))
+      const failed = rest.filter(r => !r.ok).length
+      if (failed) alert(`Saved, but ${failed} of the other tables' copies could not be changed.`)
+      setEditSaving(false); setEditing(null)
+      loadGroupData(selectedGroup)
+      return
+    }
     setEditSaving(false)
     if (!res.ok) { alert(`Could not save: ${result.error || res.status}`); return }
     const item = result.item
@@ -1049,7 +1102,7 @@ export default function AdminPage() {
     setLeaderPick(prev => ({ ...prev, [groupId]: '' }))
   }
 
-  async function loadRooms() {
+  async function loadRooms(gid: string = selectedGroup) {
     const supabase = createClient()
     const headers = await authHeaders()
     const [bookingsRes, roomsRes, venueRes] = await Promise.all([
@@ -1066,7 +1119,8 @@ export default function AdminPage() {
     const roomsJson = await roomsRes.json().catch(() => ({ rooms: [] }))
     // A room with no group_id (or from before the column existed) is shared
     // across tables; a stamped room belongs to one table only.
-    setRooms((roomsJson.rooms || []).filter((room: any) => !room.group_id || room.group_id === selectedGroup))
+    const ids = scopeIds(gid)
+    setRooms((roomsJson.rooms || []).filter((room: any) => !room.group_id || ids.includes(room.group_id)))
     setAllBookings(b || [])
 
     const venueJson = await venueRes.json().catch(() => ({}))
@@ -1231,13 +1285,14 @@ export default function AdminPage() {
     setTaskSaving(true)
     setTaskError('')
     const supabase = createClient()
-    const targetIds = targetTables(groups, selectedGroup, taskAlsoTo)
+    const targetIds = allMode ? scopeIds() : targetTables(groups, selectedGroup, taskAlsoTo)
 
     // Each table is in its own period, so the label comes from that table's
     // current tasks — the selected table's from what is already loaded, the
     // others' from one query. A brand-new table gets 'Current', as before.
-    const periodFor: Record<string, string> = { [selectedGroup]: tasks.length > 0 ? tasks[0].period_label : 'Current' }
-    const others = targetIds.filter(id => id !== selectedGroup)
+    // (All tables: `tasks` mixes tables, so every label comes from the query.)
+    const periodFor: Record<string, string> = allMode ? {} : { [selectedGroup]: tasks.length > 0 ? tasks[0].period_label : 'Current' }
+    const others = targetIds.filter(id => allMode || id !== selectedGroup)
     if (others.length) {
       const { data: rows } = await supabase
         .from('tasks').select('group_id, period_label')
@@ -1257,8 +1312,8 @@ export default function AdminPage() {
     setTaskSaving(false)
     if (error) { setTaskError(`Could not post: ${error.message}`); return }
     for (const row of data || []) notifyAbout('task', row.id)
-    const here = (data || []).find(row => row.group_id === selectedGroup)
-    if (here) setTasks(p => [here, ...p])
+    const here = (data || []).filter(row => allMode || row.group_id === selectedGroup)
+    setTasks(p => [...here, ...p])
     setTaskTitle(''); setTaskDesc('')
     if (targetIds.length > 1) {
       const names = targetIds.map(id => groups.find(g => g.id === id)?.name).filter(Boolean)
@@ -1267,7 +1322,10 @@ export default function AdminPage() {
   }
 
   async function deleteTask(id: string) {
-    if (await deleteItem('tasks', id)) setTasks(p => p.filter(t => t.id !== id))
+    if (!(await deleteItem('tasks', id))) return
+    // All tables: "remove from all" took other rows with it; reload.
+    if (allMode) loadGroupData(selectedGroup)
+    else setTasks(p => p.filter(t => t.id !== id))
   }
 
   async function addContent() {
@@ -1276,14 +1334,16 @@ export default function AdminPage() {
     if (!contentUrl.trim()) { setContentError('Upload a file or paste a link'); return }
     if (!selectedGroup) { setContentError('Pick a table at the top first — you are not leading one yet'); return }
     setContentSaving(true)
-    const { data: rows, error } = await postItems('content', [{
-      group_id: selectedGroup, title: contentTitle.trim(), url: contentUrl.trim(),
+    const { data: rows, error } = await postItems('content', scopeIds().map(group_id => ({
+      group_id, title: contentTitle.trim(), url: contentUrl.trim(),
       type: contentType, description: contentDesc.trim(),
-    }])
+    })))
     setContentSaving(false)
     if (error) { setContentError(error.message); return }
-    const data = rows?.[0]
-    if (data) { notifyAbout('content', data.id); setContent(p => [data, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc(''); setContentFileName('') }
+    if (rows?.length) {
+      for (const row of rows) notifyAbout('content', row.id)
+      setContent(p => [...rows, ...p]); setContentTitle(''); setContentUrl(''); setContentDesc(''); setContentFileName('')
+    }
   }
 
   /**
@@ -1426,11 +1486,17 @@ export default function AdminPage() {
   // Follow the "Working in" bar. A table this TC sits at but does not lead
   // is not in Admin's list; Admin stays where it is then.
   selectTableRef.current = (gid: string) => {
-    if (gid === selectedGroup || !groups.some(g => g.id === gid)) return
+    const toAll = gid === ALL_TABLES && groups.length > 1
+    if (toAll === allMode && (toAll || gid === selectedGroup)) return
+    if (!toAll && !groups.some(g => g.id === gid)) return
+    allRef.current = toAll; setAllMode(toAll)
+    setBroadcastTables(new Set())
+    if (toAll) gid = selectedGroup
     setSelectedGroup(gid)
     loadGroupData(gid)
     setJournalResponses(null)
     if (tab === 'events') loadEvents(gid)
+    if (tab === 'rooms') loadRooms(gid)
     if (tab === 'meetings') { setSelectedMeetingNumber(null); setMeetingDraft(null); loadMeetingPlans(gid) }
   }
 
@@ -1451,7 +1517,7 @@ export default function AdminPage() {
         )}
         {groups.length > 0 && selectedGroup && (
           <p className="text-bt-light/70 text-sm mt-1">
-            Working in <span className="text-white font-semibold">{groups.find(g => g.id === selectedGroup)?.name}</span>
+            Working in <span className="text-white font-semibold">{allMode ? `all ${groups.length} tables` : groups.find(g => g.id === selectedGroup)?.name}</span>
             <span className="text-bt-light/50"> · switch in the bar at the bottom</span>
           </p>
         )}
@@ -1486,7 +1552,10 @@ export default function AdminPage() {
 
         {tab === 'tasks' && (
           <>
-            {/* New Period */}
+            {/* New Period — one table at a time; it resets that table's members. */}
+            {allMode ? (
+              <p className="text-xs text-gray-400 px-1">To start a new period, pick one table in the bar at the bottom.</p>
+            ) : (
             <div style={{ backgroundColor: '#fefce8', borderColor: '#fde047' }} className="border-2 rounded-2xl p-4 space-y-3">
               <div>
                 <h3 className="font-bold text-gray-800">🔄 Start New Period</h3>
@@ -1500,30 +1569,31 @@ export default function AdminPage() {
                 {archiving ? 'Archiving...' : 'Archive Current & Start New Period'}
               </button>
             </div>
+            )}
 
             {/* Add reading / resources. Members see these under
                 "Reading & Resources" on My Table and tick them off; each one
                 counts toward their adherence like a habit does. */}
             {(() => {
-              const tableName = groups.find(g => g.id === selectedGroup)?.name || 'this table'
-              const count = targetTables(groups, selectedGroup, taskAlsoTo).length
+              const tableName = allMode ? `all ${groups.length} tables` : groups.find(g => g.id === selectedGroup)?.name || 'this table'
+              const count = allMode ? groups.length : targetTables(groups, selectedGroup, taskAlsoTo).length
               return (
                 <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
                   <h3 className="font-bold text-bt-navy">Add Reading or Resources</h3>
                   <p className="text-gray-400 text-xs">
                     Members of <span className="font-semibold text-bt-navy">{tableName}</span> see this under
                     “Reading &amp; Resources” on their My Table screen and check it off when it’s done.
-                    To post to a different table, change the table at the top of this page.
+                    {allMode ? 'To post to just one table, pick it in the bar at the bottom.' : 'To post to a different table, change the table in the bar at the bottom.'}
                   </p>
                   <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)}
                     placeholder="e.g. Read chapters 3–4 before next meeting *" className={inputClass} />
                   <input value={taskDesc} onChange={e => setTaskDesc(e.target.value)} placeholder="Details, or paste a link (optional)" className={inputClass} />
                   <p className="text-[11px] text-gray-400 -mt-1">Any web address you paste becomes a tappable link for members.</p>
-                  <TablePicker groups={groups} selectedGroup={selectedGroup} extra={taskAlsoTo} setExtra={setTaskAlsoTo} />
+                  {!allMode && <TablePicker groups={groups} selectedGroup={selectedGroup} extra={taskAlsoTo} setExtra={setTaskAlsoTo} />}
                   {taskError && <p className="text-red-600 text-xs">{taskError}</p>}
                   <button onClick={addTask} disabled={taskSaving || !taskTitle.trim()}
                     className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                    {taskSaving ? 'Posting...' : count > 1 ? `Post to ${count} tables` : `Post to ${tableName}`}
+                    {taskSaving ? 'Posting...' : allMode ? `Post to all ${count} tables` : count > 1 ? `Post to ${count} tables` : `Post to ${tableName}`}
                   </button>
                 </div>
               )
@@ -1532,12 +1602,12 @@ export default function AdminPage() {
             {/* Task list */}
             <div className="space-y-2">
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wide px-1">
-                Currently posted to {groups.find(g => g.id === selectedGroup)?.name || 'this table'}
+                Currently posted to {allMode ? 'your tables' : groups.find(g => g.id === selectedGroup)?.name || 'this table'}
               </p>
               {tasks.length === 0 && (
                 <p className="text-center text-gray-400 text-sm py-4">Nothing posted yet. Add reading or resources above.</p>
               )}
-              {tasks.map(task => (
+              {mergeCopies(tasks, allMode).map(({ item: task, ids, tableIds }) => (
                 editing?.table === 'tasks' && editing.id === task.id ? (
                   <div key={task.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
                     <input value={editing.fields.title}
@@ -1559,8 +1629,9 @@ export default function AdminPage() {
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 text-sm break-words">{linkify(task.title)}</p>
                     {task.description && <p className="text-gray-400 text-xs mt-0.5 break-words">{linkify(task.description)}</p>}
+                    {allMode && <p className="text-[11px] text-bt-blue mt-0.5">{tableNames(tableIds)}</p>}
                   </div>
-                  <button onClick={() => setEditing({ table: 'tasks', id: task.id, fields: { title: task.title, description: task.description || '' } })}
+                  <button onClick={() => setEditing({ table: 'tasks', id: task.id, others: ids.slice(1), fields: { title: task.title, description: task.description || '' } })}
                     className="text-bt-blue text-sm font-medium px-2 py-1">Edit</button>
                   <button onClick={() => deleteTask(task.id)} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
                 </div>
@@ -1575,6 +1646,7 @@ export default function AdminPage() {
             <SunriseVideoLinks />
             <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
               <h3 className="font-bold text-bt-navy">Add Content</h3>
+              <p className="text-gray-400 text-xs">Goes to {allMode ? `all ${groups.length} of your tables` : groups.find(g => g.id === selectedGroup)?.name || 'this table'}. Switch in the bar at the bottom.</p>
               <input value={contentTitle} onChange={e => setContentTitle(e.target.value)} placeholder="Title *" className={inputClass} />
               {/* Either paste a link or upload a file — the file's URL fills the same box. */}
               <label className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer ${
@@ -1606,11 +1678,11 @@ export default function AdminPage() {
               {contentError && <p className="text-red-500 text-sm">{contentError}</p>}
               <button onClick={addContent} disabled={contentSaving || contentUploading}
                 className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50">
-                {contentSaving ? 'Adding...' : 'Add Content'}
+                {contentSaving ? 'Adding...' : allMode ? `Add to all ${groups.length} tables` : 'Add Content'}
               </button>
             </div>
             <div className="space-y-2">
-              {content.map(item => (
+              {mergeCopies(content, allMode).map(({ item, ids, tableIds }) => (
                 editing?.table === 'content' && editing.id === item.id ? (
                   <div key={item.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm space-y-2">
                     <input value={editing.fields.title}
@@ -1643,12 +1715,15 @@ export default function AdminPage() {
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 text-sm">{item.title}</p>
                     <p className="text-gray-400 text-xs mt-0.5 capitalize">{item.type}</p>
+                    {allMode && <p className="text-[11px] text-bt-blue mt-0.5">{tableNames(tableIds)}</p>}
                   </div>
-                  <button onClick={() => setEditing({ table: 'content', id: item.id, fields: { title: item.title, url: item.url, type: item.type, description: item.description || '' } })}
+                  <button onClick={() => setEditing({ table: 'content', id: item.id, others: ids.slice(1), fields: { title: item.title, url: item.url, type: item.type, description: item.description || '' } })}
                     className="text-bt-blue text-sm font-medium px-2 py-1">Edit</button>
                   <button onClick={async () => {
                     if (!confirm(`Remove "${item.title}"?`)) return
-                    if (await deleteItem('content', item.id)) setContent(p => p.filter(c => c.id !== item.id))
+                    if (!(await deleteItem('content', item.id))) return
+                    if (allMode) loadGroupData(selectedGroup)
+                    else setContent(p => p.filter(c => c.id !== item.id))
                   }} className="text-red-400 text-sm font-medium px-2 py-1">Remove</button>
                 </div>
                 )
@@ -2253,9 +2328,14 @@ export default function AdminPage() {
               )}
             </div>
 
+            {allMode && (
+              <p className="text-xs text-gray-400 px-1">
+                Showing {groups.find(g => g.id === selectedGroup)?.name}&apos;s settings. Saving puts these on all {groups.length} tables.
+              </p>
+            )}
             <button onClick={saveNotifSettings} disabled={notifSaving}
               className={`w-full py-4 rounded-2xl font-semibold disabled:opacity-50 ${notifSaveError ? 'bg-red-600 text-white' : 'bg-bt-navy text-white'}`}>
-              {notifSaving ? 'Saving...' : notifSaveError ? "Couldn't save — try again" : notifSaved ? '✓ Saved!' : 'Save Notification Settings'}
+              {notifSaving ? 'Saving...' : notifSaveError ? "Couldn't save — try again" : notifSaved ? '✓ Saved!' : allMode ? `Save for all ${groups.length} tables` : 'Save Notification Settings'}
             </button>
 
             {/* Broadcast */}
@@ -2266,7 +2346,7 @@ export default function AdminPage() {
               </div>
               {(() => {
                 // Ticked tables; nothing ticked yet means the table I'm working in.
-                const picked = broadcastTables.size ? broadcastTables : new Set(selectedGroup ? [selectedGroup] : [])
+                const picked = broadcastTables.size ? broadcastTables : new Set(selectedGroup ? scopeIds() : [])
                 const toggle = (id: string) => {
                   setBroadcastScope('tables')
                   setBroadcastTables(() => { const n = new Set(picked); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -2314,7 +2394,7 @@ export default function AdminPage() {
                 className={`w-full text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40 ${broadcastScope === 'all' ? 'bg-red-600' : 'bg-bt-blue'}`}>
                 {broadcasting ? 'Sending...' : broadcastSent ? '✓ Sent!'
                   : broadcastScope === 'all' ? '📣 Send to All BT Members'
-                  : (broadcastTables.size || 1) > 1 ? `📣 Send to ${broadcastTables.size} Tables`
+                  : (broadcastTables.size || scopeIds().length) > 1 ? `📣 Send to ${broadcastTables.size || scopeIds().length} Tables`
                   : '📣 Send to Table Now'}
               </button>
             </div>
@@ -2354,7 +2434,8 @@ export default function AdminPage() {
               <div>
                 <p className="text-xs text-gray-400 font-medium mb-1.5">Who can see it</p>
                 <div className="flex gap-2">
-                  {([['all', '🌐 All BT members'], ['table', `👥 ${groups.find(g => g.id === selectedGroup)?.name || 'This table'} only`]] as const).map(([k, label]) => (
+                  {(([['all', '🌐 All BT members'], ['table', `👥 ${groups.find(g => g.id === selectedGroup)?.name || 'This table'} only`]] as const)
+                    .filter(([k]) => !(allMode && k === 'table'))).map(([k, label]) => (
                     <button key={k} onClick={() => setEventAudience(k)}
                       className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border-2 ${eventAudience === k ? 'border-bt-navy bg-bt-pale text-bt-navy' : 'border-gray-100 text-gray-500'}`}>
                       {label}
@@ -2486,6 +2567,7 @@ export default function AdminPage() {
                       <button
                         onClick={async () => {
                           const toAll = Boolean(event.group_id)
+                          if (!toAll && allMode) { alert('Pick one table in the bar at the bottom to limit an event to it.'); return }
                           const label = toAll ? 'Show this event to ALL BT members?' : `Limit this event to ${groups.find(g => g.id === selectedGroup)?.name || 'this table'} only?`
                           if (!confirm(label)) return
                           const res = await fetch('/api/admin/edit-item', {
@@ -3132,13 +3214,15 @@ export default function AdminPage() {
         )}
         {/* MEETINGS TAB */}
         {tab === 'meetings' && (() => {
-          const plans = resolvedMeetings()
+          // All tables: the BT default outlines only; per-table versions and
+          // "current meeting" belong to one table.
+          const plans = allMode ? resolveMeetingPlans(meetingDefaults) : resolvedMeetings()
           const group = groups.find(g => g.id === selectedGroup)
-          const currentNumber = group?.current_meeting_number ?? null
+          const currentNumber = allMode ? null : group?.current_meeting_number ?? null
           const selected = selectedMeetingNumber !== null
             ? plans.find(p => p.number === selectedMeetingNumber) || null
             : null
-          const hasOverride = selectedMeetingNumber !== null
+          const hasOverride = !allMode && selectedMeetingNumber !== null
             && meetingOverrides.some(p => p.number === selectedMeetingNumber)
 
           return (
@@ -3157,8 +3241,10 @@ export default function AdminPage() {
                 <div className="bg-white rounded-2xl p-5 shadow-sm">
                   <h3 className="font-bold text-bt-navy mb-1">Meeting Plans</h3>
                   <p className="text-xs text-gray-400 mb-4">
-                    The outline for each BT table meeting. Edit the BT default to change it
-                    everywhere, or make a version just for {group?.name || 'this table'}.
+                    {allMode
+                      ? 'The BT default outline for each meeting, used by every table that has not made its own version. To customize one table, pick it in the bar at the bottom.'
+                      : <>The outline for each BT table meeting. Edit the BT default to change it
+                    everywhere, or make a version just for {group?.name || 'this table'}.</>}
                   </p>
                   <div className="space-y-2">
                     {plans.map(m => (
@@ -3216,6 +3302,7 @@ export default function AdminPage() {
                     <h2 className="text-xl font-bold text-bt-navy mt-1">{selected.title}</h2>
 
                     <div className="flex gap-2 mt-4 flex-wrap">
+                      {!allMode && <>
                       <button onClick={() => setCurrentMeeting(
                         currentNumber === selected.number ? null : selected.number
                       )}
@@ -3231,6 +3318,7 @@ export default function AdminPage() {
                         className="px-3 py-2 rounded-xl text-xs font-semibold bg-bt-navy text-white">
                         Edit for this table
                       </button>
+                      </>}
                       <button onClick={() => openMeetingEditor(selected.number, 'default')}
                         className="px-3 py-2 rounded-xl text-xs font-semibold bg-white text-bt-navy border border-gray-200">
                         Edit BT default
