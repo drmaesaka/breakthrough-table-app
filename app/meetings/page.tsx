@@ -80,7 +80,7 @@ export default function MeetingsPage() {
         </p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="px-5 py-5 pb-36 space-y-4">
         {!plan ? (
           <div className="bg-white rounded-2xl p-5 shadow-sm">
             <h3 className="font-bold text-bt-navy mb-1">All Meetings</h3>

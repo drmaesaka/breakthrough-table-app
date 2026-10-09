@@ -121,7 +121,7 @@ export default function DirectoryPage() {
         </div>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-3">
+      <div className="px-5 py-5 pb-36 space-y-3">
         {dmError && (
           <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-3 text-center">
             <p className="text-red-700 text-sm font-medium">{dmError}</p>

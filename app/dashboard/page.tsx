@@ -47,7 +47,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="py-5 pb-28 space-y-4">
+      <div className="py-5 pb-36 space-y-4">
         <PushSetupBanner />
         <div className="px-5 space-y-4">
         {/* No group state */}

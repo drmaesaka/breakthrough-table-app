@@ -37,3 +37,11 @@ body {
   -webkit-user-select: text !important;
   user-select: text !important;
 }
+
+/* How far the bottom tabs sit above the screen edge (2026-10-09): clear of
+   the iPhone's rounded corners and home bar, where the corner tabs were hard
+   to tap. 8px on screens without a home bar. Pinned message boxes and page
+   bottoms add the same amount. */
+:root {
+  --nav-lift: max(8px, calc(env(safe-area-inset-bottom, 0px) - 8px));
+}

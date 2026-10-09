@@ -141,7 +141,7 @@ export default function LibraryPage() {
         <p className="text-bt-light/60 text-sm mt-0.5">{groupName ? `${groupName} and Sunrise Network` : 'Sunrise Network'} resources</p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-5">
+      <div className="px-5 py-5 pb-36 space-y-5">
 
 
         {/* Current Assignment */}

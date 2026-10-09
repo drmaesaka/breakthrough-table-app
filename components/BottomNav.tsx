@@ -128,7 +128,7 @@ export default function BottomNav() {
             </div>
           )
         })()}
-        <div className="flex">
+        <div className="flex" style={{ paddingBottom: 'var(--nav-lift)' }}>
           {tabs.map(tab => {
             const active = pathname === tab.href
             return (

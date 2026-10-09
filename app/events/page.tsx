@@ -101,7 +101,7 @@ export default function EventsPage() {
         <p className="text-bt-light/60 text-sm mt-0.5">Breakthrough Table — upcoming events</p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="px-5 py-5 pb-36 space-y-4">
         {events.length === 0 && sunrise.length === 0 && (
           <div className="text-center py-16">
             <p className="text-5xl mb-3">📅</p>

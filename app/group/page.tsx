@@ -279,13 +279,13 @@ export default function GroupPage() {
 
       {/* You — only on the table you sit at: your reading belongs to it. */}
       {view === 'you' && onHome && (
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-28">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-36">
           <MyTasks />
         </div>
       )}
 
       {view === 'people' && (
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-28 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-36 space-y-3">
         {isLeader && detail && (
           <p className="text-gray-400 text-xs px-1">TC view: tap a member for their habits, reading, attendance and more.</p>
         )}

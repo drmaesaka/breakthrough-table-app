@@ -254,7 +254,7 @@ export default function BookingPage() {
         <p className="text-bt-light/60 text-sm mt-0.5">Reserve a space at Breakthrough Table</p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-5">
+      <div className="px-5 py-5 pb-36 space-y-5">
 
         {bookingSuccess && (
           <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 text-center">

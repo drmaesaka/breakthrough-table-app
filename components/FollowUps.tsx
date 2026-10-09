@@ -113,7 +113,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
   const input = 'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue'
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-28 space-y-3">
+    <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 pb-36 space-y-3">
       {canPost && (
         <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
           {!composing ? (

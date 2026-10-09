@@ -208,7 +208,7 @@ export default function PreferencesPage() {
         </div>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="px-5 py-5 pb-36 space-y-4">
 
         {/* Push setup — install instructions, permission prompt, or blocked notice */}
         {pushSupport === 'ios-install' ? (

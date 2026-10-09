@@ -156,7 +156,7 @@ export default function AnalyticsPage() {
         <p className="text-bt-light/60 text-sm mt-0.5">{groups.length} active table{groups.length !== 1 ? 's' : ''}</p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="px-5 py-5 pb-36 space-y-4">
         {groups.length === 0 && (
           <div className="text-center py-16">
             <p className="text-5xl mb-3">📊</p>

@@ -307,7 +307,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="px-5 py-5 pb-36 space-y-4">
 
         {/* Current habits. Several can run at once, each with its own streak
             on the tasks screen — Mo's rule 2026-08-24. */}

@@ -143,7 +143,7 @@ export default function MessagesPage() {
 
       {/* Groups Tab — custom rooms across tables */}
       {tab === 'groups' && (
-        <div className="flex-1 overflow-y-auto pb-28">
+        <div className="flex-1 overflow-y-auto pb-36">
           <div className="px-5 py-4 space-y-3">
             {!creating ? (
               <button onClick={() => setCreating(true)}
@@ -198,7 +198,7 @@ export default function MessagesPage() {
 
       {/* DMs Tab */}
       {tab === 'dms' && (
-        <div className="flex-1 overflow-y-auto pb-28">
+        <div className="flex-1 overflow-y-auto pb-36">
           <div className="px-5 py-4">
             <Link href="/directory"
               className="flex items-center gap-3 bg-bt-navy text-white px-4 py-3.5 rounded-2xl font-semibold text-sm mb-4">

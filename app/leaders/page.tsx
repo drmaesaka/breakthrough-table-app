@@ -185,7 +185,7 @@ export default function LeadersPage() {
           <PhotoPreview att={att} />
           <form onSubmit={sendMessage}
             className={`flex-shrink-0 px-4 py-3 bg-white flex items-end gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
-            style={{ paddingBottom: 'calc(0.75rem + 60px + var(--table-bar, 0px))' }}>
+            style={{ paddingBottom: 'calc(0.75rem + 60px + var(--table-bar, 0px) + var(--nav-lift, 0px))' }}>
             <PhotoButton att={att} />
             <GifButton att={att} />
             <ChatInput value={newMessage} onChange={setNewMessage} placeholder="Message the other TCs..." />

@@ -147,7 +147,7 @@ export default function FinancesPage() {
         <p className="text-bt-light/60 text-sm mt-0.5">Live from Cause Machine — read only</p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-4">
+      <div className="px-5 py-5 pb-36 space-y-4">
         {error && (
           <div className="bg-white rounded-2xl shadow-sm p-5 border-l-4 border-red-400">
             <p className="font-bold text-gray-900">{error.message}</p>

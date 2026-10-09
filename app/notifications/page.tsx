@@ -55,7 +55,7 @@ export default function NotificationsPage() {
         <p className="text-bt-light/60 text-sm mt-0.5">Everything the app has sent you</p>
       </div>
 
-      <div className="px-5 py-5 pb-28 space-y-2">
+      <div className="px-5 py-5 pb-36 space-y-2">
         {loading && <p className="text-center text-gray-400 py-10">Loading...</p>}
         {failed && <p className="text-center text-gray-400 py-10">Couldn&apos;t load notifications. Close and reopen the app to try again.</p>}
         {!loading && !failed && items.length === 0 && (
