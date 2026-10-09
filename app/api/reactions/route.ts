@@ -15,9 +15,9 @@ import { REACTION_EMOJIS, type ReactionChat } from '@/lib/reactions'
 
 const CHATS: Record<ReactionChat, string> = {
   table: 'messages', room: 'chat_room_messages', direct: 'direct_messages', leaders: 'leader_messages',
-  task: 'tasks', event: 'events', announcement: 'notifications',
+  task: 'tasks', event: 'events', announcement: 'notifications', followup: 'table_posts',
 }
-const POSTS = new Set<ReactionChat>(['task', 'event', 'announcement'])
+const POSTS = new Set<ReactionChat>(['task', 'event', 'announcement', 'followup'])
 
 /** The person's own table plus the ones they lead. */
 async function myTables(userId: string, role: string): Promise<Set<string>> {

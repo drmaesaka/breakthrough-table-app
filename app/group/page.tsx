@@ -7,6 +7,7 @@ import Link from 'next/link'
 import Avatar from '@/components/Avatar'
 import MyTasks from '@/components/MyTasks'
 import TableChat from '@/components/TableChat'
+import FollowUps from '@/components/FollowUps'
 import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
 
 type Detail = {
@@ -35,7 +36,7 @@ export default function GroupPage() {
   const [homeGroupId, setHomeGroupId] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ members: Detail[]; tasks_total: number; prompts_total: number } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
-  const [view, setView] = useState<'chat' | 'you' | 'people'>('you')
+  const [view, setView] = useState<'chat' | 'you' | 'people' | 'followups'>('you')
   // TC quick-send: a message to the selected table, and a personal nudge
   // to one member — without a trip to Admin. (A 📚 Reading button sat here
   // until 2026-10-09; reading now goes in a message, or the + on the You tab.)
@@ -94,7 +95,7 @@ export default function GroupPage() {
       const { data: prof } = await supabase
         .from('profiles').select('group_id, role, groups(name)').eq('id', user.id).single()
       const leader = prof?.role === 'leader'
-      if (want === 'you' || want === 'chat' || (want === 'people' && prof?.role === 'leader')) setView(want)
+      if (want === 'you' || want === 'chat' || want === 'followups' || (want === 'people' && prof?.role === 'leader')) setView(want)
       setIsLeader(leader)
       const home = prof?.group_id || null
       setHomeGroupId(home)
@@ -234,10 +235,11 @@ export default function GroupPage() {
 
   switchRef.current = switchTable
   const onHome = groupId === homeGroupId
-  // Members: You · Chat. The Table tab (who is at the table, the TC send
-  // card, member detail) is TC-only — members do not need a view of everyone
-  // else's progress (2026-10-07).
-  const tabs = ([['you', '✅ You'], ['people', '👥 Table'], ['chat', '💬 Chat']] as const)
+  // Members: You · Follow-ups · Chat. Follow-ups (2026-10-09) is the TC's
+  // meeting follow-ups with replies, apart from the chat. The Table tab (who
+  // is at the table, the TC send card, member detail) is TC-only — members
+  // do not need a view of everyone else's progress (2026-10-07).
+  const tabs = ([['you', '✅ You'], ['followups', '📝 Follow-ups'], ['chat', '💬 Chat'], ['people', '👥 Table']] as const)
     .filter(([k]) => (k !== 'you' || onHome) && (k !== 'people' || isLeader))
 
   return (
@@ -255,10 +257,10 @@ export default function GroupPage() {
             </Link>
           )}
         </div>
-        <div className="flex gap-1 mt-4">
+        <div className="flex gap-0.5 mt-4 overflow-x-auto">
           {tabs.map(([k, label]) => (
             <button key={k} onClick={() => setView(k)}
-              className={`px-3.5 py-2 rounded-t-xl text-sm font-semibold transition-colors ${
+              className={`px-3 py-2 rounded-t-xl text-sm font-semibold whitespace-nowrap transition-colors ${
                 view === k ? 'bg-bt-pale text-bt-navy' : 'text-white/60 hover:text-white/80'
               }`}>
               {label}
@@ -266,6 +268,10 @@ export default function GroupPage() {
           ))}
         </div>
       </div>
+
+      {view === 'followups' && groupId && (
+        <FollowUps groupId={groupId} groupName={groupName} userId={currentUserId} />
+      )}
 
       {view === 'chat' && groupId && (
         <TableChat groupId={groupId} groupName={groupName} homeGroupId={homeGroupId} userId={currentUserId} />

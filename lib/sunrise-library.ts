@@ -115,6 +115,32 @@ export async function sunriseItemsFor(opts: {
   return out
 }
 
+/**
+ * Everything published to one Sunrise group (a table's), for that table's
+ * Follow-ups feed (2026-10-09). Newest first.
+ */
+export async function sunriseGroupPosts(sunriseGroupId: number): Promise<{
+  id: string; title: string; text: string; url: string | null; author: string | null; date: string | null
+}[]> {
+  const now = Date.now()
+  const { rows } = await allResources()
+  return rows
+    .filter(r => r.Status === 'Published' && Number(r.GroupId) === sunriseGroupId
+      && !(r.DateExpires && new Date(r.DateExpires).getTime() < now))
+    .map(r => {
+      const community = Array.isArray(r.Communities) ? r.Communities[0] : null
+      return {
+        id: String(r.ResourceId),
+        title: (r.Title || 'Untitled').trim(),
+        text: htmlToText(r.Description),
+        url: (r.ResourceType || '').toLowerCase() === 'document' && r.FileUrl ? r.FileUrl : community?.ResourceUrl || null,
+        author: community?.Author || null,
+        date: r.DatePublished,
+      }
+    })
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+}
+
 /** A pasted YouTube / Loom / Vimeo / Canva link as an embeddable URL, or null. */
 export function toEmbedUrl(raw: string): string | null {
   const url = raw.trim()
