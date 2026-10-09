@@ -7,6 +7,7 @@ import Avatar from '@/components/Avatar'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
 import { GifButton } from '@/components/GifPicker'
+import ChatInput from '@/components/ChatInput'
 import PeoplePicker from '@/components/PeoplePicker'
 
 type Member = { user_id: string; full_name: string; avatar_url: string | null }
@@ -192,7 +193,7 @@ export default function RoomPage() {
               <div {...rx.holdProps(msg.id)} className={`chat-hold flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
                 <MessagePhoto url={msg.image_url} />
-                {msg.content && <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{rx.text(msg)}</div>}
+                {msg.content && <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{rx.text(msg)}</div>}
                 <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
               </div>
             </div>
@@ -202,12 +203,11 @@ export default function RoomPage() {
       </div>
 
       <PhotoPreview att={att} />
-      <form onSubmit={send} className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
+      <form onSubmit={send} className={`flex-shrink-0 px-4 py-3 bg-white flex items-end gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}>
         <PhotoButton att={att} />
         <GifButton att={att} />
-        <input type="text" value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder={`Message ${room?.name || 'the group'}...`}
-          className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+        <ChatInput value={newMessage} onChange={setNewMessage} placeholder={`Message ${room?.name || 'the group'}...`} />
         <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>

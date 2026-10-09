@@ -6,6 +6,7 @@ import Avatar from '@/components/Avatar'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
 import { GifButton } from '@/components/GifPicker'
+import ChatInput from '@/components/ChatInput'
 
 /**
  * One table's chat: the message list and the send box. Lived on the Chat
@@ -189,7 +190,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
                 <MessagePhoto url={msg.image_url} />
                 {msg.content && (
-                  <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                  <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                     isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
                   }`}>
                     {rx.text(msg)}
@@ -205,17 +206,11 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
 
       <PhotoPreview att={att} />
       <form onSubmit={sendMessage}
-        className={`flex-shrink-0 px-4 py-3 bg-white flex items-center gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
+        className={`flex-shrink-0 px-4 py-3 bg-white flex items-end gap-2 ${att.active ? '' : 'border-t border-gray-100'}`}
         style={{ paddingBottom: 'calc(0.75rem + 60px + var(--table-bar, 0px))' }}>
         <PhotoButton att={att} />
         <GifButton att={att} />
-        <input
-          type="text"
-          value={newMessage}
-          onChange={e => setNewMessage(e.target.value)}
-          placeholder={isHome ? 'Message your table...' : `Message ${groupName}...`}
-          className="flex-1 bg-bt-pale rounded-full px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
-        />
+        <ChatInput value={newMessage} onChange={setNewMessage} placeholder={isHome ? 'Message your table...' : `Message ${groupName}...`} />
         <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>
