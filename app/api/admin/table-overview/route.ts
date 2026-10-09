@@ -54,7 +54,8 @@ export async function GET(req: NextRequest) {
       const last = [...dates].sort().slice(-1)[0] || null
       return { id: h.id, name: h.name, frequency: f, done, streak: streakFor(dates, done, new Date(), f), last_check_in: last }
     })
-    const tasksDone = (taskDone || []).filter(t => t.user_id === m.id && taskIds.has(t.task_id)).length
+    // Distinct items: duplicate completion rows once showed '4 of 2'.
+    const tasksDone = new Set((taskDone || []).filter(t => t.user_id === m.id && taskIds.has(t.task_id)).map(t => t.task_id)).size
     const att = (attendance || []).filter(a => a.user_id === m.id)
     const lastMeeting = att.map(a => a.meeting_date).sort().slice(-1)[0] || null
     const answered = (responses || []).filter(r => r.user_id === m.id && promptIds.has(r.prompt_id)).length

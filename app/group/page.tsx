@@ -295,7 +295,7 @@ export default function GroupPage() {
                   </div>
                   {d && (
                     <p className="text-[11px] text-gray-400 mt-1.5">
-                      {d.habits.filter(h => h.done).length}/{d.habits.length} habits · {d.tasks_done}/{detail?.tasks_total ?? 0} reading
+                      {d.habits.filter(h => h.done).length}/{d.habits.length} habits
                     </p>
                   )}
                 </div>
