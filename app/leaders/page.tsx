@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
+import { useReactions, MessageReactions } from '@/components/Reactions'
 import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
 
@@ -32,6 +33,7 @@ export default function LeadersPage() {
 
   // Chat
   const [messages, setMessages] = useState<any[]>([])
+  const rx = useReactions('leaders', messages.map(m => m.id))
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
@@ -295,7 +297,7 @@ export default function LeadersPage() {
                   {!isMe && (
                     <Avatar src={msg.profiles?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
                   )}
-                  <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`} onClick={e => rx.tapMessage(e, msg.id)}>
                     {showName && (
                       <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>
                     )}
@@ -307,6 +309,10 @@ export default function LeadersPage() {
                         {msg.content}
                       </div>
                     )}
+                    {!msg.content && msg.image_url && rx.openId !== msg.id && !rx.map[msg.id]?.length && (
+                      <button type="button" onClick={() => rx.setOpenId(msg.id)} className="text-[11px] text-gray-400 px-1">☺ React</button>
+                    )}
+                    <MessageReactions id={msg.id} state={rx} isMe={isMe} />
                   </div>
                 </div>
               )

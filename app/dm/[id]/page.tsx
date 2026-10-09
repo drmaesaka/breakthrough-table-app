@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
+import { useReactions, MessageReactions } from '@/components/Reactions'
 import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -10,6 +11,7 @@ import Link from 'next/link'
 export default function DMPage() {
   const { id: conversationId } = useParams<{ id: string }>()
   const [messages, setMessages] = useState<any[]>([])
+  const rx = useReactions('direct', messages.map(m => m.id))
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
@@ -182,7 +184,7 @@ export default function DMPage() {
               {!isMe && (
                 <Avatar src={otherPerson?.avatar_url} name={otherName} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
               )}
-              <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
+              <div className={`flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`} onClick={e => rx.tapMessage(e, msg.id)}>
                 {showName && (
                   <span className="text-xs text-gray-400 font-medium mb-1 px-1">{otherName}</span>
                 )}
@@ -194,6 +196,10 @@ export default function DMPage() {
                     {msg.content}
                   </div>
                 )}
+                {!msg.content && msg.image_url && rx.openId !== msg.id && !rx.map[msg.id]?.length && (
+                  <button type="button" onClick={() => rx.setOpenId(msg.id)} className="text-[11px] text-gray-400 px-1">☺ React</button>
+                )}
+                <MessageReactions id={msg.id} state={rx} isMe={isMe} />
               </div>
             </div>
           )
