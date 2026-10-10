@@ -51,8 +51,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Members: roomier tiles, then the day's quote pinned just above the
-          tabs (2026-10-10); the bottom padding is the tab bar's height. */}
+      {/* Members: the day's quote, then roomier tiles (2026-10-10); the
+          bottom padding is the tab bar's height. */}
       <div className="flex-1 flex flex-col py-5 space-y-4"
         style={{ paddingBottom: isMember ? 'calc(76px + var(--nav-lift, 0px) + var(--table-bar, 0px))' : '9rem' }}>
         <PushSetupBanner />
@@ -85,6 +85,15 @@ export default function DashboardPage() {
         {/* Quick links - only show if in a group */}
         {profile?.group_id && (
           <>
+            {isMember && (() => {
+              const q = quoteOfTheDay()
+              return (
+                <figure className="px-3 pt-1 pb-2 text-center">
+                  <blockquote className="text-bt-navy/80 text-sm italic leading-relaxed">“{q.text}”</blockquote>
+                  <figcaption className="text-gray-400 text-xs mt-1">— {q.by}</figcaption>
+                </figure>
+              )
+            })()}
             <div className={isMember ? 'grid grid-cols-2 gap-3.5' : 'grid grid-cols-2 gap-3'}>
               {[
                 { href: '/group', emoji: '✅', title: 'My Table', sub: 'Chat, habits & reading' },
@@ -113,15 +122,6 @@ export default function DashboardPage() {
                 )
               ))}
             </div>
-            {isMember && (() => {
-              const q = quoteOfTheDay()
-              return (
-                <figure className="mt-auto pt-2 px-2 text-center">
-                  <blockquote className="text-bt-navy/80 text-sm italic leading-relaxed">“{q.text}”</blockquote>
-                  <figcaption className="text-gray-400 text-xs mt-1">— {q.by}</figcaption>
-                </figure>
-              )
-            })()}
           </>
         )}
         </div>
