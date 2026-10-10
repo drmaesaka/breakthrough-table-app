@@ -7,7 +7,6 @@ import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
 import { fetchMyTable } from '@/lib/my-table'
-import { quoteOfTheDay } from '@/lib/daily-quote'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -51,8 +50,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Members: the day's quote, then roomier tiles (2026-10-10); the
-          bottom padding is the tab bar's height. */}
+      {/* Members: roomier tiles than TCs' (2026-10-10); the bottom padding
+          is the tab bar's height. */}
       <div className="flex-1 flex flex-col py-5 space-y-4"
         style={{ paddingBottom: isMember ? 'calc(76px + var(--nav-lift, 0px) + var(--table-bar, 0px))' : '9rem' }}>
         <PushSetupBanner />
@@ -85,16 +84,7 @@ export default function DashboardPage() {
         {/* Quick links - only show if in a group */}
         {profile?.group_id && (
           <>
-            {isMember && (() => {
-              const q = quoteOfTheDay()
-              return (
-                <figure className="px-3 pt-1 pb-2 text-center">
-                  <blockquote className="text-bt-navy/80 text-sm italic leading-relaxed">“{q.text}”</blockquote>
-                  <figcaption className="text-gray-400 text-xs mt-1">— {q.by}</figcaption>
-                </figure>
-              )
-            })()}
-            <div className={isMember ? 'grid grid-cols-2 gap-3.5' : 'grid grid-cols-2 gap-3'}>
+            <div className={isMember ? 'grid grid-cols-2 gap-4 pt-1' : 'grid grid-cols-2 gap-3'}>
               {[
                 { href: '/group', emoji: '✅', title: 'My Table', sub: 'Chat, habits & reading' },
                 { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
@@ -107,7 +97,7 @@ export default function DashboardPage() {
               ].map(card => (
                 isMember ? (
                   <Link key={card.href} href={card.href}
-                    className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform flex flex-col justify-center min-h-[7.25rem]">
+                    className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform flex flex-col justify-center min-h-[8rem]">
                     <div className="text-4xl mb-2">{card.emoji}</div>
                     <p className="font-bold text-bt-navy text-base leading-tight">{card.title}</p>
                     <p className="text-gray-400 text-xs mt-1">{card.sub}</p>
