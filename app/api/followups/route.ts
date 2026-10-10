@@ -25,6 +25,13 @@ async function access(userId: string, role: string, groupId: string) {
   return { canSee: isTC || prof?.group_id === groupId, isTC }
 }
 
+/**
+ * Only Sunrise posts from this day on become follow-ups (2026-10-10). Copying
+ * a group's whole history filled tables with a year of old worksheets by
+ * people who are not at the table in the app.
+ */
+const SUNRISE_FROM = '2026-10-10T00:00:00Z'
+
 // Sunrise group posts → table_posts, at most every five minutes per table.
 const lastSync = new Map<string, number>()
 async function syncSunrise(groupId: string) {
@@ -35,7 +42,7 @@ async function syncSunrise(groupId: string) {
   const sid = Number(g?.sunrise_group_id || 0)
   if (!sid) return
   try {
-    const items = await sunriseGroupPosts(sid)
+    const items = (await sunriseGroupPosts(sid)).filter(i => (i.date || '') >= SUNRISE_FROM)
     if (!items.length) return
     const { error } = await admin.from('table_posts').upsert(items.map(i => ({
       group_id: groupId, source: 'sunrise', source_id: i.id, title: i.title,
@@ -63,7 +70,10 @@ export async function GET(req: NextRequest) {
   await syncSunrise(groupId)
   const admin = adminClient()
   const { data: posts, error } = await admin.from('table_posts').select('*')
-    .eq('group_id', groupId).eq('hidden', false).order('created_at', { ascending: false }).limit(60)
+    .eq('group_id', groupId).eq('hidden', false)
+    // Older Sunrise copies made before SUNRISE_FROM stay out of the feed.
+    .or(`source.eq.app,created_at.gte.${SUNRISE_FROM}`)
+    .order('created_at', { ascending: false }).limit(60)
   if (error) {
     if (/table_posts/.test(error.message)) return NextResponse.json({ posts: [], canPost: false, note: 'not set up' })
     return NextResponse.json({ error: 'Could not load follow-ups' }, { status: 500 })
