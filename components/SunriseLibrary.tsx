@@ -26,10 +26,17 @@ function docViewer(url: string): string | null {
   return null
 }
 
-export default function SunriseLibrary() {
+/**
+ * `mine`: what the person's own TC posted to the table (the app's `content`
+ * rows). Shown only under the "My TC" pill (2026-10-10), which is how
+ * members are pointed at their table's material; `render` draws them.
+ */
+export default function SunriseLibrary({ mine }: {
+  mine?: { items: { id: string; title: string; description?: string | null }[]; render: (items: any[]) => React.ReactNode }
+}) {
   const [items, setItems] = useState<SunriseItem[] | null>(null)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState<'all' | SunriseItem['kind']>('all')
+  const [filter, setFilter] = useState<'all' | 'mine' | SunriseItem['kind']>('all')
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<SunriseItem | null>(null)
   const [shown, setShown] = useState(20)
@@ -45,12 +52,17 @@ export default function SunriseLibrary() {
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return (items || []).filter(i => (filter === 'all' || i.kind === filter)
+    return (items || []).filter(i => (filter === 'all' || filter === 'mine' || i.kind === filter)
       && (!q || i.title.toLowerCase().includes(q) || (i.author || '').toLowerCase().includes(q) || i.summary.toLowerCase().includes(q)))
   }, [items, filter, query])
 
+  const mineVisible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return (mine?.items || []).filter(i => !q || i.title.toLowerCase().includes(q) || (i.description || '').toLowerCase().includes(q))
+  }, [mine, query])
+
   if (items === null) return <p className="text-center text-gray-400 text-sm py-6">Loading...</p>
-  if (!items.length && !error) return null
+  if (!items.length && !error && !mine?.items.length) return null
 
   return (
     <div>
@@ -59,13 +71,21 @@ export default function SunriseLibrary() {
       <input value={query} onChange={e => { setQuery(e.target.value); setShown(20) }} placeholder="Search videos, documents, articles..."
         className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue mb-2" />
       <div className="flex gap-2 mb-3 overflow-x-auto">
-        {(['all', 'video', 'document', 'article'] as const).map(k => (
+        {(['all', ...(mine ? ['mine' as const] : []), 'video', 'document', 'article'] as const).map(k => (
           <button key={k} onClick={() => { setFilter(k); setShown(20) }}
             className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${filter === k ? 'bg-bt-navy text-white' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            {k === 'all' ? 'All' : KIND[k].label + 's'}
+            {k === 'all' ? 'All' : k === 'mine' ? `My TC${mine?.items.length ? ` · ${mine.items.length}` : ''}` : KIND[k].label + 's'}
           </button>
         ))}
       </div>
+
+      {filter === 'mine' && (
+        mineVisible.length
+          ? <div className="space-y-3">{mine!.render(mineVisible)}</div>
+          : <p className="text-center text-gray-400 text-sm py-6">{query ? 'Nothing matches.' : 'Nothing from your TC yet.'}</p>
+      )}
+
+      {filter !== 'mine' && (
 
       <div className="space-y-2">
         {visible.slice(0, shown).map(item => {
@@ -95,6 +115,7 @@ export default function SunriseLibrary() {
           </button>
         )}
       </div>
+      )}
 
       {open && <Viewer item={open} onClose={() => setOpen(null)} />}
     </div>

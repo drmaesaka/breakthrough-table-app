@@ -89,7 +89,7 @@ function ContentCard({ item, onRemove }: { item: any; onRemove?: () => void }) {
 }
 
 export default function LibraryPage() {
-  // The table's own items, newest first. "Current / Previous Assignments"
+  // The table's own items, newest first; shown under the "My TC" pill. "Current / Previous Assignments"
   // went 2026-10-10: assignments live in Reading & Resources and Follow-ups,
   // and the split hinged on a period date tables rarely kept up.
   const [items, setItems] = useState<any[]>([])
@@ -156,16 +156,11 @@ export default function LibraryPage() {
       <div className="px-5 py-5 pb-36 space-y-5">
 
 
-        {items.length > 0 && (
-          <div>
-            <p className="text-xs font-bold text-bt-navy uppercase tracking-wide mb-3 px-1">From your TC</p>
-            <div className="space-y-3">
-              {items.map(item => <ContentCard key={item.id} item={item} onRemove={isLeader ? () => removeItem(item) : undefined} />)}
-            </div>
-          </div>
-        )}
-
-        <SunriseLibrary />
+        {/* The table's own items live under the "My TC" pill (2026-10-10). */}
+        <SunriseLibrary mine={{
+          items,
+          render: list => list.map(item => <ContentCard key={item.id} item={item} onRemove={isLeader ? () => removeItem(item) : undefined} />),
+        }} />
       </div>
 
       <BottomNav />
