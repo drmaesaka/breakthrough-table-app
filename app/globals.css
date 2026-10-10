@@ -45,3 +45,14 @@ body {
 :root {
   --nav-lift: max(8px, calc(env(safe-area-inset-bottom, 0px) - 8px));
 }
+
+/* Installed iPhone app (2026-10-10): with the see-through status bar, iOS
+   sometimes reopens the app with its screen area short by the status bar's
+   height, so the bottom tabs float with an empty band under them. Making
+   the page at least that much taller keeps them on the bottom edge — the
+   known workaround for this WebKit bug. */
+@media (display-mode: standalone) {
+  html {
+    min-height: calc(100% + env(safe-area-inset-top, 0px));
+  }
+}
