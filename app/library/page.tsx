@@ -141,7 +141,7 @@ export default function LibraryPage() {
     <div className="min-h-screen bg-bt-pale">
       <div className="bg-bt-navy px-5 pt-16 pb-6">
         <h1 className="text-white text-2xl font-bold">Library</h1>
-        <p className="text-bt-light/60 text-sm mt-0.5">{groupName ? `${groupName} and Sunrise Network` : 'Sunrise Network'} resources</p>
+        <p className="text-bt-light/60 text-sm mt-0.5">Resources & videos</p>
       </div>
 
       <div className="px-5 py-5 pb-36 space-y-5">

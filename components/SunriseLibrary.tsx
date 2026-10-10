@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase'
 import { linkify } from '@/lib/linkify'
 import type { SunriseItem } from '@/lib/sunrise-library'
 
-// Library's "From Sunrise Network" section: everything posted on Sunrise that
+// Library's Sunrise Network section (unlabelled for members since 2026-10-10): everything posted on Sunrise that
 // this person may see (decided server-side, /api/library/sunrise), opened
 // right here — videos play, documents open in a viewer, articles show their
 // text. No Sunrise login.
@@ -38,7 +38,7 @@ export default function SunriseLibrary() {
     (async () => {
       const { data: { session } } = await createClient().auth.getSession()
       const res = await fetch('/api/library/sunrise', { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } }).catch(() => null)
-      if (!res || !res.ok) { setError("Couldn't load Sunrise Network content right now."); setItems([]); return }
+      if (!res || !res.ok) { setError("Couldn't load the library right now."); setItems([]); return }
       setItems((await res.json()).items || [])
     })()
   }, [])
@@ -49,15 +49,11 @@ export default function SunriseLibrary() {
       && (!q || i.title.toLowerCase().includes(q) || (i.author || '').toLowerCase().includes(q) || i.summary.toLowerCase().includes(q)))
   }, [items, filter, query])
 
-  if (items === null) return <p className="text-center text-gray-400 text-sm py-6">Loading Sunrise Network content...</p>
+  if (items === null) return <p className="text-center text-gray-400 text-sm py-6">Loading...</p>
   if (!items.length && !error) return null
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3 px-1">
-        <span className="text-xs font-bold text-bt-navy uppercase tracking-wide">From Sunrise Network</span>
-        <span className="text-xs text-gray-400">{items.length}</span>
-      </div>
       {error && <p className="text-xs text-red-600 px-1 mb-2">{error}</p>}
 
       <input value={query} onChange={e => { setQuery(e.target.value); setShown(20) }} placeholder="Search videos, documents, articles..."
