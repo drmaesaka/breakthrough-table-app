@@ -2112,9 +2112,15 @@ export default function AdminPage() {
                           // leaders asked to see at a glance.
                           const led = groups.filter(g => (groupLeaders[g.id] || []).some((l: any) => l.user_id === u.id))
                           if (led.length === 0) return <span className="text-xs bg-bt-navy text-white px-2 py-0.5 rounded-full">Leader</span>
+                          // A short pill, then the tables as plain wrapping text:
+                          // eight names inside one rounded pill spilled past its
+                          // corners (2026-10-10).
                           return (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${led.length > 1 ? 'bg-amber-400 text-bt-navy' : 'bg-bt-navy text-white'}`}>
-                              {led.length > 1 ? `TC of ${led.length} tables: ` : 'TC · '}{led.map(g => g.name).join(', ')}
+                            <span className="basis-full flex flex-col items-start gap-1">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${led.length > 1 ? 'bg-amber-400 text-bt-navy' : 'bg-bt-navy text-white'}`}>
+                                {led.length > 1 ? `TC of ${led.length} tables` : 'TC'}
+                              </span>
+                              <span className="text-xs text-gray-600 leading-snug">{led.map(g => g.name).join(' · ')}</span>
                             </span>
                           )
                         })()}
