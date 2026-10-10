@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import SunriseLibrary from '@/components/SunriseLibrary'
-import { fetchMyTable } from '@/lib/my-table'
 
 const TYPE_CONFIG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
   video:   { label: 'Video',   bg: 'bg-red-50',    text: 'text-red-500',    icon: '▶' },
@@ -24,7 +23,7 @@ function getYouTubeId(url: string): string | null {
   return null
 }
 
-function ContentCard({ item }: { item: any }) {
+function ContentCard({ item, onRemove }: { item: any; onRemove?: () => void }) {
   const ytId = item.url ? getYouTubeId(item.url) : null
   const thumbUrl = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null
   // Uploaded documents are saved as type "link" (the only types the table
@@ -65,12 +64,20 @@ function ContentCard({ item }: { item: any }) {
               <span className="text-[10px]">{cfg.icon}</span> {cfg.label}
             </span>
             <p className="font-semibold text-gray-900 text-sm leading-snug">{item.title}</p>
+            {Date.now() - new Date(item.created_at).getTime() < 7 * 86400000 && (
+              <span className="inline-block mt-1 bg-bt-blue text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">New</span>
+            )}
             {item.description && (
               <p className="text-gray-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{item.description}</p>
             )}
           </div>
           {/* Only show icon if no thumbnail */}
-          {!thumbUrl && (
+          {/* TCs: remove it from the table without a trip to Admin (2026-10-10). */}
+          {onRemove && (
+            <button type="button" onClick={e => { e.preventDefault(); e.stopPropagation(); onRemove() }}
+              className="text-red-400 text-xs font-semibold flex-shrink-0 mt-0.5">Remove</button>
+          )}
+          {!thumbUrl && !onRemove && (
             <svg className="w-4 h-4 text-gray-300 flex-shrink-0 mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
@@ -82,11 +89,12 @@ function ContentCard({ item }: { item: any }) {
 }
 
 export default function LibraryPage() {
-  const [current, setCurrent] = useState<any[]>([])
-  const [previous, setPrevious] = useState<any[]>([])
+  // The table's own items, newest first. "Current / Previous Assignments"
+  // went 2026-10-10: assignments live in Reading & Resources and Follow-ups,
+  // and the split hinged on a period date tables rarely kept up.
+  const [items, setItems] = useState<any[]>([])
+  const [isLeader, setIsLeader] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showPrevious, setShowPrevious] = useState(false)
-  const [groupName, setGroupName] = useState('')
   const router = useRouter()
 
   useEffect(() => {
@@ -97,14 +105,12 @@ export default function LibraryPage() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('group_id, groups(name, last_period_start)')
+        .select('group_id, role')
         .eq('id', user.id)
         .single()
 
+      setIsLeader(prof?.role === 'leader')
       if (!prof?.group_id) { setLoading(false); return }
-      // The browser's groups read can come back empty for a member; ask the server then.
-      const table = (prof.groups as any)?.name ? prof.groups as any : await fetchMyTable()
-      setGroupName(table?.name || '')
 
       const { data: contentData } = await supabase
         .from('content')
@@ -112,24 +118,27 @@ export default function LibraryPage() {
         .eq('group_id', prof.group_id)
         .order('created_at', { ascending: false })
 
-      if (!contentData || contentData.length === 0) { setLoading(false); return }
-
-      // "Current" means this period, not "within 7 days of whatever was posted
-      // last". The old cutoff was measured backwards from the newest row, so a
-      // table whose leader posted nothing for three months still showed
-      // three-month-old material as the Current Assignment — it could never go
-      // stale, because it defined its own window.
-      const periodStart = table?.last_period_start
-      const cutoff = periodStart
-        ? new Date(periodStart)
-        : new Date(Date.now() - 7 * 86400000) // no period recorded: last 7 days from now
-
-      setCurrent(contentData.filter(item => new Date(item.created_at) >= cutoff))
-      setPrevious(contentData.filter(item => new Date(item.created_at) < cutoff))
+      setItems(contentData || [])
       setLoading(false)
     }
     load()
   }, [router])
+
+  async function removeItem(item: any) {
+    const { data: { session } } = await createClient().auth.getSession()
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` }
+    // Same as Admin → Library: something posted to several tables can go from all of them.
+    const pre = await fetch('/api/admin/post-item', { method: 'DELETE', headers, body: JSON.stringify({ table: 'content', id: item.id, count: true }) })
+    const info = await pre.json().catch(() => ({}))
+    let all = false
+    if (pre.ok && info.copies > 1) {
+      if (confirm(`"${item.title}" is on ${info.copies} tables (${(info.tables || []).join(', ')}). Remove it from all of them?`)) all = true
+      else if (!confirm('Remove it from just this table, then?')) return
+    } else if (!confirm(`Remove "${item.title}" from the Library?`)) return
+    const res = await fetch('/api/admin/post-item', { method: 'DELETE', headers, body: JSON.stringify({ table: 'content', id: item.id, all }) })
+    if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error || 'Could not remove it.'); return }
+    setItems(p => p.filter(x => x.id !== item.id))
+  }
 
   if (loading) return (
     <div className="min-h-screen bg-bt-pale flex items-center justify-center">
@@ -147,40 +156,12 @@ export default function LibraryPage() {
       <div className="px-5 py-5 pb-36 space-y-5">
 
 
-        {/* Current Assignment */}
-        {current.length > 0 && (
+        {items.length > 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-3 px-1">
-              <span className="text-xs font-bold text-bt-navy uppercase tracking-wide">Current Assignment</span>
-              <span className="bg-bt-blue text-white text-xs px-2 py-0.5 rounded-full font-semibold">New</span>
-            </div>
+            <p className="text-xs font-bold text-bt-navy uppercase tracking-wide mb-3 px-1">From your TC</p>
             <div className="space-y-3">
-              {current.map(item => <ContentCard key={item.id} item={item} />)}
+              {items.map(item => <ContentCard key={item.id} item={item} onRemove={isLeader ? () => removeItem(item) : undefined} />)}
             </div>
-          </div>
-        )}
-
-        {/* Previous Assignments */}
-        {previous.length > 0 && (
-          <div>
-            <button
-              onClick={() => setShowPrevious(!showPrevious)}
-              className="w-full flex items-center justify-between bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Previous Assignments</span>
-                <span className="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded-full font-semibold">{previous.length}</span>
-              </div>
-              <svg className={`w-4 h-4 text-gray-400 transition-transform ${showPrevious ? 'rotate-180' : ''}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showPrevious && (
-              <div className="space-y-3 mt-3">
-                {previous.map(item => <ContentCard key={item.id} item={item} />)}
-              </div>
-            )}
           </div>
         )}
 
