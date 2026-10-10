@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import SunriseLibrary from '@/components/SunriseLibrary'
+import { fetchMyTable } from '@/lib/my-table'
 
 const TYPE_CONFIG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
   video:   { label: 'Video',   bg: 'bg-red-50',    text: 'text-red-500',    icon: '▶' },
@@ -101,7 +102,9 @@ export default function LibraryPage() {
         .single()
 
       if (!prof?.group_id) { setLoading(false); return }
-      setGroupName((prof.groups as any)?.name || '')
+      // The browser's groups read can come back empty for a member; ask the server then.
+      const table = (prof.groups as any)?.name ? prof.groups as any : await fetchMyTable()
+      setGroupName(table?.name || '')
 
       const { data: contentData } = await supabase
         .from('content')
@@ -116,7 +119,7 @@ export default function LibraryPage() {
       // table whose leader posted nothing for three months still showed
       // three-month-old material as the Current Assignment — it could never go
       // stale, because it defined its own window.
-      const periodStart = (prof.groups as any)?.last_period_start
+      const periodStart = table?.last_period_start
       const cutoff = periodStart
         ? new Date(periodStart)
         : new Date(Date.now() - 7 * 86400000) // no period recorded: last 7 days from now

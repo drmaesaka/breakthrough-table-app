@@ -9,6 +9,7 @@ import MyTasks from '@/components/MyTasks'
 import TableChat from '@/components/TableChat'
 import FollowUps from '@/components/FollowUps'
 import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
+import { fetchMyTable } from '@/lib/my-table'
 
 type Detail = {
   id: string; full_name: string; avatar_url: string | null; role: string
@@ -100,8 +101,11 @@ export default function GroupPage() {
       const home = prof?.group_id || null
       setHomeGroupId(home)
       if (home) setGroupName((prof?.groups as any)?.name || 'My Group')
+      // The browser's groups read can come back empty for a member; ask the server then.
+      const homeName = (prof?.groups as any)?.name || (home ? (await fetchMyTable())?.name : null)
+      if (home && homeName) setGroupName(homeName)
 
-      let all: { id: string; name: string }[] = home ? [{ id: home, name: (prof?.groups as any)?.name || 'My table' }] : []
+      let all: { id: string; name: string }[] = home ? [{ id: home, name: homeName || 'My table' }] : []
       if (leader) {
         const res = await fetch('/api/admin/my-groups', { headers: await headers() }).catch(() => null)
         const led = res && res.ok ? ((await res.json()).groups || []) : []

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
+import { fetchMyTable } from '@/lib/my-table'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -26,15 +27,17 @@ export default function DashboardPage() {
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
+        if (prof.group_id && !prof.groups?.name) fetchMyTable().then(t => { if (t?.name) setGroupName(t.name) })
       }
     }
     load()
   }, [router])
 
   const firstName = profile?.full_name?.split(' ')[0] || 'there'
+  const isMember = Boolean(profile?.group_id) && profile?.role !== 'leader'
 
   return (
-    <div className="min-h-screen bg-bt-pale">
+    <div className="bg-bt-pale flex flex-col" style={{ minHeight: '100dvh' }}>
       {profile && <WelcomeScreen userId={profile.id} firstName={firstName} />}
       <div className="bg-bt-navy px-5 pt-16 pb-8">
         {/* The top-right corner belongs to the notifications bell. */}
@@ -47,9 +50,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="py-5 pb-36 space-y-4">
+      {/* Members' tiles stretch to fill the screen down to the tabs
+          (2026-10-10); the bottom padding is the tab bar's height. */}
+      <div className="flex-1 flex flex-col py-5 space-y-4"
+        style={{ paddingBottom: isMember ? 'calc(76px + var(--nav-lift, 0px) + var(--table-bar, 0px))' : '9rem' }}>
         <PushSetupBanner />
-        <div className="px-5 space-y-4">
+        <div className="px-5 space-y-4 flex-1 flex flex-col">
         {/* No group state */}
         {profile && !profile.group_id && (
           <div className="bg-white rounded-2xl p-6 shadow-sm text-center">
@@ -78,7 +84,7 @@ export default function DashboardPage() {
         {/* Quick links - only show if in a group */}
         {profile?.group_id && (
           <>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={isMember ? 'flex-1 grid grid-cols-2 auto-rows-fr gap-4' : 'grid grid-cols-2 gap-3'}>
               {[
                 { href: '/group', emoji: '✅', title: 'My Table', sub: 'Chat, habits & reading' },
                 { href: '/events', emoji: '📅', title: 'Events', sub: 'Upcoming BT events' },
@@ -89,12 +95,21 @@ export default function DashboardPage() {
                 { href: '/directory', emoji: '👥', title: 'Directory', sub: 'Find BT members' },
                 { href: '/preferences', emoji: '🔔', title: 'Nudge Settings', sub: 'Customize check-ins' },
               ].map(card => (
+                isMember ? (
+                  <Link key={card.href} href={card.href}
+                    className="bg-white rounded-3xl p-5 shadow-sm active:scale-95 transition-transform flex flex-col justify-center min-h-[8.5rem]">
+                    <div className="text-5xl mb-3">{card.emoji}</div>
+                    <p className="font-bold text-bt-navy text-lg leading-tight">{card.title}</p>
+                    <p className="text-gray-400 text-sm mt-1">{card.sub}</p>
+                  </Link>
+                ) : (
                 <Link key={card.href} href={card.href}
                   className="bg-white rounded-2xl p-4 shadow-sm active:scale-95 transition-transform block">
                   <div className="text-3xl mb-2">{card.emoji}</div>
                   <p className="font-semibold text-bt-navy text-sm">{card.title}</p>
                   <p className="text-gray-400 text-xs mt-0.5">{card.sub}</p>
                 </Link>
+                )
               ))}
             </div>
           </>
