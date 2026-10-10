@@ -178,7 +178,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-gray-900 truncate">{name}</p>
                 <p className="text-[11px] text-gray-400">
-                  {when(p.created_at)}{p.edited_at ? ' · edited' : ''}{p.source === 'sunrise' ? ' · 🌅 from Sunrise' : ''}
+                  {when(p.created_at)}{p.edited_at ? ' · edited' : ''}
                 </p>
               </div>
               {(p.mine || canPost) && !isEditing && (
