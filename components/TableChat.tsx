@@ -7,6 +7,7 @@ import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/compo
 import { useReactions, MessageReactions } from '@/components/Reactions'
 import { GifButton } from '@/components/GifPicker'
 import ChatInput from '@/components/ChatInput'
+import { useStickToBottom } from '@/components/useStickToBottom'
 
 /**
  * One table's chat: the message list and the send box. Lived on the Chat
@@ -30,6 +31,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
   const [sendError, setSendError] = useState(false)
   const att = usePhotoAttach(userId)
   const bottomRef = useRef<HTMLDivElement>(null)
+  useStickToBottom(bottomRef)
   const groupIdRef = useRef(groupId)
   const lastIdRef = useRef<string | null>(null)
   const newestSeenRef = useRef<string | null>(null)

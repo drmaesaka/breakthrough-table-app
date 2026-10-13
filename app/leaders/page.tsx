@@ -9,6 +9,7 @@ import { GifButton } from '@/components/GifPicker'
 import ChatInput from '@/components/ChatInput'
 import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
+import { useStickToBottom } from '@/components/useStickToBottom'
 
 // The TCs' own space: one channel across every table. (A shared Resources
 // shelf sat beside it until 2026-10-09; it was never used, and TC-only
@@ -30,6 +31,7 @@ export default function LeadersPage() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  useStickToBottom(bottomRef)
   const newestSeenRef = useRef<string | null>(null)
   const lastIdRef = useRef<string | null>(null)
 

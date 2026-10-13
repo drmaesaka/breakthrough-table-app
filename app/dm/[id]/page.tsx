@@ -9,6 +9,7 @@ import ChatInput from '@/components/ChatInput'
 import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import { useStickToBottom } from '@/components/useStickToBottom'
 
 export default function DMPage() {
   const { id: conversationId } = useParams<{ id: string }>()
@@ -22,6 +23,7 @@ export default function DMPage() {
   const [otherPerson, setOtherPerson] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
+  useStickToBottom(bottomRef)
   const lastCountRef = useRef<string | number | null>(0)
   const newestSeenRef = useRef<string | null>(null)
   const router = useRouter()

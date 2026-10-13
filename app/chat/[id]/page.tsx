@@ -9,6 +9,7 @@ import { useReactions, MessageReactions } from '@/components/Reactions'
 import { GifButton } from '@/components/GifPicker'
 import ChatInput from '@/components/ChatInput'
 import PeoplePicker from '@/components/PeoplePicker'
+import { useStickToBottom } from '@/components/useStickToBottom'
 
 type Member = { user_id: string; full_name: string; avatar_url: string | null }
 
@@ -36,6 +37,7 @@ export default function RoomPage() {
   const [nameDraft, setNameDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  useStickToBottom(bottomRef)
   const lastIdRef = useRef<string | null>(null)
   const newestSeenRef = useRef<string | null>(null)
 
