@@ -53,7 +53,7 @@ export default function DashboardPage() {
       {/* Members: roomier tiles than TCs' (2026-10-10); the bottom padding
           is the tab bar's height. */}
       <div className="flex-1 flex flex-col py-5 space-y-4"
-        style={{ paddingBottom: isMember ? 'calc(76px + var(--nav-lift, 0px) + var(--table-bar, 0px))' : '9rem' }}>
+        style={{ paddingBottom: isMember ? 'calc(86px + var(--nav-lift, 0px) + var(--table-bar, 0px))' : '9rem' }}>
         <PushSetupBanner />
         <div className="px-5 space-y-4 flex-1 flex flex-col">
         {/* No group state */}
