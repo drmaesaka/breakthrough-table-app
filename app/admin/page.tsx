@@ -31,6 +31,7 @@ import {
 } from '@/lib/venue'
 
 import { ledGroups } from '@/lib/leader-groups'
+import { sendSetupLink } from '@/lib/setup-link'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -2065,7 +2066,7 @@ export default function AdminPage() {
                   </p>
                   <button onClick={() => sendPushReminder(noPush.map(u => u.full_name))} disabled={pushReminderBusy}
                     className="mt-2 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600 text-white disabled:opacity-50">
-                    {pushReminderBusy ? 'Sending...' : `✉️ Email them the setup steps`}
+                    {pushReminderBusy ? 'Sending...' : `✉️ Email all of them the app link + setup steps`}
                   </button>
                   <p className="text-[11px] text-amber-700/80 mt-1.5">Or say it at the next meeting — that works best.</p>
                 </div>
@@ -2135,6 +2136,11 @@ export default function AdminPage() {
                         })()}
                         {!u.push_enabled && (
                           <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">🔕 No notifications</span>
+                        )}
+                        {/* One person: email them the app link and Home Screen steps. */}
+                        {!u.push_enabled && u.role !== 'leader' && (
+                          <button type="button" onClick={async () => { const m = await sendSetupLink(u.id, u.full_name || 'them'); if (m) alert(m) }}
+                            className="text-xs font-semibold text-bt-blue">✉️ Send app link</button>
                         )}
                       </div>
                       <p className="text-gray-400 text-xs">{groupForUser?.name || 'Unassigned'}</p>

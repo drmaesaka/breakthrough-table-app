@@ -10,6 +10,7 @@ import TableChat from '@/components/TableChat'
 import FollowUps from '@/components/FollowUps'
 import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
 import { fetchMyTable } from '@/lib/my-table'
+import { sendSetupLink } from '@/lib/setup-link'
 
 type Detail = {
   id: string; full_name: string; avatar_url: string | null; role: string
@@ -401,7 +402,12 @@ export default function GroupPage() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Reading &amp; Resources</p><p className="font-bold text-bt-navy text-base">{d.tasks_done} <span className="text-gray-400 font-normal">of {detail?.tasks_total ?? 0}</span></p></div>
                     <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Meetings attended</p><p className="font-bold text-bt-navy text-base">{d.meetings_attended} <span className="text-gray-400 font-normal">last {fmt(d.last_meeting)}</span></p></div>
-                    <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Notifications</p><p className={`font-bold text-base ${d.push_enabled ? 'text-green-600' : 'text-amber-600'}`}>{d.push_enabled ? 'On' : 'Off'}</p></div>
+                    <div className="bg-bt-pale rounded-xl p-3"><p className="text-gray-400">Notifications</p><p className={`font-bold text-base ${d.push_enabled ? 'text-green-600' : 'text-amber-600'}`}>{d.push_enabled ? 'On' : 'Off'}</p>
+                      {!d.push_enabled && member.id !== currentUserId && (
+                        <button type="button" onClick={async e => { e.stopPropagation(); const m = await sendSetupLink(member.id, member.full_name || 'them'); if (m) alert(m) }}
+                          className="mt-1 text-[11px] font-semibold text-bt-blue text-left">✉️ Send app link</button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-[11px] text-gray-400">
                     Period streak {d.streak} · joined {fmt(d.joined)}{d.email ? ` · ${d.email}` : ''}

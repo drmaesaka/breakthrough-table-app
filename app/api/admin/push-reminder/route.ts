@@ -45,7 +45,9 @@ export async function POST(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { dry } = await req.json().catch(() => ({}))
+  // user_ids: just these people (a TC's per-member button, 2026-10-13); else everyone without push.
+  const { dry, user_ids } = await req.json().catch(() => ({}))
+  const only: string[] | null = Array.isArray(user_ids) ? user_ids.map(String) : null
   const supabase = adminClient()
   const mine = await leaderGroupIds(auth.userId)
   if (!mine.length) return NextResponse.json({ recipients: [], emailed: 0, unreachable: [] })
@@ -59,7 +61,7 @@ export async function POST(req: NextRequest) {
     ? await supabase.from('push_subscriptions').select('user_id').in('user_id', ids)
     : { data: [] as { user_id: string }[] }
   const withPush = new Set((subs || []).map(s => s.user_id))
-  const targets = (members || []).filter(m => ids.includes(m.id) && !withPush.has(m.id))
+  const targets = (members || []).filter(m => ids.includes(m.id) && !withPush.has(m.id) && (!only || only.includes(m.id)))
   if (!targets.length) return NextResponse.json({ recipients: [], emailed: 0, unreachable: [] })
 
   const emails = await fetchMemberEmails(supabase, targets.map(t => t.id))
