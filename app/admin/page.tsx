@@ -320,6 +320,8 @@ export default function AdminPage() {
   const [contentError, setContentError] = useState('')
   const [contentSaving, setContentSaving] = useState(false)
   const [memberFilter, setMemberFilter] = useState('all')
+  /** Admin → Members search: name, email or table (2026-10-13). */
+  const [memberSearch, setMemberSearch] = useState('')
   const [prompts, setPrompts] = useState<any[]>([])
   const [promptText, setPromptText] = useState('')
   const [promptSaving, setPromptSaving] = useState(false)
@@ -2070,6 +2072,9 @@ export default function AdminPage() {
               )
             })()}
 
+            <input type="search" value={memberSearch} onChange={e => setMemberSearch(e.target.value)}
+              placeholder="🔍 Search by name, email or table" className={inputClass} />
+
             {/* Filter dropdown */}
             <select
               value={memberFilter}
@@ -2086,13 +2091,17 @@ export default function AdminPage() {
 
             {/* Filtered list */}
             {(() => {
-              const filtered = memberFilter === 'all'
+              const inView = memberFilter === 'all'
                 ? users
                 : memberFilter === 'unassigned'
                 ? users.filter(u => !u.group_id)
                 : users.filter(u => u.group_id === memberFilter)
+              const q = memberSearch.trim().toLowerCase()
+              const filtered = !q ? inView : inView.filter(u =>
+                [u.full_name, u.login_email, u.contact_email, groups.find(g => g.id === u.group_id)?.name]
+                  .some(v => (v || '').toLowerCase().includes(q)))
               if (filtered.length === 0) return (
-                <p className="text-center text-gray-400 text-sm py-8">No members in this view</p>
+                <p className="text-center text-gray-400 text-sm py-8">{q ? `Nobody matches “${memberSearch.trim()}”` : 'No members in this view'}</p>
               )
               return filtered.map(u => {
               const groupForUser = groups.find(g => g.id === u.group_id)
