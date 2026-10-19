@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
@@ -10,6 +10,7 @@ import Avatar from '@/components/Avatar'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useStickToBottom } from '@/components/useStickToBottom'
+import { ChatDay, ChatTime } from '@/components/ChatTime'
 
 export default function DMPage() {
   const { id: conversationId } = useParams<{ id: string }>()
@@ -184,7 +185,9 @@ export default function DMPage() {
           const showName = !isMe && (!prevMsg || prevMsg.sender_id !== msg.sender_id)
 
           return (
-            <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+            <Fragment key={msg.id}>
+            <ChatDay msg={msg} prev={prevMsg} />
+            <div className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
               {!isMe && (
                 <Avatar src={otherPerson?.avatar_url} name={otherName} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
               )}
@@ -201,8 +204,10 @@ export default function DMPage() {
                   </div>
                 )}
                 <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
+                <ChatTime msg={msg} next={messages[i + 1]} sameSender={messages[i + 1]?.sender_id === msg.sender_id} isMe={isMe} />
               </div>
             </div>
+            </Fragment>
           )
         })}
         <div ref={bottomRef} />

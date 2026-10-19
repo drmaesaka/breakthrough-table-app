@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
@@ -10,6 +10,7 @@ import ChatInput from '@/components/ChatInput'
 import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
 import { useStickToBottom } from '@/components/useStickToBottom'
+import { ChatDay, ChatTime } from '@/components/ChatTime'
 
 // The TCs' own space: one channel across every table. (A shared Resources
 // shelf sat beside it until 2026-10-09; it was never used, and TC-only
@@ -160,7 +161,9 @@ export default function LeadersPage() {
               const showName = !isMe && (!prevMsg || prevMsg.user_id !== msg.user_id)
 
               return (
-                <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                <Fragment key={msg.id}>
+                <ChatDay msg={msg} prev={prevMsg} />
+                <div className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                   {!isMe && (
                     <Avatar src={msg.profiles?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
                   )}
@@ -177,8 +180,10 @@ export default function LeadersPage() {
                       </div>
                     )}
                     <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
+                    <ChatTime msg={msg} next={messages[i + 1]} sameSender={messages[i + 1]?.user_id === msg.user_id} isMe={isMe} />
                   </div>
                 </div>
+                </Fragment>
               )
             })}
             <div ref={bottomRef} />

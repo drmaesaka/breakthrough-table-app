@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, Fragment } from 'react'
 import { createClient } from '@/lib/supabase'
 import { notifyAbout } from '@/lib/notify-client'
 import Avatar from '@/components/Avatar'
@@ -8,6 +8,7 @@ import { useReactions, MessageReactions } from '@/components/Reactions'
 import { GifButton } from '@/components/GifPicker'
 import ChatInput from '@/components/ChatInput'
 import { useStickToBottom } from '@/components/useStickToBottom'
+import { ChatDay, ChatTime } from '@/components/ChatTime'
 
 /**
  * One table's chat: the message list and the send box. Lived on the Chat
@@ -184,7 +185,9 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
           const prevMsg = messages[i - 1]
           const showName = !isMe && (!prevMsg || prevMsg.user_id !== msg.user_id)
           return (
-            <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+            <Fragment key={msg.id}>
+            <ChatDay msg={msg} prev={prevMsg} />
+            <div className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
               {!isMe && (
                 <Avatar src={msg.profiles?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />
               )}
@@ -199,8 +202,10 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
                   </div>
                 )}
                 <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
+                <ChatTime msg={msg} next={messages[i + 1]} sameSender={messages[i + 1]?.user_id === msg.user_id} isMe={isMe} />
               </div>
             </div>
+            </Fragment>
           )
         })}
         <div ref={bottomRef} />

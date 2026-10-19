@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, Fragment } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
@@ -10,6 +10,7 @@ import { GifButton } from '@/components/GifPicker'
 import ChatInput from '@/components/ChatInput'
 import PeoplePicker from '@/components/PeoplePicker'
 import { useStickToBottom } from '@/components/useStickToBottom'
+import { ChatDay, ChatTime } from '@/components/ChatTime'
 
 type Member = { user_id: string; full_name: string; avatar_url: string | null }
 
@@ -190,15 +191,19 @@ export default function RoomPage() {
           const p = Array.isArray(msg.profiles) ? msg.profiles[0] : msg.profiles
           const name = p?.full_name || byId.get(msg.user_id)?.full_name || 'Member'
           return (
-            <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+            <Fragment key={msg.id}>
+            <ChatDay msg={msg} prev={prev} />
+            <div className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
               {!isMe && <Avatar src={p?.avatar_url} name={name} className="w-7 h-7 bg-bt-pale border border-gray-200 mb-0.5" textClass="text-bt-navy font-bold text-xs" />}
               <div {...rx.holdProps(msg.id)} className={`chat-hold flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
                 <MessagePhoto url={msg.image_url} />
                 {msg.content && <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{rx.text(msg)}</div>}
                 <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
+                <ChatTime msg={msg} next={messages[i + 1]} sameSender={messages[i + 1]?.user_id === msg.user_id} isMe={isMe} />
               </div>
             </div>
+            </Fragment>
           )
         })}
         <div ref={bottomRef} />
