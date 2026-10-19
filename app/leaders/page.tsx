@@ -11,6 +11,7 @@ import Avatar from '@/components/Avatar'
 import { notifyAbout } from '@/lib/notify-client'
 import { useStickToBottom } from '@/components/useStickToBottom'
 import { ChatDay, ChatTime } from '@/components/ChatTime'
+import { useMentionPeople, notifyMentions, withMentions } from '@/lib/mentions'
 
 // The TCs' own space: one channel across every table. (A shared Resources
 // shelf sat beside it until 2026-10-09; it was never used, and TC-only
@@ -28,6 +29,7 @@ export default function LeadersPage() {
   // Chat
   const [messages, setMessages] = useState<any[]>([])
   const rx = useReactions('leaders', messages.map(m => m.id))
+  const people = useMentionPeople('leaders', 'all')
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
@@ -119,6 +121,7 @@ export default function LeadersPage() {
     // Keep what they typed if the insert was rejected.
     if (error) { console.error('leader message send failed:', error.message); setSendError(true); return }
     notifyAbout('tc', sent?.id)
+    notifyMentions('leaders', sent?.id, newMessage.trim(), people)
     setSendError(false)
     setNewMessage('')
     att.clear()
@@ -176,7 +179,7 @@ export default function LeadersPage() {
                       <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                         isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
                       }`}>
-                        {rx.text(msg)}
+                        {withMentions(rx.text(msg), people, isMe ? 'font-semibold underline' : 'font-semibold text-bt-blue')}
                       </div>
                     )}
                     <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
@@ -195,7 +198,7 @@ export default function LeadersPage() {
             style={{ paddingBottom: 'calc(0.75rem + 70px + var(--table-bar, 0px) + var(--nav-lift, 0px))' }}>
             <PhotoButton att={att} />
             <GifButton att={att} />
-            <ChatInput value={newMessage} onChange={setNewMessage} placeholder="Message the other TCs..." />
+            <ChatInput people={people} value={newMessage} onChange={setNewMessage} placeholder="Message the other TCs..." />
             <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
               className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
               title={sendError ? "Didn't send — tap to try again" : 'Send'}>

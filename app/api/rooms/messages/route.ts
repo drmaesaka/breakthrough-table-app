@@ -57,5 +57,5 @@ export async function POST(req: NextRequest) {
     .select('id, room_id, user_id, content, created_at').single()
   if (error) return NextResponse.json({ error: 'Could not send', detail: error.message }, { status: 500 })
   try { await notifyRoom(admin, row) } catch (err) { console.error('room notify failed:', err) }
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, id: row.id })
 }

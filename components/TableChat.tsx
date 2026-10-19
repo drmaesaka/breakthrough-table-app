@@ -9,6 +9,7 @@ import { GifButton } from '@/components/GifPicker'
 import ChatInput from '@/components/ChatInput'
 import { useStickToBottom } from '@/components/useStickToBottom'
 import { ChatDay, ChatTime } from '@/components/ChatTime'
+import { useMentionPeople, notifyMentions, withMentions } from '@/lib/mentions'
 
 /**
  * One table's chat: the message list and the send box. Lived on the Chat
@@ -27,6 +28,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
 }) {
   const [messages, setMessages] = useState<any[]>([])
   const rx = useReactions('table', messages.map(m => m.id))
+  const people = useMentionPeople('table', groupId)
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
@@ -150,10 +152,11 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
         body: JSON.stringify({ group_id: groupId, content: text, ...(photo ? { image_url: photo } : {}) }),
       })
       if (!res.ok) error = { message: `send failed (${res.status})` }
+      else notifyMentions('table', (await res.json().catch(() => ({}))).id, text, people)
     } else {
       const r = await supabase.from('messages').insert({ group_id: groupId, user_id: userId, content: text, ...(photo ? { image_url: photo } : {}) }).select('id').single()
       error = r.error
-      if (!r.error) notifyAbout('chat', r.data?.id)
+      if (!r.error) { notifyAbout('chat', r.data?.id); notifyMentions('table', r.data?.id, text, people) }
     }
     setSending(false)
     // Keep the member's text in the box if the send failed.
@@ -198,7 +201,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
                   <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
                     isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'
                   }`}>
-                    {rx.text(msg)}
+                    {withMentions(rx.text(msg), people, isMe ? 'font-semibold underline' : 'font-semibold text-bt-blue')}
                   </div>
                 )}
                 <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
@@ -217,7 +220,7 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
         style={{ paddingBottom: 'calc(0.75rem + 70px + var(--table-bar, 0px) + var(--nav-lift, 0px))' }}>
         <PhotoButton att={att} />
         <GifButton att={att} />
-        <ChatInput value={newMessage} onChange={setNewMessage} placeholder={isHome ? 'Message your table...' : `Message ${groupName}...`} />
+        <ChatInput people={people} value={newMessage} onChange={setNewMessage} placeholder={isHome ? 'Message your table...' : `Message ${groupName}...`} />
         <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 transition-opacity ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>

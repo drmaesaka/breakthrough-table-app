@@ -11,6 +11,7 @@ import ChatInput from '@/components/ChatInput'
 import PeoplePicker from '@/components/PeoplePicker'
 import { useStickToBottom } from '@/components/useStickToBottom'
 import { ChatDay, ChatTime } from '@/components/ChatTime'
+import { useMentionPeople, notifyMentions, withMentions } from '@/lib/mentions'
 
 type Member = { user_id: string; full_name: string; avatar_url: string | null }
 
@@ -27,6 +28,7 @@ export default function RoomPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [messages, setMessages] = useState<any[]>([])
   const rx = useReactions('room', messages.map(m => m.id))
+  const people = useMentionPeople('room', roomId)
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(false)
@@ -91,9 +93,11 @@ export default function RoomPage() {
     e.preventDefault()
     if ((!newMessage.trim() && !att.photo) || sending || att.busy) return
     setSending(true)
-    const res = await fetch('/api/rooms/messages', { method: 'POST', headers: await headers(), body: JSON.stringify({ room_id: roomId, content: newMessage.trim(), ...(att.photo ? { image_url: att.photo } : {}) }) })
+    const text = newMessage.trim()
+    const res = await fetch('/api/rooms/messages', { method: 'POST', headers: await headers(), body: JSON.stringify({ room_id: roomId, content: text, ...(att.photo ? { image_url: att.photo } : {}) }) })
     setSending(false)
     if (!res.ok) { setSendError(true); return }
+    notifyMentions('room', (await res.json().catch(() => ({}))).id, text, people)
     setSendError(false); setNewMessage(''); att.clear()
     fetchMessages()
   }
@@ -198,7 +202,7 @@ export default function RoomPage() {
               <div {...rx.holdProps(msg.id)} className={`chat-hold flex flex-col max-w-[72%] ${isMe ? 'items-end' : 'items-start'}`}>
                 {showName && <span className="text-xs text-gray-400 font-medium mb-1 px-1">{name}</span>}
                 <MessagePhoto url={msg.image_url} />
-                {msg.content && <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{rx.text(msg)}</div>}
+                {msg.content && <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${isMe ? 'bg-bt-navy text-white rounded-br-sm' : 'bg-white text-gray-900 shadow-sm rounded-bl-sm'}`}>{withMentions(rx.text(msg), people, isMe ? 'font-semibold underline' : 'font-semibold text-bt-blue')}</div>}
                 <MessageReactions id={msg.id} state={rx} isMe={isMe} content={rx.text(msg)} />
                 <ChatTime msg={msg} next={messages[i + 1]} sameSender={messages[i + 1]?.user_id === msg.user_id} isMe={isMe} />
               </div>
@@ -214,7 +218,7 @@ export default function RoomPage() {
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}>
         <PhotoButton att={att} />
         <GifButton att={att} />
-        <ChatInput value={newMessage} onChange={setNewMessage} placeholder={`Message ${room?.name || 'the group'}...`} />
+        <ChatInput people={people} value={newMessage} onChange={setNewMessage} placeholder={`Message ${room?.name || 'the group'}...`} />
         <button type="submit" disabled={(!newMessage.trim() && !att.photo) || sending || att.busy}
           className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40 ${sendError ? 'bg-red-600' : 'bg-bt-navy'}`}
           title={sendError ? "Didn't send — tap to try again" : 'Send'}>

@@ -68,5 +68,5 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: 'Could not send', detail: error.message }, { status: 500 })
   // Same ping the browser path sends; a failure here must not fail the send.
   try { await notifyTableChat(admin, row) } catch (err) { console.error('chat notify failed:', err) }
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, id: row.id })
 }

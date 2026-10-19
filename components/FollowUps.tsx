@@ -5,6 +5,8 @@ import { linkify } from '@/lib/linkify'
 import Avatar from '@/components/Avatar'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, PostReactions } from '@/components/Reactions'
+import ChatInput from '@/components/ChatInput'
+import { useMentionPeople, notifyMentions, withMentions } from '@/lib/mentions'
 
 /**
  * My Table → Follow-ups (2026-10-09): the table's meeting follow-ups, apart
@@ -33,6 +35,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
   const [library, setLibrary] = useState<{ id: string; title: string; url: string }[]>([])
   const [note, setNote] = useState('')
   const rx = useReactions('followup', (posts || []).map(p => p.id))
+  const people = useMentionPeople('followup', groupId)
 
   // Composer (TCs)
   const [composing, setComposing] = useState(false)
@@ -81,6 +84,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
     const { ok, json } = await call({ method: 'POST', body: { action: 'post', group_id: groupId, title, body, link_url: link, image_url: att.photo } })
     setPosting(false)
     if (!ok) { setPostError(json.error || 'Could not post. Try again.'); return }
+    notifyMentions('followup', json.id, `${title} ${body}`, people)
     setTitle(''); setBody(''); setLink(''); att.clear(); setComposing(false)
     load()
   }
@@ -92,6 +96,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
     const { ok, json } = await call({ method: 'POST', body: { action: 'reply', post_id: postId, body: text } })
     setReplying(null)
     if (!ok) { alert(json.error || 'Could not send. Try again.'); return }
+    notifyMentions('followup_reply', json.id, text, people)
     setReplyText(r => ({ ...r, [postId]: '' }))
     load()
   }
@@ -124,8 +129,9 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
           ) : (
             <>
               <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title (optional), e.g. Meeting 4 follow-up" className={input} />
-              <textarea value={body} onChange={e => setBody(e.target.value)} rows={4}
-                placeholder="What we covered, what to read or do before next time..." className={`${input} resize-none leading-relaxed`} />
+              <ChatInput value={body} onChange={setBody} people={people} enterSends={false}
+                placeholder="What we covered, what to read or do before next time... Type @ to tag someone."
+                className={`${input} resize-none leading-relaxed min-h-[6rem] block`} />
               <input value={link} onChange={e => setLink(e.target.value)} placeholder="Link (optional)" className={input} />
               {library.length > 0 && (
                 <select value="" onChange={e => {
@@ -201,7 +207,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
             ) : p.body && (
               <>
                 <p className="text-sm text-gray-700 mt-1.5 leading-relaxed whitespace-pre-wrap break-words">
-                  {linkify(long ? p.body.slice(0, 400) + '…' : p.body)}
+                  {withMentions(long ? p.body.slice(0, 400) + '…' : p.body, people, 'font-semibold text-bt-blue', linkify)}
                 </p>
                 {p.body.length > 420 && (
                   <button type="button" onClick={() => setExpanded(s => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })}
@@ -244,7 +250,7 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
                             </div>
                           </div>
                         ) : (
-                          <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{linkify(r.body)}</p>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{withMentions(r.body, people, 'font-semibold text-bt-blue', linkify)}</p>
                         )}
                         {r.image_url && <MessagePhoto url={r.image_url} />}
                         {(r.mine || canPost) && !rEditing && (
@@ -258,10 +264,8 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
                   )
                 })}
                 <div className="flex items-end gap-2">
-                  <textarea value={replyText[p.id] || ''} rows={1}
-                    onChange={e => { setReplyText(r => ({ ...r, [p.id]: e.target.value })); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px` }}
-                    placeholder="Write a reply..."
-                    className="flex-1 min-w-0 bg-bt-pale rounded-2xl px-4 py-2.5 text-sm text-gray-900 resize-none focus:outline-none focus:ring-2 focus:ring-bt-blue" />
+                  <ChatInput value={replyText[p.id] || ''} onChange={v => setReplyText(r => ({ ...r, [p.id]: v }))}
+                    people={people} enterSends={false} placeholder="Write a reply... (@ to tag)" />
                   <button type="button" onClick={() => reply(p.id)} disabled={replying === p.id || !(replyText[p.id] || '').trim()}
                     className="h-10 px-4 rounded-full bg-bt-navy text-white text-xs font-semibold disabled:opacity-40 flex-shrink-0">
                     {replying === p.id ? '...' : 'Reply'}
