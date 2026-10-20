@@ -11,7 +11,7 @@ import { notifyMembers } from '@/lib/notify'
 // copied in as follow-ups too, so a TC who posts on Sunrise posts once.
 //
 // GET  ?group_id=                                 → { posts, canPost, library }
-// POST { action: 'post', group_id, body, title?, link_url?, image_url? }   TCs of the table
+// POST { action: 'post', group_id, body, title?, links?: [{label, url}], image_url? }   TCs of the table
 // POST { action: 'reply', post_id, body, image_url? }                       anyone at the table
 // POST { action: 'edit', kind: 'post'|'reply', id, body }                   the author
 // POST { action: 'delete', kind: 'post'|'reply', id }                       the author, or a TC of the table
@@ -109,6 +109,14 @@ export async function GET(req: NextRequest) {
 
 const clean = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max)
 const safeUrl = (v: unknown) => { const u = clean(v, 1000); return /^https?:\/\//i.test(u) ? u : null }
+/** links: [{label, url}] → link_url (JSON for several, see lib/post-links.ts); link_url alone still works. */
+function linksColumn(b: any): string | null {
+  const list = (Array.isArray(b.links) ? b.links : [])
+    .map((l: any) => ({ label: clean(l?.label, 120) || null, url: safeUrl(l?.url) }))
+    .filter((l: any) => l.url).slice(0, 20)
+  if (!list.length) return safeUrl(b.link_url)
+  return list.length === 1 && !list[0].label ? list[0].url : JSON.stringify(list)
+}
 
 export async function POST(req: NextRequest) {
   const auth = await requireUser(req)
@@ -126,7 +134,7 @@ export async function POST(req: NextRequest) {
     if (!body && !title) return NextResponse.json({ error: 'Write something first' }, { status: 400 })
     const { data, error } = await admin.from('table_posts').insert({
       group_id: groupId, author_id: auth.userId, source: 'app', title, body,
-      link_url: safeUrl(b.link_url), image_url: photo(b.image_url),
+      link_url: linksColumn(b), image_url: photo(b.image_url),
     }).select('id').single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     // Everyone at the table, apart from the TC posting.

@@ -7,6 +7,7 @@ import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/compo
 import { useReactions, PostReactions } from '@/components/Reactions'
 import ChatInput from '@/components/ChatInput'
 import { useMentionPeople, notifyMentions, withMentions } from '@/lib/mentions'
+import { parseLinks, linkName } from '@/lib/post-links'
 
 /**
  * My Table → Follow-ups (2026-10-09): the table's meeting follow-ups, apart
@@ -41,7 +42,8 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
   const [composing, setComposing] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [link, setLink] = useState('')
+  // Several links per follow-up (2026-10-20), each with an optional label.
+  const [links, setLinks] = useState<{ label: string; url: string }[]>([{ label: '', url: '' }])
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState('')
   const att = usePhotoAttach(userId)
@@ -81,11 +83,11 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
   async function post() {
     if (!body.trim() && !title.trim()) return
     setPosting(true); setPostError('')
-    const { ok, json } = await call({ method: 'POST', body: { action: 'post', group_id: groupId, title, body, link_url: link, image_url: att.photo } })
+    const { ok, json } = await call({ method: 'POST', body: { action: 'post', group_id: groupId, title, body, links: links.filter(l => l.url.trim()), image_url: att.photo } })
     setPosting(false)
     if (!ok) { setPostError(json.error || 'Could not post. Try again.'); return }
     notifyMentions('followup', json.id, `${title} ${body}`, people)
-    setTitle(''); setBody(''); setLink(''); att.clear(); setComposing(false)
+    setTitle(''); setBody(''); setLinks([{ label: '', url: '' }]); att.clear(); setComposing(false)
     load()
   }
 
@@ -132,13 +134,31 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
               <ChatInput value={body} onChange={setBody} people={people} enterSends={false}
                 placeholder="What we covered, what to read or do before next time... Type @ to tag someone."
                 className={`${input} resize-none leading-relaxed min-h-[6rem] block`} />
-              <input value={link} onChange={e => setLink(e.target.value)} placeholder="Link (optional)" className={input} />
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-gray-500 px-1">Links (optional)</p>
+                {links.map((l, k) => (
+                  <div key={k} className="bg-bt-pale/60 rounded-xl p-2 space-y-1.5">
+                    <div className="flex gap-2 items-center">
+                      <input value={l.label} onChange={e => setLinks(ls => ls.map((x, j) => j === k ? { ...x, label: e.target.value } : x))}
+                        placeholder={`Name, e.g. Video ${k + 1}`} className={`${input} py-2`} />
+                      {links.length > 1 && (
+                        <button type="button" aria-label="Remove this link" onClick={() => setLinks(ls => ls.filter((_, j) => j !== k))}
+                          className="text-gray-400 text-lg px-1 flex-shrink-0">×</button>
+                      )}
+                    </div>
+                    <input value={l.url} onChange={e => setLinks(ls => ls.map((x, j) => j === k ? { ...x, url: e.target.value } : x))}
+                      placeholder="https://..." inputMode="url" className={`${input} py-2`} />
+                  </div>
+                ))}
+                <button type="button" onClick={() => setLinks(ls => [...ls, { label: '', url: '' }])}
+                  className="text-xs font-semibold text-bt-blue px-1">＋ Add another link</button>
+              </div>
               {library.length > 0 && (
                 <select value="" onChange={e => {
                   const item = library.find(l => l.id === e.target.value)
-                  if (item) { setLink(item.url); if (!title.trim()) setTitle(item.title) }
+                  if (item) setLinks(ls => [...ls.filter(x => x.url.trim()), { label: item.title, url: item.url }])
                 }} className={`${input} bg-white`}>
-                  <option value="">📖 Or attach something from the Library...</option>
+                  <option value="">📖 Add something from the Library...</option>
                   {library.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}
                 </select>
               )}
@@ -216,11 +236,16 @@ export default function FollowUps({ groupId, groupName, userId }: { groupId: str
               </>
             )}
             {p.image_url && <div className="mt-2"><MessagePhoto url={p.image_url} /></div>}
-            {p.link_url && (
-              <a href={p.link_url} target="_blank" rel="noopener noreferrer"
-                className="mt-3 block text-center py-2 rounded-xl bg-bt-pale text-bt-navy text-sm font-semibold">
-                {p.source === 'sunrise' ? 'Open it →' : 'Open link →'}
-              </a>
+            {parseLinks(p.link_url).length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {parseLinks(p.link_url).map((l, k, all) => (
+                  <a key={k} href={l.url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-between gap-2 py-2 px-3 rounded-xl bg-bt-pale text-bt-navy text-sm font-semibold">
+                    <span className="truncate">{p.source === 'sunrise' ? 'Open it' : all.length === 1 && !l.label ? 'Open link' : linkName(l)}</span>
+                    <span className="flex-shrink-0">→</span>
+                  </a>
+                ))}
+              </div>
             )}
 
             <div className="flex items-start justify-between gap-2">
