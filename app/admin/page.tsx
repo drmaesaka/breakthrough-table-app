@@ -1275,6 +1275,28 @@ export default function AdminPage() {
     setRenaming(null)
   }
 
+  /** Deletes a table for good (2026-10-20; /api/admin/groups). Two checks: a summary, then the name typed. */
+  async function deleteTable(g: { id: string; name: string }) {
+    const seated = users.filter(u => u.group_id === g.id).length
+    if (!confirm(`Delete ${g.name}? This cannot be undone.\n\n` +
+      `${seated ? `${seated} ${seated === 1 ? 'person sits' : 'people sit'} here. They keep their accounts but will have no table until you seat them elsewhere.\n\n` : ''}` +
+      `Its chat, reading, library items, follow-ups, attendance and table-only events are deleted too.`)) return
+    const typed = prompt(`To confirm, type the table's name: ${g.name}`)
+    if (typed === null) return
+    if (typed.trim() !== g.name.trim()) { alert('The name did not match, so nothing was deleted.'); return }
+    const res = await fetch('/api/admin/groups', { method: 'DELETE', headers: await authHeaders(), body: JSON.stringify({ group_id: g.id, confirm_name: typed }) })
+    const r = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(r.error || `Could not delete (${res.status})`); return }
+    setGroups(prev => prev.filter(x => x.id !== g.id))
+    groupsRef.current = groupsRef.current.filter(x => x.id !== g.id)
+    setUsers(prev => prev.map(u => u.group_id === g.id ? { ...u, group_id: null } : u))
+    if (selectedGroup === g.id) {
+      const next = groups.find(x => x.id !== g.id)
+      if (next) { setSelectedGroup(next.id); loadGroupData(next.id) } else setSelectedGroup('')
+    }
+    alert(`${g.name} was deleted.`)
+  }
+
   async function createGroup() {
     if (!groupName.trim()) return
     const supabase = createClient()
@@ -1781,6 +1803,8 @@ export default function AdminPage() {
                             <p className="font-semibold text-gray-900 truncate">{g.name}</p>
                             <button onClick={() => setRenaming({ id: g.id, value: g.name })}
                               className="text-bt-blue text-xs font-semibold flex-shrink-0">Rename</button>
+                            <button onClick={() => deleteTable(g)}
+                              className="text-red-400 text-xs font-semibold flex-shrink-0">Delete</button>
                           </div>
                         )}
                         {/* When the programme began. Tables join the app months
