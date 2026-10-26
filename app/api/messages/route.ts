@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
 import { isOwnChatPhoto } from '@/lib/chat-photo'
 import { notifyTableChat } from '@/lib/notify'
+import { extraTablesOf, peopleAtTables } from '@/lib/memberships'
 
 // Table chat for a table the caller LEADS but does not sit at.
 //
@@ -18,6 +19,8 @@ async function allowed(userId: string, groupId: string) {
   const supabase = adminClient()
   const { data: prof } = await supabase.from('profiles').select('group_id').eq('id', userId).maybeSingle()
   if (prof?.group_id === groupId) return true
+  // A member's extra table (2026-10-26) reads through here too.
+  if ((await extraTablesOf(userId)).includes(groupId)) return true
   return (await leaderGroupIds(userId)).includes(groupId)
 }
 

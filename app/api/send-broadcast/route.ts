@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, requireGroupOwnership, leaderGroupIds } from '@/lib/api-auth'
 import { notifyMembers } from '@/lib/notify'
+import { peopleAtTables } from '@/lib/memberships'
 
 export const maxDuration = 60
 
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
 
   const supabase = adminClient()
   let query = supabase.from('profiles').select('id')
+  // The tables addressed; their extra-table members (2026-10-26) are added below.
+  let tables: string[] = []
 
   if (scope === 'table') {
     if (!group_id) return NextResponse.json({ error: 'group_id is required' }, { status: 400 })
@@ -31,6 +34,7 @@ export async function POST(req: NextRequest) {
     const owns = await requireGroupOwnership(auth.userId, group_id)
     if (!owns.ok) return NextResponse.json({ error: owns.error }, { status: owns.status })
     query = query.eq('group_id', group_id)
+    tables = [group_id]
   } else if (scope === 'tables') {
     // Any chosen set of the caller's own tables (2026-10-07: it was one table
     // or all of them, nothing in between).
@@ -39,10 +43,12 @@ export async function POST(req: NextRequest) {
     const mine = await leaderGroupIds(auth.userId)
     if (wanted.some(id => !mine.includes(id))) return NextResponse.json({ error: 'You can only send to tables you lead' }, { status: 403 })
     query = query.in('group_id', wanted)
+    tables = wanted
   } else if (scope === 'mine') {
     const mine = await leaderGroupIds(auth.userId)
     if (!mine.length) return NextResponse.json({ message: 'You lead no tables', sent: 0, emailed: 0, recipients: 0 })
     query = query.in('group_id', mine)
+    tables = mine
   } else {
     // Members without a table (alumni, not yet seated) are left out: a table
     // announcement means nothing to them and they cannot act on it.
@@ -53,7 +59,8 @@ export async function POST(req: NextRequest) {
   if (membersError) return NextResponse.json({ error: 'Could not load members' }, { status: 500 })
 
   // The sender does not need their own announcement.
-  const recipientIds = (members || []).map((m: any) => m.id).filter((id: string) => id !== auth.userId)
+  const extra = tables.length ? await peopleAtTables(tables) : []
+  const recipientIds = [...new Set([...(members || []).map((m: any) => m.id), ...extra])].filter((id: string) => id !== auth.userId)
   if (!recipientIds.length) return NextResponse.json({ message: 'Nobody to send to', sent: 0, emailed: 0, recipients: 0 })
 
   const result = await notifyMembers(supabase, {

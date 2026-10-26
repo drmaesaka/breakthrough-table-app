@@ -4,6 +4,7 @@ import { causeMachineConfigured } from '@/lib/cause-machine'
 import { sunriseGroupPosts } from '@/lib/sunrise-library'
 import { isOwnChatPhoto } from '@/lib/chat-photo'
 import { notifyMembers } from '@/lib/notify'
+import { extraTablesOf, peopleAtTables } from '@/lib/memberships'
 
 // A table's Follow-ups feed (2026-10-09; sql/2026-10-09-follow-ups.sql).
 // TCs post meeting follow-ups; everyone at the table reacts and replies under
@@ -22,7 +23,8 @@ async function access(userId: string, role: string, groupId: string) {
     role === 'leader' ? leaderGroupIds(userId) : Promise.resolve([] as string[]),
   ])
   const isTC = led.includes(groupId)
-  return { canSee: isTC || prof?.group_id === groupId, isTC }
+  const extra = isTC || prof?.group_id === groupId ? false : (await extraTablesOf(userId)).includes(groupId)
+  return { canSee: isTC || prof?.group_id === groupId || extra, isTC }
 }
 
 /**
@@ -138,7 +140,7 @@ export async function POST(req: NextRequest) {
     }).select('id').single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     // Everyone at the table, apart from the TC posting.
-    const { data: seated } = await admin.from('profiles').select('id').eq('group_id', groupId)
+    const seated = (await peopleAtTables([groupId])).map(id => ({ id }))
     await notifyMembers(admin, {
       kind: 'task', recipientIds: (seated || []).map(p => p.id).filter(id => id !== auth.userId),
       title: '📝 New follow-up from your TC', body: title || body, url: `/group?table=${groupId}&tab=followups`,

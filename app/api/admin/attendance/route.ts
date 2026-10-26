@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, requireGroupOwnership } from '@/lib/api-auth'
+import { peopleAtTables } from '@/lib/memberships'
 
 // Roll call: one table, one day. The TC picks the date (defaults to today),
 // optionally which playbook meeting it was, taps the names who were there,
@@ -80,8 +81,8 @@ export async function PUT(req: NextRequest) {
   const supabase = adminClient()
 
   // Only people who actually sit at this table can be marked present at it.
-  const { data: seated } = await supabase.from('profiles').select('id').eq('group_id', group_id)
-  const allowed = new Set((seated || []).map(p => p.id))
+  // (or are there as an extra table, 2026-10-26)
+  const allowed = new Set(await peopleAtTables([group_id]))
   const ids: string[] = [...new Set(user_ids.filter((id: unknown): id is string => typeof id === 'string' && allowed.has(id)))]
 
   const { error: clearError } = await supabase

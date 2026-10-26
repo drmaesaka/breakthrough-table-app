@@ -1410,6 +1410,19 @@ export default function AdminPage() {
     else setContentType('link')
   }
 
+  /** Add or take off an extra table, leaving the main table alone (2026-10-26). */
+  async function changeExtraTable(u: any, gid: string, add: boolean) {
+    const name = groups.find(g => g.id === gid)?.name || 'that table'
+    if (!add && !confirm(`Take ${u.full_name || 'them'} off ${name}? Their main table stays the same.`)) return
+    const res = await fetch('/api/admin/members', { method: 'PATCH', headers: await authHeaders(),
+      body: JSON.stringify(add ? { userId: u.id, addTable: gid } : { userId: u.id, removeTable: gid }) })
+    const r = await res.json().catch(() => ({}))
+    if (!res.ok) { alert(r.error || 'Could not change their tables.'); return }
+    setUsers(p => p.map(x => x.id !== u.id ? x : {
+      ...x, extra_group_ids: add ? [...(x.extra_group_ids || []), gid] : (x.extra_group_ids || []).filter((id: string) => id !== gid),
+    }))
+  }
+
   async function assignUserToGroup(userId: string, groupId: string) {
     const val = groupId === '' ? null : groupId
     const res = await fetch('/api/admin/members', {
@@ -1843,7 +1856,7 @@ export default function AdminPage() {
                             <p className="text-xs mt-0.5">
                               <span className="text-bt-blue font-semibold">TC: </span>
                               <span className="text-gray-700">{names.length ? names.join(', ') : '—'}</span>
-                              <span className="text-gray-400"> · {users.filter(u => u.group_id === g.id).length} members</span>
+                              <span className="text-gray-400"> · {users.filter(u => (u.group_id === g.id || (u.extra_group_ids || []).includes(g.id))).length} members</span>
                             </p>
                           )
                         })()}
@@ -2035,7 +2048,7 @@ export default function AdminPage() {
 
                     <TableAttendance
                       group={g}
-                      seated={users.filter((u: any) => u.group_id === g.id).slice().sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))}
+                      seated={users.filter((u: any) => (u.group_id === g.id || (u.extra_group_ids || []).includes(g.id))).slice().sort((a: any, b: any) => (a.full_name || '').localeCompare(b.full_name || ''))}
                       plans={resolvedMeetings().map(p => ({ number: p.number, title: p.title }))}
                       headers={authHeaders}
                       onCurrentMeeting={(gid, n) => setGroups(prev => prev.map(x => x.id === gid ? { ...x, current_meeting_number: n } : x))}
@@ -2109,7 +2122,7 @@ export default function AdminPage() {
               <option value="unassigned">Unassigned</option>
               {groups.map(g => (
                 <option key={g.id} value={g.id}>
-                  {g.name} ({users.filter(u => u.group_id === g.id).length})
+                  {g.name} ({users.filter(u => (u.group_id === g.id || (u.extra_group_ids || []).includes(g.id))).length})
                 </option>
               ))}
             </select>
@@ -2120,7 +2133,7 @@ export default function AdminPage() {
                 ? users
                 : memberFilter === 'unassigned'
                 ? users.filter(u => !u.group_id)
-                : users.filter(u => u.group_id === memberFilter)
+                : users.filter(u => u.group_id === memberFilter || (u.extra_group_ids || []).includes(memberFilter))
               const q = memberSearch.trim().toLowerCase()
               const filtered = !q ? inView : inView.filter(u =>
                 [u.full_name, u.login_email, u.contact_email, groups.find(g => g.id === u.group_id)?.name]
@@ -2205,6 +2218,27 @@ export default function AdminPage() {
                     <option value="">— Unassigned —</option>
                     {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
+                  {/* Extra tables (2026-10-26): also at other tables, main table unchanged. */}
+                  {u.group_id && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(u.extra_group_ids || []).map((gid: string) => {
+                        const g = groups.find(x => x.id === gid)
+                        return (
+                          <span key={gid} className="inline-flex items-center gap-1 text-xs bg-bt-pale text-bt-navy px-2 py-1 rounded-full">
+                            Also at {g?.name || 'another table'}
+                            {g && <button type="button" aria-label={`Take off ${g.name}`} onClick={() => changeExtraTable(u, gid, false)} className="text-gray-400 font-bold">×</button>}
+                          </span>
+                        )
+                      })}
+                      {groups.some(g => g.id !== u.group_id && !(u.extra_group_ids || []).includes(g.id)) && (
+                        <select value="" onChange={e => e.target.value && changeExtraTable(u, e.target.value, true)}
+                          className="text-xs text-bt-blue font-semibold bg-transparent border-0 p-0 focus:outline-none">
+                          <option value="">＋ Also add to another table</option>
+                          {groups.filter(g => g.id !== u.group_id && !(u.extra_group_ids || []).includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <button onClick={() => toggleLeader(u.id, u.role)}
                       className={`flex-1 text-xs font-medium py-2 rounded-lg border transition-colors ${

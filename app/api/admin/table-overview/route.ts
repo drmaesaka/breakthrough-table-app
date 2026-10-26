@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, requireGroupOwnership } from '@/lib/api-auth'
 import { doneInPeriod, streakFor, freqOf, type Frequency } from '@/lib/habits'
 import { localDay } from '@/lib/dates'
+import { peopleAtTables } from '@/lib/memberships'
 
 // Everything a TC wants to know about each member of one table, in one
 // call, for the My Table screen. Service key, table ownership checked.
@@ -18,10 +19,12 @@ export async function GET(req: NextRequest) {
   const today = localDay()
   const since = localDay(new Date(Date.now() - 35 * 86400000))
 
-  const { data: members } = await admin
+  // Seated here, or here as an extra table (2026-10-26).
+  const atTable = await peopleAtTables([groupId])
+  const { data: members } = atTable.length ? await admin
     .from('profiles')
     .select('id, full_name, avatar_url, role, adherence_percent, streak, contact_email, created_at')
-    .eq('group_id', groupId)
+    .in('id', atTable) : { data: [] as any[] }
   const ids = (members || []).map(m => m.id)
   if (!ids.length) return NextResponse.json({ members: [], tasks_total: 0 })
 

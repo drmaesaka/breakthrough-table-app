@@ -20,13 +20,24 @@ export default function BottomNav() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       const { data } = await supabase.from('profiles').select('role, group_id, groups(name)').eq('id', user.id).single()
-      if (data?.role !== 'leader') return
-      setIsLeader(true)
-      const home = data.group_id ? { id: data.group_id as string, name: (data.groups as any)?.name || 'My table', home: true } : null
       const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/admin/my-groups', { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } }).catch(() => null)
+      const auth = { Authorization: `Bearer ${session?.access_token ?? ''}` }
+      // Main table + extra tables (2026-10-26). A member with one table sees no bar.
+      const mt = await fetch('/api/my-tables', { headers: auth }).catch(() => null)
+      const mine: { id: string; name: string; home: boolean }[] = mt && mt.ok ? ((await mt.json()).tables || []) : []
+      if (data?.role !== 'leader') {
+        if (mine.length > 1) {
+          setTables(mine)
+          setCurrent(pickTable(mine.map(t => t.id), mine.find(t => t.home)?.id))
+        }
+        return
+      }
+      setIsLeader(true)
+      const home = data.group_id ? { id: data.group_id as string, name: mine.find(t => t.home)?.name || (data.groups as any)?.name || 'My table', home: true } : null
+      const res = await fetch('/api/admin/my-groups', { headers: auth }).catch(() => null)
       const led = res && res.ok ? ((await res.json()).groups || []) : []
       const all = [...(home ? [home] : []), ...led.filter((g: any) => g.id !== home?.id).map((g: any) => ({ id: g.id, name: g.name, home: false }))]
+      for (const t of mine) if (!all.some(x => x.id === t.id)) all.push({ ...t, home: false })
       setTables(all)
       setCurrent(getCurrentTable() === ALL_TABLES ? ALL_TABLES : pickTable(all.map(t => t.id), home?.id))
     }

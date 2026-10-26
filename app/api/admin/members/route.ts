@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireLeader, leaderGroupIds } from '@/lib/api-auth'
 import { fetchLoginEmails } from '@/lib/member-emails'
+import { extraTablesFor } from '@/lib/memberships'
 
 // `role = 'leader'` is app-wide, not per-table, so every handler here narrows to
 // the caller's own groups. Without that narrowing any leader could read, reassign
@@ -23,10 +24,18 @@ export async function GET(req: NextRequest) {
     ? `group_id.is.null,group_id.in.(${myGroups.join(',')})`
     : 'group_id.is.null'
 
+  // Also people whose main table is elsewhere but who are at one of mine as
+  // an extra table (2026-10-26).
+  const { data: extraRows } = myGroups.length
+    ? await supabase.from('table_memberships').select('user_id').in('group_id', myGroups)
+    : { data: [] as { user_id: string }[] }
+  const extraIds = [...new Set((extraRows || []).map(r => r.user_id))]
+  const filter = extraIds.length ? `${scopeFilter},id.in.(${extraIds.join(',')})` : scopeFilter
+
   const { data, error } = await supabase
     .from('profiles')
     .select('id, full_name, group_id, role, adherence_percent, streak, contact_email')
-    .or(scopeFilter)
+    .or(filter)
     .order('full_name', { ascending: true })
 
   if (error) return NextResponse.json({ error: 'Failed to load members' }, { status: 500 })
@@ -41,7 +50,8 @@ export async function GET(req: NextRequest) {
 
   // Sign-in addresses, so a TC can see who has none and fix it (2026-10-07).
   const logins = await fetchLoginEmails(supabase, memberIds)
-  const members = (data || []).map(m => ({ ...m, push_enabled: subscribed.has(m.id), login_email: logins.get(m.id) || null }))
+  const extras = await extraTablesFor(memberIds)
+  const members = (data || []).map(m => ({ ...m, push_enabled: subscribed.has(m.id), login_email: logins.get(m.id) || null, extra_group_ids: extras.get(m.id) || [] }))
   return NextResponse.json({ members, group_ids: myGroups })
 }
 
@@ -49,8 +59,32 @@ export async function PATCH(req: NextRequest) {
   const auth = await requireLeader(req)
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
-  const { userId, groupId, role, fullName, contactEmail, loginEmail } = await req.json()
+  const { userId, groupId, role, fullName, contactEmail, loginEmail, addTable, removeTable } = await req.json()
   if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 })
+
+  // Extra tables (2026-10-26): add or take off one of the caller's own tables
+  // without touching the person's main table.
+  if (addTable || removeTable) {
+    const gid = String(addTable || removeTable)
+    const mine = await leaderGroupIds(auth.userId)
+    if (!mine.includes(gid)) return NextResponse.json({ error: 'Not the leader of that table' }, { status: 403 })
+    const admin = adminClient()
+    if (removeTable) {
+      const { error } = await admin.from('table_memberships').delete().eq('user_id', userId).eq('group_id', gid)
+      if (error) return NextResponse.json({ error: /table_memberships/.test(error.message) ? 'Extra tables need one setup step first' : 'Could not remove' }, { status: 500 })
+      return NextResponse.json({ success: true })
+    }
+    const scope = await memberInScope(userId, mine, true)
+    if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: scope.status })
+    const { data: target } = await admin.from('profiles').select('group_id').eq('id', userId).maybeSingle()
+    if (target?.group_id === gid) return NextResponse.json({ error: 'That is already their main table' }, { status: 400 })
+    // No main table yet: this becomes it, rather than an extra.
+    const { error } = !target?.group_id
+      ? await admin.from('profiles').update({ group_id: gid }).eq('id', userId)
+      : await admin.from('table_memberships').upsert({ user_id: userId, group_id: gid, added_by: auth.userId }, { onConflict: 'user_id,group_id' })
+    if (error) return NextResponse.json({ error: /table_memberships/.test(error.message) ? 'Extra tables need one setup step first' : 'Could not add' }, { status: 500 })
+    return NextResponse.json({ success: true, main: !target?.group_id })
+  }
 
   if (role !== undefined && role !== 'leader' && role !== 'participant') {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
@@ -193,7 +227,9 @@ export async function DELETE(req: NextRequest) {
  */
 async function memberInScope(
   userId: string,
-  myGroups: string[]
+  myGroups: string[],
+  /** Adding an extra table takes nobody away from their TC, so anyone may be added. */
+  addingExtra = false
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const { data: target, error } = await adminClient()
     .from('profiles')
@@ -203,7 +239,7 @@ async function memberInScope(
 
   if (error) return { ok: false, status: 500, error: 'Could not load member' }
   if (!target) return { ok: false, status: 404, error: 'Member not found' }
-  if (target.group_id && !myGroups.includes(target.group_id)) {
+  if (!addingExtra && target.group_id && !myGroups.includes(target.group_id)) {
     return { ok: false, status: 403, error: 'That member belongs to another table' }
   }
   return { ok: true }

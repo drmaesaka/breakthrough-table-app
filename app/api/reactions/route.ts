@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
 import { REACTION_EMOJIS, type ReactionChat } from '@/lib/reactions'
+import { tablesOf } from '@/lib/memberships'
 
 // Reactions on chat messages (2026-10-09). Service key only — the table has
 // no RLS policies — so every call first narrows the message ids to ones this
@@ -21,11 +22,11 @@ const POSTS = new Set<ReactionChat>(['task', 'event', 'announcement', 'followup'
 
 /** The person's own table plus the ones they lead. */
 async function myTables(userId: string, role: string): Promise<Set<string>> {
-  const [{ data: prof }, led] = await Promise.all([
-    adminClient().from('profiles').select('group_id').eq('id', userId).maybeSingle(),
+  const [mine, led] = await Promise.all([
+    tablesOf(userId), // main table + extra tables (2026-10-26)
     role === 'leader' ? leaderGroupIds(userId) : Promise.resolve([] as string[]),
   ])
-  return new Set<string>([...(prof?.group_id ? [prof.group_id] : []), ...led])
+  return new Set<string>([...mine, ...led])
 }
 
 /** Posts among `ids` this person can see. Nobody edits a post here. */

@@ -112,6 +112,10 @@ export default function GroupPage() {
         const led = res && res.ok ? ((await res.json()).groups || []) : []
         all = [...all, ...led.filter((g: any) => g.id !== home).map((g: any) => ({ id: g.id, name: g.name }))]
       }
+      // Extra tables the person belongs to besides their main one (2026-10-26).
+      const mt = await fetch('/api/my-tables', { headers: await headers() }).catch(() => null)
+      const mine = mt && mt.ok ? ((await mt.json()).tables || []) : []
+      all = [...all, ...mine.filter((t: any) => !all.some(x => x.id === t.id)).map((t: any) => ({ id: t.id, name: t.name }))]
       setTables(all)
       // ?table=<id> from a chat notification opens that table, if it is one of mine.
       const wantTable = new URLSearchParams(window.location.search).get('table')
@@ -120,7 +124,7 @@ export default function GroupPage() {
       // ?tab=you means your own habits, which live on your own table.
       const first = (wantTable && all.find(t => t.id === wantTable)?.id) || (want === 'you' && home) || pickTable(all.map(t => t.id), home)
       // Leave Admin's "All tables" choice alone; this screen just shows one table.
-      if (first && leader && getCurrentTable() !== ALL_TABLES) setCurrentTable(first)
+      if (first && (leader || all.length > 1) && getCurrentTable() !== ALL_TABLES) setCurrentTable(first)
       if (!first) { router.push('/dashboard'); return }
       setGroupId(first)
       const firstName = all.find(t => t.id === first)?.name
@@ -165,7 +169,7 @@ export default function GroupPage() {
     if (inv?.ok) setInvite((await inv.json()).url || null)
     else setInviteNote('Only this table’s TC can share its invite link.')
     const list = mem?.ok ? ((await mem.json()).members || []) : []
-    setCandidates(list.filter((u: any) => u.group_id !== groupId)
+    setCandidates(list.filter((u: any) => u.group_id !== groupId && !(u.extra_group_ids || []).includes(groupId))
       .sort((a: any, b: any) => (a.group_id ? 1 : 0) - (b.group_id ? 1 : 0) || (a.full_name || '').localeCompare(b.full_name || '')))
   }
 
@@ -179,15 +183,20 @@ export default function GroupPage() {
     catch { setInviteNote('Copy the link above and send it to them.') }
   }
 
-  async function seatMember() {
+  /**
+   * 'both': this table becomes one of their extra tables and they keep their
+   * main one (2026-10-26). 'move': this becomes their main table instead.
+   * Someone with no table yet just gets this one as their main table.
+   */
+  async function seatMember(mode: 'both' | 'move' = 'both') {
     const who = candidates.find(c => c.id === addPick)
     if (!who || !groupId) return
-    const from = who.group_id ? tables.find(t => t.id === who.group_id)?.name : null
-    if (from && !confirm(`Move ${who.full_name || 'them'} from ${from} to ${groupName}? A person sits at one table.`)) return
+    const from = who.group_id ? tables.find(t => t.id === who.group_id)?.name || 'their table' : null
+    if (from && mode === 'move' && !confirm(`Move ${who.full_name || 'them'} from ${from} to ${groupName}? They will leave ${from}.`)) return
     setAdding(true); setAddNote('')
     const res = await fetch('/api/admin/members', { method: 'PATCH',
       headers: { ...(await headers()), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: who.id, groupId }) })
+      body: JSON.stringify(mode === 'move' || !who.group_id ? { userId: who.id, groupId } : { userId: who.id, addTable: groupId }) })
     const r = await res.json().catch(() => ({}))
     setAdding(false)
     if (!res.ok) { setAddNote(r.error || 'Could not add them. Try again.'); return }
@@ -348,10 +357,29 @@ export default function GroupPage() {
                       return <option key={c.id} value={c.id}>{c.full_name || 'Unnamed'}{at ? ` — at ${at}` : ' — no table yet'}</option>
                     })}
                   </select>
-                  <button type="button" onClick={seatMember} disabled={!addPick || adding}
-                    className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
-                    {adding ? 'Adding...' : `Add to ${groupName}`}
-                  </button>
+                  {(() => {
+                    const who = candidates.find(c => c.id === addPick)
+                    const from = who?.group_id ? tables.find(t => t.id === who.group_id)?.name || 'another table' : null
+                    if (!from) return (
+                      <button type="button" onClick={() => seatMember('move')} disabled={!addPick || adding}
+                        className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                        {adding ? 'Adding...' : `Add to ${groupName}`}
+                      </button>
+                    )
+                    // Already at a table: be at both, or move.
+                    return (
+                      <div className="space-y-2">
+                        <button type="button" onClick={() => seatMember('both')} disabled={adding}
+                          className="w-full bg-bt-navy text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-40">
+                          {adding ? 'Adding...' : `Add to ${groupName} too (stays at ${from})`}
+                        </button>
+                        <button type="button" onClick={() => seatMember('move')} disabled={adding}
+                          className="w-full border border-gray-200 text-gray-600 py-2.5 rounded-xl font-semibold text-xs disabled:opacity-40">
+                          Move from {from} to {groupName} instead
+                        </button>
+                      </div>
+                    )
+                  })()}
                   {addNote && <p className={`text-xs ${addNote.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{addNote}</p>}
                 </div>
               </>

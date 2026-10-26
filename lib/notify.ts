@@ -1,6 +1,7 @@
 import { sendPush } from '@/lib/send-push'
 import { sendEmail, notificationEmail } from '@/lib/send-email'
 import { fetchMemberEmails } from '@/lib/member-emails'
+import { peopleAtTables } from '@/lib/memberships'
 
 // Event notifications: a chat message, a DM, new reading, a new prompt, a
 // new library item. Push where the member has it, email where not (only for
@@ -122,8 +123,9 @@ export async function notifyMembers(admin: any, args: {
 
 /** Everyone who should hear about a table's activity: its members plus its leaders, minus one person. */
 export async function tableAudience(admin: any, groupId: string, exceptUserId: string): Promise<string[]> {
-  const [{ data: members }, { data: legacy }, { data: co }] = await Promise.all([
-    admin.from('profiles').select('id').eq('group_id', groupId),
+  const [members, { data: legacy }, { data: co }] = await Promise.all([
+    // Seated there or there as an extra table (2026-10-26).
+    peopleAtTables([groupId]).then(ids => ids.map(id => ({ id }))),
     admin.from('groups').select('leader_id').eq('id', groupId).maybeSingle(),
     admin.from('group_leaders').select('user_id').eq('group_id', groupId),
   ])

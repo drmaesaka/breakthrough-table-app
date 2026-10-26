@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser, leaderGroupIds } from '@/lib/api-auth'
 import { notifyMembers } from '@/lib/notify'
+import { extraTablesOf, peopleAtTables } from '@/lib/memberships'
 
 // @mentions in the chats and Follow-ups (2026-10-19).
 //
@@ -38,13 +39,13 @@ async function peopleIn(chat: Chat, id: string, userId: string, role: string): P
     return profiles([data.participant_1, data.participant_2])
   }
   // A table's chat or Follow-ups: who sits there, plus its TCs.
-  const [{ data: seated }, { data: legacy }, { data: joined }, { data: me }] = await Promise.all([
-    admin.from('profiles').select('id').eq('group_id', id),
+  const [seatedIds, { data: legacy }, { data: joined }, { data: me }] = await Promise.all([
+    peopleAtTables([id]),
     admin.from('groups').select('leader_id').eq('id', id).maybeSingle(),
     admin.from('group_leaders').select('user_id').eq('group_id', id),
     admin.from('profiles').select('group_id').eq('id', userId).maybeSingle(),
   ])
-  const ids = [...(seated || []).map(p => p.id), ...(legacy?.leader_id ? [legacy.leader_id] : []), ...(joined || []).map(j => j.user_id)]
+  const ids = [...seatedIds, ...(legacy?.leader_id ? [legacy.leader_id] : []), ...(joined || []).map(j => j.user_id)]
   const allowed = me?.group_id === id || ids.includes(userId) || (role === 'leader' && (await leaderGroupIds(userId)).includes(id))
   return allowed ? profiles(ids) : null
 }

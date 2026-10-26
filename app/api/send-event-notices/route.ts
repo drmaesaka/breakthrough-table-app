@@ -5,6 +5,7 @@ import { sendPush } from '@/lib/send-push'
 import { sendEmail, notificationEmail } from '@/lib/send-email'
 import { fetchMemberEmails } from '@/lib/member-emails'
 import { retryQuery } from '@/lib/db-retry'
+import { peopleAtTables } from '@/lib/memberships'
 
 // Event announcements, reminders and follow-ups.
 //
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
   /** Members of the event's table. A NULL group_id is a legacy BT-wide event. */
   async function audienceFor(event: EventRow): Promise<string[]> {
     const { data, error } = event.group_id
-      ? await supabase.from('profiles').select('id').eq('group_id', event.group_id)
+      ? { data: (await peopleAtTables([event.group_id])).map(id => ({ id })), error: null }
       : await supabase.from('profiles').select('id').not('group_id', 'is', null)
     if (error) {
       console.error('audience lookup failed:', event.id, error.message)
