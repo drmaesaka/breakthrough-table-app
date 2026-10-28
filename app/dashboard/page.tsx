@@ -7,6 +7,7 @@ import BottomNav from '@/components/BottomNav'
 import PushSetupBanner from '@/components/PushSetupBanner'
 import WelcomeScreen from '@/components/WelcomeScreen'
 import { fetchMyTable } from '@/lib/my-table'
+import { fetchMe } from '@/lib/me'
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null)
@@ -23,7 +24,7 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('*, groups(name)').eq('id', user.id).single()
+      const prof = await fetchMe(user.id)
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')

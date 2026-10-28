@@ -11,6 +11,7 @@ import FollowUps from '@/components/FollowUps'
 import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
 import { fetchMyTable } from '@/lib/my-table'
 import { sendSetupLink } from '@/lib/setup-link'
+import { fetchMe } from '@/lib/me'
 
 type Detail = {
   id: string; full_name: string; avatar_url: string | null; role: string
@@ -94,8 +95,7 @@ export default function GroupPage() {
       // Links can open a tab directly: /group?tab=you from a habit nudge.
       const want = new URLSearchParams(window.location.search).get('tab')
 
-      const { data: prof } = await supabase
-        .from('profiles').select('group_id, role, groups(name)').eq('id', user.id).single()
+      const prof = await fetchMe(user.id)
       const leader = prof?.role === 'leader'
       if (want === 'you' || want === 'chat' || want === 'followups' || (want === 'people' && prof?.role === 'leader')) setView(want)
       setIsLeader(leader)

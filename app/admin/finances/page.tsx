@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import { BUSINESS_LABELS, type Business } from '@/lib/business-lines'
+import { fetchMe } from '@/lib/me'
 
 // Read-only financial dashboard over Cause Machine.
 //
@@ -92,7 +93,7 @@ export default function FinancesPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      const prof = await fetchMe(user.id)
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
       const { data: { session } } = await supabase.auth.getSession()

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import BottomNav from '@/components/BottomNav'
 import SunriseLibrary from '@/components/SunriseLibrary'
+import { fetchMe } from '@/lib/me'
 
 const TYPE_CONFIG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
   video:   { label: 'Video',   bg: 'bg-red-50',    text: 'text-red-500',    icon: '▶' },
@@ -103,11 +104,7 @@ export default function LibraryPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('group_id, role')
-        .eq('id', user.id)
-        .single()
+      const prof = await fetchMe(user.id)
 
       setIsLeader(prof?.role === 'leader')
       if (!prof?.group_id) { setLoading(false); return }

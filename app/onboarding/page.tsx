@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import Image from 'next/image'
+import { fetchMe } from '@/lib/me'
 
 // Step 2 exists because the app's entire mechanism is the nudge, and on iOS
 // web push only works once the PWA is installed to the Home Screen. Members
@@ -36,11 +37,7 @@ export default function OnboardingPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('full_name, group_id, onboarded, groups(name)')
-        .eq('id', user.id)
-        .single()
+      const prof = await fetchMe(user.id)
 
       // Skip onboarding if already done
       if (prof?.onboarded) { router.push('/dashboard'); return }

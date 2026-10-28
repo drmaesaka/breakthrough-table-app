@@ -7,6 +7,7 @@ import { doneInPeriod, freqOf } from '@/lib/habits'
 import Avatar from '@/components/Avatar'
 import { localDay } from '@/lib/dates'
 import { ledGroups } from '@/lib/leader-groups'
+import { fetchMe } from '@/lib/me'
 
 export default function AnalyticsPage() {
   const [groups, setGroups] = useState<any[]>([])
@@ -24,7 +25,7 @@ export default function AnalyticsPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      const prof = await fetchMe(user.id)
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
 
       // Only this leader's tables — analytics used to show every group in the app.

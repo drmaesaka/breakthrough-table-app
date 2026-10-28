@@ -12,6 +12,7 @@ import { notifyAbout } from '@/lib/notify-client'
 import { useStickToBottom } from '@/components/useStickToBottom'
 import { ChatDay, ChatTime } from '@/components/ChatTime'
 import { useMentionPeople, notifyMentions, withMentions } from '@/lib/mentions'
+import { fetchMe } from '@/lib/me'
 
 // The TCs' own space: one channel across every table. (A shared Resources
 // shelf sat beside it until 2026-10-09; it was never used, and TC-only
@@ -83,8 +84,7 @@ export default function LeadersPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: profile } = await supabase
-        .from('profiles').select('role').eq('id', user.id).maybeSingle()
+      const profile = await fetchMe(user.id)
       if (profile?.role !== 'leader') { router.push('/dashboard'); return }
 
       setUser(user)

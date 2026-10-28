@@ -7,6 +7,7 @@ import BottomNav from '@/components/BottomNav'
 import NotificationCard from '@/components/NotificationCard'
 import Avatar from '@/components/Avatar'
 import { shrinkImage } from '@/lib/image'
+import { fetchMe } from '@/lib/me'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<any>(null)
@@ -55,8 +56,8 @@ export default function ProfilePage() {
       setEmail(user.email || '')
       setUserId(user.id)
 
-      const [{ data: prof }, { data: history }, { data: habitRows }] = await Promise.all([
-        supabase.from('profiles').select('*, groups(name)').eq('id', user.id).single(),
+      const [prof, { data: history }, { data: habitRows }] = await Promise.all([
+        fetchMe(user.id),
         supabase.from('habit_history').select('*').eq('user_id', user.id).order('graduated_at', { ascending: false }),
         supabase.from('habits').select('*').eq('user_id', user.id).is('archived_at', null).order('created_at', { ascending: true }),
       ])

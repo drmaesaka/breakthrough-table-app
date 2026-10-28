@@ -32,6 +32,7 @@ import {
 
 import { ledGroups } from '@/lib/leader-groups'
 import { sendSetupLink } from '@/lib/setup-link'
+import { fetchMe } from '@/lib/me'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -469,7 +470,7 @@ export default function AdminPage() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
-      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+      const prof = await fetchMe(user.id)
       if (prof?.role !== 'leader') { router.push('/dashboard'); return }
       setMyId(user.id)
 

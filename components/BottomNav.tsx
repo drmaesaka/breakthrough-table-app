@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 import { pickTable, setCurrentTable, onCurrentTableChange, getCurrentTable, ALL_TABLES } from '@/lib/current-table'
+import { fetchMe } from '@/lib/me'
 
 export default function BottomNav() {
   const pathname = usePathname()
@@ -19,7 +20,7 @@ export default function BottomNav() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { data } = await supabase.from('profiles').select('role, group_id, groups(name)').eq('id', user.id).single()
+      const data = await fetchMe(user.id)
       const { data: { session } } = await supabase.auth.getSession()
       const auth = { Authorization: `Bearer ${session?.access_token ?? ''}` }
       // Main table + extra tables (2026-10-26). A member with one table sees no bar.
