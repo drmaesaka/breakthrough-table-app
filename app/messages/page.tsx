@@ -54,36 +54,13 @@ export default function MessagesPage() {
     router.push(`/chat/${json.room.id}`)
   }
 
-  async function fetchDMs(userId: string) {
+  // Through /api/dms (2026-10-28): the browser's lookup of the other person
+  // came back empty and every conversation read "Member".
+  async function fetchDMs(_userId: string) {
     setDmsLoading(true)
-    const { data } = await supabase
-      .from('dm_conversations')
-      .select('id, participant_1, participant_2, created_at')
-      .or(`participant_1.eq.${userId},participant_2.eq.${userId}`)
-      .order('created_at', { ascending: false })
-
-    if (!data) { setDmsLoading(false); return }
-
-    // Get the other person's profile for each convo
-    const enriched = await Promise.all(data.map(async (convo: any) => {
-      const otherId = convo.participant_1 === userId ? convo.participant_2 : convo.participant_1
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('full_name, group_id, avatar_url, groups(name)')
-        .eq('id', otherId)
-        .single()
-      // Get latest message
-      const { data: lastMsg } = await supabase
-        .from('direct_messages')
-        .select('content, created_at')
-        .eq('conversation_id', convo.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      return { ...convo, other: prof, otherId, lastMsg }
-    }))
-
-    setConversations(enriched)
+    const res = await fetch('/api/dms', { headers: await authHeaders() }).catch(() => null)
+    const json = res?.ok ? await res.json().catch(() => ({})) : {}
+    setConversations(json.conversations || [])
     setDmsLoading(false)
   }
 

@@ -76,23 +76,16 @@ export default function DMPage() {
       if (!user) { router.push('/login'); return }
       setUser(user)
 
-      // Load conversation to find other participant
-      const { data: convo } = await supabase
-        .from('dm_conversations')
-        .select('participant_1, participant_2')
-        .eq('id', conversationId)
-        .single()
-
+      // The other person, through /api/dms (2026-10-28): the browser lookup
+      // came back empty and the header read "Member".
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`/api/dms?id=${encodeURIComponent(String(conversationId))}`, {
+        headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+      }).catch(() => null)
+      const convo = res?.ok ? (await res.json()).conversation : null
       if (!convo) { router.push('/messages'); return }
 
-      const otherId = convo.participant_1 === user.id ? convo.participant_2 : convo.participant_1
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('full_name, group_id, avatar_url, groups(name)')
-        .eq('id', otherId)
-        .single()
-
-      setOtherPerson(prof)
+      setOtherPerson(convo.other)
       await fetchMessages()
       setLoading(false)
     }
