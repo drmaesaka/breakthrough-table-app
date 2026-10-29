@@ -7,7 +7,7 @@ import BottomNav from '@/components/BottomNav'
 import NotificationCard from '@/components/NotificationCard'
 import Avatar from '@/components/Avatar'
 import { shrinkImage } from '@/lib/image'
-import { fetchMe } from '@/lib/me'
+import { fetchMe, saveMe } from '@/lib/me'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<any>(null)
@@ -78,20 +78,19 @@ export default function ProfilePage() {
     load()
   }, [router])
 
+  /** Also runs when the name box loses focus, so leaving the page keeps it. */
   async function saveName() {
-    if (!name.trim()) return
+    if (!name.trim() || name.trim() === (profile?.full_name || '')) return
     setSaving(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setSaving(false); return }
-    const { error } = await supabase.from('profiles').update({ full_name: name.trim() }).eq('id', user.id)
+    const error = await saveMe({ full_name: name.trim() })
     setSaving(false)
     if (error) {
-      console.error('profile name save failed:', error.message)
+      console.error('profile name save failed:', error)
       setSaveError(true)
       setTimeout(() => setSaveError(false), 4000)
       return
     }
+    setProfile((p: any) => ({ ...p, full_name: name.trim() }))
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
@@ -193,16 +192,15 @@ export default function ProfilePage() {
 
   async function saveDirectory() {
     setDirSaving(true)
-    const supabase = createClient()
-    const { error } = await supabase.from('profiles').update({
+    const error = await saveMe({
       directory_opt_in: directoryOptIn,
       bio: bio.trim(),
       linkedin_url: linkedinUrl.trim(),
       contact_email: contactEmail.trim(),
-    }).eq('id', userId)
+    })
     setDirSaving(false)
     if (error) {
-      console.error('directory save failed:', error.message)
+      console.error('directory save failed:', error)
       setDirError(true)
       setTimeout(() => setDirError(false), 4000)
       return
@@ -251,9 +249,9 @@ export default function ProfilePage() {
       return
     }
     const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-    const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', userId)
+    const dbErr = await saveMe({ avatar_url: data.publicUrl })
     setAvatarBusy(false)
-    if (dbErr) { setAvatarError(`Could not save the photo: ${dbErr.message}`); return }
+    if (dbErr) { setAvatarError(`Could not save the photo: ${dbErr}`); return }
     setAvatarUrl(data.publicUrl)
   }
 
@@ -261,9 +259,9 @@ export default function ProfilePage() {
     if (!userId) return
     setAvatarBusy(true)
     setAvatarError('')
-    const { error } = await createClient().from('profiles').update({ avatar_url: null }).eq('id', userId)
+    const error = await saveMe({ avatar_url: null })
     setAvatarBusy(false)
-    if (error) { setAvatarError(`Could not remove the photo: ${error.message}`); return }
+    if (error) { setAvatarError(`Could not remove the photo: ${error}`); return }
     setAvatarUrl(null)
   }
 
@@ -498,6 +496,7 @@ export default function ProfilePage() {
           <input
             value={name}
             onChange={e => setName(e.target.value)}
+            onBlur={saveName}
             placeholder="Your full name"
             className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-bt-blue"
           />

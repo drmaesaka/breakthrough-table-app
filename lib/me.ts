@@ -27,3 +27,23 @@ async function fromServer(): Promise<any | null> {
     return res.ok ? (await res.json()).profile : null
   } catch { return null }
 }
+
+/**
+ * Saves fields on the caller's own profile through /api/me (2026-10-29).
+ * Returns an error message, or null once the server confirms the row changed.
+ */
+export async function saveMe(changes: Record<string, unknown>): Promise<string | null> {
+  try {
+    const { data: { session } } = await createClient().auth.getSession()
+    const res = await fetch('/api/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+      body: JSON.stringify(changes),
+    })
+    if (res.ok) {
+      try { localStorage.removeItem('bt-home-profile') } catch {}
+      return null
+    }
+    return (await res.json().catch(() => ({}))).error || 'Could not save'
+  } catch { return 'Could not save — check your connection' }
+}

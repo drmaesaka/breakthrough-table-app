@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import Image from 'next/image'
-import { fetchMe } from '@/lib/me'
+import { fetchMe, saveMe } from '@/lib/me'
 
 // Step 2 exists because the app's entire mechanism is the nudge, and on iOS
 // web push only works once the PWA is installed to the Home Screen. Members
@@ -78,8 +78,8 @@ export default function OnboardingPage() {
     if (!user) { setSaving(false); return }
     // Not worth blocking entry to the app on, but a silent failure means the
     // member gets shown onboarding again later with no explanation.
-    const { error } = await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
-    if (error) console.error('onboarding flag failed:', error.message)
+    const error = await saveMe({ onboarded: true })
+    if (error) console.error('onboarding flag failed:', error)
     router.push('/dashboard')
   }
 
