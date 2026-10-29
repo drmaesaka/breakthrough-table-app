@@ -214,6 +214,7 @@ export default function ProfilePage() {
   async function handleLogout() {
     const supabase = createClient()
     await supabase.auth.signOut()
+    try { localStorage.removeItem('bt-home-profile') } catch {}
     router.push('/login')
   }
 

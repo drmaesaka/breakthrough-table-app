@@ -18,7 +18,14 @@ export default function DashboardPage() {
   // "before your next meeting" were too much; it went through several
   // versions (progress bar → This week → meeting card) before this.
 
+  // The last profile is kept on the phone so a reopen draws the greeting and
+  // tiles straight away instead of a blank page saying "Welcome back, there"
+  // (2026-10-29). The fresh one replaces it a moment later.
   useEffect(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem('bt-home-profile') || 'null')
+      if (cached) { setProfile(cached); setGroupName(cached.groups?.name || cached._tableName || '') }
+    } catch {}
     async function load() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
@@ -28,13 +35,17 @@ export default function DashboardPage() {
       if (prof) {
         setProfile(prof)
         setGroupName(prof.groups?.name || '')
-        if (prof.group_id && !prof.groups?.name) fetchMyTable().then(t => { if (t?.name) setGroupName(t.name) })
+        const save = (tableName?: string) => {
+          try { localStorage.setItem('bt-home-profile', JSON.stringify({ ...prof, _tableName: tableName })) } catch {}
+        }
+        save()
+        if (prof.group_id && !prof.groups?.name) fetchMyTable().then(t => { if (t?.name) { setGroupName(t.name); save(t.name) } })
       }
     }
     load()
   }, [router])
 
-  const firstName = profile?.full_name?.split(' ')[0] || 'there'
+  const firstName = profile?.full_name?.split(' ')[0] || ''
   const isMember = Boolean(profile?.group_id) && profile?.role !== 'leader'
 
   return (
@@ -43,9 +54,10 @@ export default function DashboardPage() {
       <div className="bg-bt-navy px-5 pt-16 pb-8">
         {/* The top-right corner belongs to the notifications bell. */}
         <div className="flex items-start justify-between pr-10">
-          <div>
-            <p className="text-bt-light text-sm font-medium">Welcome back,</p>
-            <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>
+          {/* Nothing until the name is known; the space is kept so the page doesn't jump. */}
+          <div className={profile ? '' : 'invisible'}>
+            <p className="text-bt-light text-sm font-medium">{firstName ? 'Welcome back,' : 'Welcome back 👋'}</p>
+            {firstName && <h1 className="text-white text-3xl font-bold mt-0.5">{firstName} 👋</h1>}
             {groupName && <p className="text-bt-light/70 text-sm mt-1">🪑 Your table: <span className="text-white font-semibold">{groupName}</span></p>}
           </div>
         </div>
