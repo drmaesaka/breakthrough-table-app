@@ -187,5 +187,7 @@ async function report(steps: Step[], quiet: boolean) {
     }).catch(err => console.error('health alert email failed:', err))
   }
   if (failed.length) console.error('[health-writes] failed:', JSON.stringify(failed))
-  return NextResponse.json({ ok: failed.length === 0, failed: failed.length, steps })
+  // 500 on any failure so the cron job's own history turns red and
+  // cron-job.org sends its failure email too, not only ours.
+  return NextResponse.json({ ok: failed.length === 0, failed: failed.length, steps }, { status: failed.length ? 500 : 200 })
 }
