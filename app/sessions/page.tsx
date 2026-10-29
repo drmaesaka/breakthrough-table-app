@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { postApi } from '@/lib/api-client'
 import BottomNav from '@/components/BottomNav'
 
 // Alumni and monthly drop-in tables. Deliberately not filtered by group_id:
@@ -73,16 +74,11 @@ export default function SessionsPage() {
   async function toggle(session: Session) {
     setWorking(session.id)
     setError(null)
-    const supabase = createClient()
-
+    // Through the server (2026-10-29) so a withdrawal cannot quietly not happen.
     if (mine.has(session.id)) {
-      const { error: err } = await supabase
-        .from('signup_registrations')
-        .delete()
-        .eq('session_id', session.id)
-        .eq('user_id', userId)
+      const { error: err } = await postApi('/api/signups', { session_id: session.id, on: false })
       if (err) {
-        console.error('withdraw failed:', err.message)
+        console.error('withdraw failed:', err)
         setError({ id: session.id, message: "Couldn't cancel — try again" })
       } else {
         setMine(m => { const s = new Set(m); s.delete(session.id); return s })
@@ -90,15 +86,13 @@ export default function SessionsPage() {
           ? { ...s, registered_count: Math.max(0, s.registered_count - 1) } : s))
       }
     } else {
-      const { error: err } = await supabase
-        .from('signup_registrations')
-        .insert({ session_id: session.id, user_id: userId })
+      const { error: err } = await postApi('/api/signups', { session_id: session.id, on: true })
       if (err) {
         // "This session is full" and "closed for sign-ups" are raised by the
         // capacity trigger, so surface the database's own wording rather than
         // a generic failure the member cannot act on.
-        console.error('signup failed:', err.message)
-        setError({ id: session.id, message: friendlyError(err.message) })
+        console.error('signup failed:', err)
+        setError({ id: session.id, message: friendlyError(err) })
       } else {
         setMine(m => new Set([...m, session.id]))
         setSessions(p => p.map(s => s.id === session.id

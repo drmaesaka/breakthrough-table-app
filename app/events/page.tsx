@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { postApi } from '@/lib/api-client'
 import BottomNav from '@/components/BottomNav'
 import type { SunriseEvent } from '@/lib/sunrise-events'
 import { useReactions, PostReactions } from '@/components/Reactions'
@@ -51,23 +52,17 @@ export default function EventsPage() {
 
   async function toggleRsvp(eventId: string) {
     setRsvping(eventId)
-    const supabase = createClient()
     const hasRsvp = rsvps.has(eventId)
+    // Through the server (2026-10-29) so a cancel cannot quietly not happen.
+    const { error } = await postApi('/api/rsvp', { event_id: eventId, going: !hasRsvp })
 
     // Only move the RSVP locally once the write lands — showing "I'm going" for
     // a rejected insert leaves the member registered in their head only, and the
     // leader's headcount short by one.
-    if (hasRsvp) {
-      const { error } = await supabase.from('event_rsvps').delete().eq('event_id', eventId).eq('user_id', userId)
-      if (error) console.error('rsvp delete failed:', error.message)
-      else setRsvps(r => { const s = new Set(r); s.delete(eventId); return s })
-      setRsvpError(error ? eventId : null)
-    } else {
-      const { error } = await supabase.from('event_rsvps').insert({ event_id: eventId, user_id: userId })
-      if (error) console.error('rsvp insert failed:', error.message)
-      else setRsvps(r => new Set([...r, eventId]))
-      setRsvpError(error ? eventId : null)
-    }
+    if (error) console.error('rsvp failed:', error)
+    else if (hasRsvp) setRsvps(r => { const s = new Set(r); s.delete(eventId); return s })
+    else setRsvps(r => new Set([...r, eventId]))
+    setRsvpError(error ? eventId : null)
     setRsvping(null)
   }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminClient, requireUser } from '@/lib/api-auth'
+import { isOwnChatPhoto } from '@/lib/chat-photo'
 
 // The caller's direct-message conversations with the other person's name,
 // photo and table, and the latest message (2026-10-28). Server-side because
@@ -49,4 +50,27 @@ export async function GET(req: NextRequest) {
     return { ...r, lastMsg }
   }))
   return NextResponse.json({ conversations: withLast })
+}
+
+// Sending a direct message (2026-10-29). Server-side so a console policy on
+// direct_messages cannot block it; the sender must be in the conversation.
+// POST { conversation_id, content, image_url? } → { id }
+export async function POST(req: NextRequest) {
+  const auth = await requireUser(req)
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status })
+  const { conversation_id, content, image_url } = await req.json().catch(() => ({}))
+  const text = typeof content === 'string' ? content.trim() : ''
+  const photo = isOwnChatPhoto(image_url, auth.userId) ? image_url : null
+  if (image_url && !photo) return NextResponse.json({ error: 'Bad photo' }, { status: 400 })
+  if (typeof conversation_id !== 'string' || (!text && !photo)) return NextResponse.json({ error: 'Write a message' }, { status: 400 })
+  const admin = adminClient()
+  const { data: convo } = await admin.from('dm_conversations').select('participant_1, participant_2').eq('id', conversation_id).maybeSingle()
+  if (!convo || (convo.participant_1 !== auth.userId && convo.participant_2 !== auth.userId)) {
+    return NextResponse.json({ error: 'Not your conversation' }, { status: 403 })
+  }
+  const { data, error } = await admin.from('direct_messages')
+    .insert({ conversation_id, sender_id: auth.userId, content: text, ...(photo ? { image_url: photo } : {}) })
+    .select('id').single()
+  if (error) return NextResponse.json({ error: 'Could not send' }, { status: 500 })
+  return NextResponse.json({ id: data.id })
 }

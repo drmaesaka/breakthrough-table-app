@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase'
 import { linkify, hasLink } from '@/lib/linkify'
 import { notifyAbout } from '@/lib/notify-client'
 import { localDay } from '@/lib/dates'
+import { postApi } from '@/lib/api-client'
 import { calcAdherence, datesByHabit, streakFor, doneInPeriod, periodKey, freqOf, FREQ_LABEL, type Habit, type Frequency } from '@/lib/habits'
 import { useReactions, PostReactions } from '@/components/Reactions'
 
@@ -119,25 +120,18 @@ export default function MyTasks() {
   }
 
   async function toggleTask(taskId: string) {
-    const supabase = createClient()
     const isCompleted = completedIds.has(taskId)
     const newSet = new Set(completedIds)
-
-    if (isCompleted) {
-      await supabase.from('task_completions').delete().eq('task_id', taskId).eq('user_id', userId)
-      newSet.delete(taskId)
-    } else {
-      await supabase.from('task_completions').insert({ task_id: taskId, user_id: userId })
-      newSet.add(taskId)
-    }
-
-    setCompletedIds(newSet)
-    const adherence = calcAdherence(newSet.size, doneToday.size, tasks.length, habits.length)
+    if (isCompleted) newSet.delete(taskId); else newSet.add(taskId)
 
     // Streak is credited once per period when the leader rolls the period over,
     // not here — incrementing on each toggle meant unchecking and rechecking an
     // item inflated it every time.
-    await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
+    const adherence = calcAdherence(newSet.size, doneToday.size, tasks.length, habits.length)
+    // Through the server (2026-10-29), and only shown once it is stored.
+    const { error } = await postApi('/api/habits', { action: 'task', task_id: taskId, done: !isCompleted, adherence })
+    if (error) { console.error('task toggle failed:', error); alert("Couldn't save that — try again"); return }
+    setCompletedIds(newSet)
   }
 
   async function addHabit() {
@@ -145,21 +139,16 @@ export default function MyTasks() {
     if (!name) return
     if (habits.some(h => h.name.toLowerCase() === name.toLowerCase())) { setAddError('You already have that habit'); return }
     setAddSaving(true); setAddError('')
-    const supabase = createClient()
-    let { data, error } = await supabase.from('habits').insert({ user_id: userId, name, frequency: newFreq }).select().single()
-    // Before the 2026-09-29 migration the column does not exist: save as daily.
-    if (error && /frequency/.test(error.message)) {
-      ;({ data, error } = await supabase.from('habits').insert({ user_id: userId, name }).select().single())
-    }
+    const { data: res, error } = await postApi('/api/habits', { action: 'add', name, frequency: newFreq })
+    const data = res?.habit
     setAddSaving(false)
-    if (error) { setAddError("Couldn't save — try again"); return }
+    if (error || !data) { setAddError("Couldn't save — try again"); return }
     setHabits(prev => [...prev, data as Habit])
     setStreaks(prev => new Map(prev).set(data.id, 0))
     setNewHabit(''); setNewFreq('daily'); setAdding(false)
   }
 
   async function toggleHabit(habitId: string) {
-    const supabase = createClient()
     const wasDone = doneToday.has(habitId)
     const nextDone = new Set(doneToday)
 
@@ -171,15 +160,17 @@ export default function MyTasks() {
       // Un-tick clears every check-in in the current period, so a weekly
       // habit ticked on Tuesday can still be un-ticked on Thursday.
       const dates = [...(historyByHabit.get(habitId) || [])].filter(d => periodKey(d, f) === periodKey(today, f))
-      await supabase.from('habit_completions')
-        .delete().eq('user_id', userId).eq('habit_id', habitId).in('completed_date', dates.length ? dates : [today])
       nextDone.delete(habitId)
+      const adherence = calcAdherence(completedIds.size, nextDone.size, tasks.length, habits.length)
+      const { error } = await postApi('/api/habits', { action: 'uncheck', habit_id: habitId, dates: dates.length ? dates : [today], adherence })
+      if (error) { console.error('habit uncheck failed:', error); alert("Couldn't undo that — try again"); return }
       setStreaks(prev => new Map(prev).set(habitId, Math.max(0, (prev.get(habitId) || 0) - 1)))
       setHistoryByHabit(prev => { const m = new Map(prev); const d = new Set(m.get(habitId) || []); for (const x of dates) d.delete(x); m.set(habitId, d); return m })
     } else {
-      await supabase.from('habit_completions')
-        .insert({ user_id: userId, habit_id: habitId, completed_date: today })
       nextDone.add(habitId)
+      const adherence = calcAdherence(completedIds.size, nextDone.size, tasks.length, habits.length)
+      const { error } = await postApi('/api/habits', { action: 'check', habit_id: habitId, date: today, adherence })
+      if (error) { console.error('habit check failed:', error); alert("Couldn't save that check-off — try again"); return }
       setStreaks(prev => new Map(prev).set(habitId, (prev.get(habitId) || 0) + 1))
       setHistoryByHabit(prev => { const m = new Map(prev); const d = new Set(m.get(habitId) || []); d.add(today); m.set(habitId, d); return m })
       setJustDone(habitId)
@@ -187,8 +178,6 @@ export default function MyTasks() {
     }
 
     setDoneToday(nextDone)
-    const adherence = calcAdherence(completedIds.size, nextDone.size, tasks.length, habits.length)
-    await supabase.from('profiles').update({ adherence_percent: adherence }).eq('id', userId)
   }
 
   async function addItem() {

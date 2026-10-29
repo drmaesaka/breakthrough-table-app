@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { postApi } from '@/lib/api-client'
 import BottomNav from '@/components/BottomNav'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
@@ -113,13 +114,12 @@ export default function LeadersPage() {
     e.preventDefault()
     if ((!newMessage.trim() && !att.photo) || !user || sending || att.busy) return
     setSending(true)
-    const { data: sent, error } = await supabase
-      .from('leader_messages')
-      .insert({ user_id: user.id, content: newMessage.trim(), ...(att.photo ? { image_url: att.photo } : {}) })
-      .select('id').single()
+    // Through the server (2026-10-29) so a console policy cannot block it.
+    const { data: sent, error } = await postApi('/api/leaders/messages',
+      { content: newMessage.trim(), ...(att.photo ? { image_url: att.photo } : {}) })
     setSending(false)
-    // Keep what they typed if the insert was rejected.
-    if (error) { console.error('leader message send failed:', error.message); setSendError(true); return }
+    // Keep what they typed if the send was rejected.
+    if (error) { console.error('leader message send failed:', error); setSendError(true); return }
     notifyAbout('tc', sent?.id)
     notifyMentions('leaders', sent?.id, newMessage.trim(), people)
     setSendError(false)

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase'
+import { postApi } from '@/lib/api-client'
 import { notifyAbout } from '@/lib/notify-client'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
@@ -113,17 +114,17 @@ export default function DMPage() {
     if ((!newMessage.trim() && !att.photo) || !user || sending || att.busy) return
     const text = newMessage.trim()
     setSending(true)
-    const { data: sent, error } = await supabase.from('direct_messages').insert({
+    // Through the server (2026-10-29) so a console policy cannot block it.
+    const { data: sent, error } = await postApi('/api/dms', {
       conversation_id: conversationId,
-      sender_id: user.id,
       content: text,
       ...(att.photo ? { image_url: att.photo } : {}),
-    }).select('id').single()
+    })
     setSending(false)
     if (!error) notifyAbout('dm', sent?.id)
-    
+
     if (error) {
-      console.error('dm send failed:', error.message)
+      console.error('dm send failed:', error)
       setSendError(true)
       return
     }

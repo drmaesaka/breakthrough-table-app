@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, Fragment } from 'react'
 import { createClient } from '@/lib/supabase'
-import { notifyAbout } from '@/lib/notify-client'
 import Avatar from '@/components/Avatar'
 import { usePhotoAttach, PhotoButton, PhotoPreview, MessagePhoto } from '@/components/ChatPhoto'
 import { useReactions, MessageReactions } from '@/components/Reactions'
@@ -145,7 +144,9 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
     const text = newMessage.trim()
     setSending(true)
     let error: { message: string } | null = null
-    if (!isHome) {
+    // Every send goes through the server (2026-10-29), so a console policy on
+    // messages cannot block it; the route sends the same chat ping.
+    {
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: await authHeaders(),
@@ -153,10 +154,6 @@ export default function TableChat({ groupId, groupName, homeGroupId, userId }: {
       })
       if (!res.ok) error = { message: `send failed (${res.status})` }
       else notifyMentions('table', (await res.json().catch(() => ({}))).id, text, people)
-    } else {
-      const r = await supabase.from('messages').insert({ group_id: groupId, user_id: userId, content: text, ...(photo ? { image_url: photo } : {}) }).select('id').single()
-      error = r.error
-      if (!r.error) { notifyAbout('chat', r.data?.id); notifyMentions('table', r.data?.id, text, people) }
     }
     setSending(false)
     // Keep the member's text in the box if the send failed.

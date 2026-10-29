@@ -8,6 +8,7 @@ import NotificationCard from '@/components/NotificationCard'
 import Avatar from '@/components/Avatar'
 import { shrinkImage } from '@/lib/image'
 import { fetchMe, saveMe } from '@/lib/me'
+import { postApi } from '@/lib/api-client'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<any>(null)
@@ -105,21 +106,13 @@ export default function ProfilePage() {
       return
     }
     setHabitSaving(true)
-    const supabase = createClient()
-    let { data, error } = await supabase
-      .from('habits')
-      .insert({ user_id: userId, name, frequency: habitFreq })
-      .select()
-      .single()
-    // Before the 2026-09-29 migration the column does not exist: save as daily.
-    if (error && /frequency/.test(error.message)) {
-      ;({ data, error } = await supabase.from('habits').insert({ user_id: userId, name }).select().single())
-    }
+    const { data: res, error } = await postApi('/api/habits', { action: 'add', name, frequency: habitFreq })
+    const data = res?.habit
     setHabitSaving(false)
     // Only reflect it locally once it is actually stored, so a failed save
     // leaves the typed name in the box to retry with.
-    if (error) {
-      console.error('habit save failed:', error.message)
+    if (error || !data) {
+      console.error('habit save failed:', error)
       setHabitError(true)
       setTimeout(() => setHabitError(false), 4000)
       return
@@ -134,29 +127,12 @@ export default function ProfilePage() {
     setGraduating(habit.id)
     const supabase = createClient()
 
-    // Archive to history FIRST and stop if it fails. Retiring the habit after a
-    // failed insert would destroy it with no record that it ever existed.
-    const { error: historyError } = await supabase.from('habit_history').insert({
-      user_id: userId,
-      habit_name: habit.name,
-      graduated_at: new Date().toISOString(),
-    })
+    // The server records the badge first, then archives the habit (archived,
+    // not deleted: its check-ins should outlive it). 2026-10-29.
+    const { error: gradError } = await postApi('/api/habits', { action: 'graduate', habit_id: habit.id })
 
-    if (historyError) {
-      console.error('habit_history insert failed:', historyError.message)
-      setGraduating(null)
-      setGraduateError(true)
-      setTimeout(() => setGraduateError(false), 5000)
-      return
-    }
-
-    // Archived, not deleted: habit_completions references this row, and the
-    // member's proof that they did it should outlive the habit.
-    const { error: clearError } = await supabase
-      .from('habits').update({ archived_at: new Date().toISOString() }).eq('id', habit.id)
-
-    if (clearError) {
-      console.error('archiving habit failed:', clearError.message)
+    if (gradError) {
+      console.error('graduating habit failed:', gradError)
       setGraduating(null)
       setGraduateError(true)
       setTimeout(() => setGraduateError(false), 5000)
